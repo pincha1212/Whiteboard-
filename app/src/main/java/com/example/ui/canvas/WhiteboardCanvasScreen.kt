@@ -1282,7 +1282,7 @@ private fun getShapeHandleHitIndex(
         if (hypot(wX - p1.x, wY - (p1.y - ShapeCanvasCoordinates.lineRotationHandleOffsetWorld(scale))) <= tolerance) return 3
         return -1
     }
-    val (lx, ly) = ShapeCanvasCoordinates.toLocalUnrotated(shape, wX, wY)
+    val (lx, ly) = ShapeCanvasCoordinates.ShapeCanvasCoordinates.toLocalUnrotated(shape, wX, wY)
     val corners = listOf(
         shape.x to shape.y,
         (shape.x + shape.width) to shape.y,
@@ -1332,7 +1332,7 @@ private fun isPointHittingShape(
         }
         return false
     }
-    val (lx, ly) = toLocalUnrotated(shape, wX, wY)
+    val (lx, ly) = ShapeCanvasCoordinates.toLocalUnrotated(shape, wX, wY)
     if (shape.vertices.size >= 3) {
         for (i in shape.vertices.indices) {
             val a = shape.vertices[i]
