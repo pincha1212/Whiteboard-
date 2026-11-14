@@ -89,11 +89,8 @@ import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
 import kotlinx.coroutines.delay
-import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 private enum class CanvasGestureMode {
     NONE,
