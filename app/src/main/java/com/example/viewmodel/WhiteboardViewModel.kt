@@ -787,7 +787,7 @@ class WhiteboardViewModel : ViewModel() {
     /** Avoid scanning every note against every column when the board has no auto-expanding columns. */
     private fun recalculateColumnsIfPresent(board: WhiteboardBoard): WhiteboardBoard {
         if (board.shapes.none { it.templateRole == "COLUMN_CONTAINER" }) return board
-        return recalculateColumnsIfPresent(board)
+        return IdeationTemplateFactory.recalculateAutoExpandingColumns(board)
     }
 
     fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
