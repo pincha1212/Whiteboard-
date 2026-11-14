@@ -528,4 +528,27 @@ class NotesViewModel : ViewModel() {
             )
         }
     }
+
+    /**
+     * Receives the canonical workspace data. Keeps the active editor pointed at the
+     * latest version of its note while avoiding unnecessary StateFlow emissions.
+     */
+    fun syncWorkspaceData(notes: List<NoteItem>, folders: List<NoteFolder>) {
+        val visibleNotes = notes.filter { !it.isDeleted }
+        _uiState.update { state ->
+            val activeId = state.activeNote?.id
+            val nextActive = activeId?.let { id -> visibleNotes.find { it.id == id } }
+                ?: state.activeNote?.takeIf { activeId == null }
+            if (state.notes == visibleNotes && state.folders == folders && state.activeNote == nextActive) {
+                state
+            } else {
+                state.copy(
+                    notes = visibleNotes,
+                    folders = folders,
+                    activeNote = nextActive
+                )
+            }
+        }
+    }
+
 }
