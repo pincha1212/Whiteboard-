@@ -603,11 +603,11 @@ fun StickyNoteView(
 
         // Protruding Rotation Handle connected via guide stem line from top-center edge of the card
         if (activeSelectionHandles) {
-            // 1. Anchor tick at the top-center edge of the card (matching square handle in reference)
+            // 1. Anchor tick sits on the actual top edge of the card. The inner selection box is vertically centered inside the larger rotation-gutter container.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 52.5.dp)
+                    .offset(y = 20.5.dp)
                     .size(7.dp)
                     .shadow(2.dp, RoundedCornerShape(2.dp))
                     .clip(RoundedCornerShape(2.dp))
@@ -615,21 +615,21 @@ fun StickyNoteView(
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
 
-            // 2. Connecting guide line (stem) extending 28.dp upwards to the rotation handle
+            // 2. Guide stem runs outward from the card top edge to the rotation handle.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 28.dp)
+                    .offset(y = (-4).dp)
                     .width(2.dp)
                     .height(28.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
 
-            // 3. Circular rotation handle (touch target >= 44x44px; size = 48.dp)
+            // 3. Rotation handle centered 28.dp above the card, outside its bounds.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 4.dp)
+                    .offset(y = (-28).dp)
                     .size(handleTargetDp)
                     .onGloballyPositioned { handleCoords = it }
                     .pointerInput(note.id, note.isLocked) {
