@@ -844,11 +844,13 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Sticky Notes (unselected first, selected last so resize handles sit cleanly on top)
-        val orderedNotes = state.board.stickyNotes
-            .filter { !it.isHiddenByCollapse }
-            .sortedBy { n ->
-                if (n.id == state.selectedNoteId || state.selectedNoteIds.contains(n.id)) 1 else 0
-            }
+        val orderedNotes = remember(state.board.stickyNotes, state.selectedNoteId, state.selectedNoteIds) {
+            state.board.stickyNotes
+                .filter { !it.isHiddenByCollapse }
+                .sortedBy { n ->
+                    if (n.id == state.selectedNoteId || state.selectedNoteIds.contains(n.id)) 1 else 0
+                }
+        }
 
         orderedNotes.forEach { note ->
             val isSelected = note.id == state.selectedNoteId || state.selectedNoteIds.contains(note.id)
