@@ -101,8 +101,8 @@ class WorkspaceNoteProjectionTest {
         assertEquals("pin-hash", merged.pinHash)
         assertEquals(true, merged.isLocked)
         assertEquals(listOf(NoteTag("universidad", "#A855F7")), merged.tags)
-        assertEquals(80f, merged.canvasData?.x)
-        assertEquals(120f, merged.canvasData?.y)
+        assertEquals(80f, merged.canvasData?.x ?: Float.NaN, 0.001f)
+        assertEquals(120f, merged.canvasData?.y ?: Float.NaN, 0.001f)
     }
 
     @Test
@@ -211,11 +211,11 @@ class WorkspaceNoteProjectionTest {
             assertEquals(note.isVoiceNote, restoredNote.isVoiceNote)
             assertEquals(note.pinHash, restoredNote.pinHash)
             assertEquals(note.canvasData?.boardId, restoredNote.canvasData?.boardId)
-            assertEquals(125f, restoredNote.canvasData?.x)
+            assertEquals(125f, restoredNote.canvasData?.x ?: Float.NaN, 0.001f)
             assertEquals("Informe de campo", projectedCard.title)
             assertEquals("Observaciones y resultados", projectedCard.text)
-            assertEquals(125f, projectedCard.x)
-            assertEquals(240f, projectedCard.y)
+            assertEquals(125f, projectedCard.x, 0.001f)
+            assertEquals(240f, projectedCard.y, 0.001f)
         } finally {
             file.delete()
         }
