@@ -7,6 +7,7 @@ import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteItem
 import com.example.notes.model.NoteTag
 import com.example.notes.model.NoteVersion
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -151,6 +152,73 @@ class WorkspaceNoteProjectionTest {
         assertNotNull(restored)
         assertEquals("Título de la tarjeta", restored?.stickyNotes?.singleOrNull()?.title)
         assertEquals("Contenido de la tarjeta", restored?.stickyNotes?.singleOrNull()?.text)
+    }
+
+    @Test
+    fun workspaceDiskRoundTripPreservesRichNoteAndCanvasProjection() {
+        val file = File.createTempFile("workspace-rich-note", ".json")
+        file.delete()
+        try {
+            val store = LocalFirstWorkspaceStore(storageFile = file)
+            val board = WhiteboardBoard(id = "persist-board", title = "Pizarra de proyecto")
+            store.createBoard(board)
+
+            val note = NoteItem(
+                id = "persist-note",
+                title = "Informe de campo",
+                content = "Observaciones y resultados",
+                folder = "Pizarra de proyecto",
+                tags = listOf(NoteTag("geotecnologia", "#0F766E")),
+                isPinned = true,
+                isLocked = true,
+                pinHash = "secure-pin-hash",
+                isVoiceNote = true,
+                voiceDurationSec = 64,
+                voiceAudioUri = "/private/voice-persist.m4a",
+                checklists = listOf(ChecklistItem(id = "persist-task", text = "Procesar datos", isDone = true)),
+                versionHistory = listOf(
+                    NoteVersion(
+                        versionId = "persist-version",
+                        timestamp = 200L,
+                        title = "Borrador",
+                        content = "Notas preliminares",
+                        changeSummary = "Guardado inicial"
+                    )
+                ),
+                canvasData = CanvasNoteData(
+                    boardId = "persist-board",
+                    x = 125f,
+                    y = 240f,
+                    width = 280f,
+                    height = 210f,
+                    rotation = 5f
+                )
+            )
+            store.upsertNote(note)
+
+            val restored = LocalFirstWorkspaceStore(storageFile = file)
+            val restoredNote = restored.currentState.notes.single { it.id == note.id }
+            val restoredBoard = restored.currentState.boards.single { it.id == board.id }
+            val projectedCard = restoredBoard.stickyNotes.single()
+
+            assertEquals(note.title, restoredNote.title)
+            assertEquals(note.content, restoredNote.content)
+            assertEquals(note.tags, restoredNote.tags)
+            assertEquals(note.checklists, restoredNote.checklists)
+            assertEquals(note.versionHistory, restoredNote.versionHistory)
+            assertEquals(note.voiceAudioUri, restoredNote.voiceAudioUri)
+            assertEquals(note.voiceDurationSec, restoredNote.voiceDurationSec)
+            assertEquals(note.isVoiceNote, restoredNote.isVoiceNote)
+            assertEquals(note.pinHash, restoredNote.pinHash)
+            assertEquals(note.canvasData?.boardId, restoredNote.canvasData?.boardId)
+            assertEquals(125f, restoredNote.canvasData?.x)
+            assertEquals("Informe de campo", projectedCard.title)
+            assertEquals("Observaciones y resultados", projectedCard.text)
+            assertEquals(125f, projectedCard.x)
+            assertEquals(240f, projectedCard.y)
+        } finally {
+            file.delete()
+        }
     }
 
     @Test
