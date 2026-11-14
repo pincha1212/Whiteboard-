@@ -60,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -441,7 +442,7 @@ fun StickyNoteView(
 
                 // Auto-Fit Content Container (adapts dynamically and stays in view at all times)
                 val scrollState = rememberScrollState()
-                LaunchedEffect(note.text) {
+                LaunchedEffect(note.text, note.title) {
                     if (scrollState.maxValue > 0) {
                         scrollState.scrollTo(scrollState.maxValue)
                     }
@@ -453,41 +454,56 @@ fun StickyNoteView(
                         .padding(innerPadDp)
                         .verticalScroll(scrollState)
                 ) {
-                    val effectiveStyle = TextStyle(
-                        color = textColor,
-                        fontSize = autoFitFontSp,
-                        lineHeight = (autoFitFontSp.value * 1.18f).sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    BasicTextField(
-                        value = note.text,
-                        onValueChange = onUpdateText,
-                        enabled = !note.isLocked && !isPanOnlyMode,
-                        readOnly = note.isLocked || isPanOnlyMode,
-                        textStyle = effectiveStyle,
-                        cursorBrush = SolidColor(textColor),
-                        decorationBox = { inner ->
-                            if (note.text.isEmpty()) {
-                                Text(
-                                    text = "Escribe tu idea aquí...",
-                                    style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
-                                )
-                            }
-                            inner()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = with(density) { innerHeightPx.toDp() })
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused && !isPanOnlyMode) {
-                                    currentOnSelect()
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        note.title?.takeIf { it.isNotBlank() }?.let { title ->
+                            Text(
+                                text = title,
+                                color = textColor,
+                                fontSize = (autoFitFontSp.value * 1.18f).sp,
+                                lineHeight = (autoFitFontSp.value * 1.34f).sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp)
+                            )
+                        }
+
+                        val effectiveStyle = TextStyle(
+                            color = textColor,
+                            fontSize = autoFitFontSp,
+                            lineHeight = (autoFitFontSp.value * 1.18f).sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        BasicTextField(
+                            value = note.text,
+                            onValueChange = onUpdateText,
+                            enabled = !note.isLocked && !isPanOnlyMode,
+                            readOnly = note.isLocked || isPanOnlyMode,
+                            textStyle = effectiveStyle,
+                            cursorBrush = SolidColor(textColor),
+                            decorationBox = { inner ->
+                                if (note.text.isEmpty()) {
+                                    Text(
+                                        text = "Escribe tu idea aquí...",
+                                        style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
+                                    )
                                 }
-                            }
-                            .semantics {
-                                set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
-                            }
-                            .testTag("sticky_note_input_${note.id}")
-                    )
+                                inner()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = with(density) { innerHeightPx.toDp() })
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused && !isPanOnlyMode) {
+                                        currentOnSelect()
+                                    }
+                                }
+                                .semantics {
+                                    set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
+                                }
+                                .testTag("sticky_note_input_${note.id}")
+                        )
+                    }
                 }
             }
         }
