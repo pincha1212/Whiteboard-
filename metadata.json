@@ -1,0 +1,6 @@
+{
+  "name": "Whiteboard",
+  "description": "Pizarra infinita inspirada en Microsoft Whiteboard con herramientas de dibujo, notas adhesivas, formas, plantillas y auditoría de versiones.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
