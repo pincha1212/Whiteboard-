@@ -2,16 +2,25 @@ package com.example.viewmodel
 
 import androidx.lifecycle.ViewModel
 import com.example.data.BoardSnapshotSerializer
+import com.example.ink.IdeationTemplateFactory
+import com.example.ink.PixelEraserGeometry
 import com.example.ink.ShapeRecognizer
+import com.example.ink.StickyNoteBounds
+import com.example.ink.StickyNoteGeometry
+import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.StrokeStabilizer
+import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.CustomBoardTemplate
 import com.example.model.LaserPoint
+import com.example.model.LineCapStyle
 import com.example.model.RulerState
 import com.example.model.ShapeItem
 import com.example.model.ShapeRecognitionProposal
 import com.example.model.ShapeType
+import com.example.model.isLineLike
 import com.example.model.StickyNote
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
@@ -27,8 +36,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.UUID
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.sin
 
 data class WhiteboardUiState(
@@ -39,6 +50,7 @@ data class WhiteboardUiState(
     val penColorHex: String = "#1E1E1E",
     val penWidth: Float = 6f,
     val penStyle: StrokeStyle = StrokeStyle.SOLID,
+    val penCapStyle: LineCapStyle = LineCapStyle.NONE,
     val isRainbowPen: Boolean = false,
     val autoShapeRecognition: Boolean = false,
     val isRulerActive: Boolean = false,
@@ -48,6 +60,8 @@ data class WhiteboardUiState(
     val panX: Float = 0f,
     val panY: Float = 0f,
     val scale: Float = 1.0f,
+    val viewportWidthPx: Float = 1080f,
+    val viewportHeightPx: Float = 1920f,
     val activeStroke: List<StrokePoint>? = null,
     val laserTrail: List<LaserPoint> = emptyList(),
     val selectedStrokeId: String? = null,
@@ -63,8 +77,12 @@ data class WhiteboardUiState(
     val pendingStrokeColor: String = "#2563EB",
     val pendingFillColor: String = "#DBEAFE",
     val pendingStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
+    val pendingCapStyle: LineCapStyle = LineCapStyle.NONE,
     val canUndo: Boolean = false,
-    val canRedo: Boolean = false
+    val canRedo: Boolean = false,
+    val showTemplatesOnNewBoard: Boolean = false,
+    val shouldAutoOpenTemplatePicker: Boolean = false,
+    val customTemplates: List<CustomBoardTemplate> = emptyList()
 )
 
 private data class BoardSnapshot(
@@ -116,7 +134,23 @@ class WhiteboardViewModel : ViewModel() {
     }
 
     fun setTool(tool: ToolType) {
-        _uiState.update { it.copy(currentTool = tool) }
+        _uiState.update { state ->
+            if (tool == ToolType.HAND) {
+                state.copy(
+                    currentTool = tool,
+                    selectedStrokeId = null,
+                    selectedShapeId = null,
+                    selectedNoteId = null,
+                    selectedStrokeIds = emptySet(),
+                    selectedShapeIds = emptySet(),
+                    selectedNoteIds = emptySet(),
+                    pendingStickyNoteColor = null,
+                    pendingShapeType = null
+                )
+            } else {
+                state.copy(currentTool = tool)
+            }
+        }
     }
 
     fun toggleZenMode() {
@@ -157,13 +191,51 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
-    fun onPanZoom(panX: Float, panY: Float, zoomChange: Float) {
-        _uiState.update {
-            val nextScale = (it.scale * zoomChange).coerceIn(0.20f, 5.0f)
-            it.copy(
-                scale = nextScale,
-                panX = it.panX + panX,
-                panY = it.panY + panY
+    fun onViewportSizeChanged(newWidthPx: Float, newHeightPx: Float) {
+        if (newWidthPx <= 0f || newHeightPx <= 0f) return
+        _uiState.update { state ->
+            val currentCam = ViewportTransform(
+                scale = state.scale,
+                panX = state.panX,
+                panY = state.panY,
+                viewportWidthPx = state.viewportWidthPx,
+                viewportHeightPx = state.viewportHeightPx
+            )
+            val adapted = currentCam.adaptToViewportResize(newWidthPx, newHeightPx)
+            state.copy(
+                panX = adapted.panX,
+                panY = adapted.panY,
+                viewportWidthPx = adapted.viewportWidthPx,
+                viewportHeightPx = adapted.viewportHeightPx
+            )
+        }
+    }
+
+    fun onPanZoom(
+        panX: Float,
+        panY: Float,
+        zoomChange: Float,
+        focalX: Float? = null,
+        focalY: Float? = null
+    ) {
+        _uiState.update { state ->
+            val cam = ViewportTransform(
+                scale = state.scale,
+                panX = state.panX,
+                panY = state.panY,
+                viewportWidthPx = state.viewportWidthPx,
+                viewportHeightPx = state.viewportHeightPx
+            ).panAndZoom(
+                deltaPanX = panX,
+                deltaPanY = panY,
+                zoomChange = zoomChange,
+                focalX = focalX,
+                focalY = focalY
+            )
+            state.copy(
+                scale = cam.scale,
+                panX = cam.panX,
+                panY = cam.panY
             )
         }
     }
@@ -290,12 +362,13 @@ class WhiteboardViewModel : ViewModel() {
             isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
             isRainbow = state.isRainbowPen && !isTranslucentEmphasis,
             strokeStyle = state.penStyle,
+            capStyle = state.penCapStyle,
             brushType = brushType,
             opacity = brushType.defaultOpacity
         )
 
-        val recognized = if (state.autoShapeRecognition && !isTranslucentEmphasis) {
-            ShapeRecognizer.recognizeStroke(newStroke)
+        val recognized = if (state.autoShapeRecognition) {
+            ShapeRecognizer.recognizeStroke(newStroke.copy(points = points))
         } else {
             null
         }
@@ -325,11 +398,15 @@ class WhiteboardViewModel : ViewModel() {
         if (points.size < 4) return false
         val state = _uiState.value
         val brushType = brushTypeForTool(state.currentTool)
+        val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER || brushType == StrokeBrushType.SOFT_BRUSH
         val tempStroke = WhiteboardStroke(
             points = points,
             colorHex = effectiveColorForBrush(brushType, state.penColorHex),
             width = effectiveStrokeWidthForBrush(brushType, state.penWidth),
+            isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
+            isRainbow = state.isRainbowPen && !isTranslucentEmphasis,
             strokeStyle = state.penStyle,
+            capStyle = state.penCapStyle,
             brushType = brushType,
             opacity = brushType.defaultOpacity
         )
@@ -344,8 +421,11 @@ class WhiteboardViewModel : ViewModel() {
                 activeStroke = null,
                 shapeRecognitionProposal = null,
                 selectedShapeId = recognized.shapeItem.id,
+                selectedShapeIds = setOf(recognized.shapeItem.id),
                 selectedStrokeId = null,
-                selectedNoteId = null
+                selectedStrokeIds = emptySet(),
+                selectedNoteId = null,
+                selectedNoteIds = emptySet()
             )
         }
         return true
@@ -377,13 +457,32 @@ class WhiteboardViewModel : ViewModel() {
         }
 
         val hitShape = board.shapes.lastOrNull { s ->
-            if (s.shapeType == ShapeType.LINE && s.vertices.size >= 2) {
-                pointToSegmentDistance(worldX, worldY, s.vertices[0], s.vertices[1]) <= tolerance
+            if (s.isLocked || s.isHiddenByCollapse) {
+                false
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
+                var hit = false
+                for (i in 0 until s.vertices.lastIndex) {
+                    if (pointToSegmentDistance(worldX, worldY, s.vertices[i], s.vertices[i + 1]) <= tolerance) {
+                        hit = true
+                        break
+                    }
+                }
+                hit
             } else {
-                worldX >= s.x - tolerance &&
-                    worldX <= s.x + s.width + tolerance &&
-                    worldY >= s.y - tolerance &&
-                    worldY <= s.y + s.height + tolerance
+                val (lx, ly) = if (s.rotation != 0f) {
+                    val cx = s.x + s.width / 2f
+                    val cy = s.y + s.height / 2f
+                    val rad = -s.rotation * (PI.toFloat() / 180f)
+                    val dx = worldX - cx
+                    val dy = worldY - cy
+                    (cx + dx * cos(rad) - dy * sin(rad)) to (cy + dx * sin(rad) + dy * cos(rad))
+                } else {
+                    worldX to worldY
+                }
+                lx >= s.x - tolerance &&
+                    lx <= s.x + s.width + tolerance &&
+                    ly >= s.y - tolerance &&
+                    ly <= s.y + s.height + tolerance
             }
         }
         if (hitShape != null) {
@@ -401,7 +500,31 @@ class WhiteboardViewModel : ViewModel() {
     }
 
     /**
-     * Pixel Eraser: splits and trims only the touched portion of vector strokes cleanly.
+     * Pixel Eraser: sweeps along a pointer segment without leaving gaps during fast drags.
+     */
+    fun erasePixelSegment(
+        from: StrokePoint,
+        to: StrokePoint,
+        radius: Float,
+        saveSnapshot: Boolean = false
+    ): Boolean {
+        val dist = hypot(to.x - from.x, to.y - from.y)
+        val stepLen = max(2f, radius * 0.45f)
+        val steps = ceil(dist / stepLen).toInt().coerceIn(1, 32)
+        var anyErased = false
+        for (i in 1..steps) {
+            val t = i / steps.toFloat()
+            val px = from.x + (to.x - from.x) * t
+            val py = from.y + (to.y - from.y) * t
+            if (erasePixelAt(px, py, radius, saveSnapshot = saveSnapshot && !anyErased)) {
+                anyErased = true
+            }
+        }
+        return anyErased
+    }
+
+    /**
+     * Pixel Eraser: splits and trims touched portions of both vector strokes and auto-created/preset shapes.
      */
     fun erasePixelAt(
         worldX: Float,
@@ -410,25 +533,36 @@ class WhiteboardViewModel : ViewModel() {
         saveSnapshot: Boolean = false
     ): Boolean {
         val board = _uiState.value.board
-        if (board.strokes.isEmpty()) return false
+        if (board.strokes.isEmpty() && board.shapes.isEmpty()) return false
 
         var anyErased = false
         val nextStrokes = mutableListOf<WhiteboardStroke>()
+        val nextShapes = mutableListOf<ShapeItem>()
 
         for (stroke in board.strokes) {
             val effectiveRadius = radius + (stroke.width * 0.35f)
-            val fragments = splitStrokeOutsideCircle(stroke.points, worldX, worldY, effectiveRadius)
-            val unchanged = fragments.size == 1 && fragments.first().size == stroke.points.size
-            if (unchanged) {
+            val clipped = PixelEraserGeometry.clipContourOutsideCircle(
+                points = stroke.points,
+                isClosed = false,
+                cx = worldX,
+                cy = worldY,
+                radius = effectiveRadius
+            )
+            if (!clipped.wasModified) {
                 nextStrokes.add(stroke)
             } else {
                 anyErased = true
-                fragments.forEachIndexed { idx, fragPts ->
-                    if (fragPts.size >= 2) {
+                clipped.fragments.forEachIndexed { idx, frag ->
+                    if (frag.points.size >= 2) {
                         nextStrokes.add(
                             stroke.copy(
                                 id = if (idx == 0) stroke.id else UUID.randomUUID().toString(),
-                                points = fragPts
+                                points = frag.points,
+                                capStyle = PixelEraserGeometry.resolveCapStyleForFragment(
+                                    stroke.capStyle,
+                                    frag.keptOrigStart,
+                                    frag.keptOrigEnd
+                                )
                             )
                         )
                     }
@@ -436,59 +570,40 @@ class WhiteboardViewModel : ViewModel() {
             }
         }
 
+        for (shape in board.shapes) {
+            if (shape.isLocked || shape.isHiddenByCollapse) {
+                nextShapes.add(shape)
+                continue
+            }
+            val decomposed = PixelEraserGeometry.eraseShapeAtCircle(
+                shape = shape,
+                cx = worldX,
+                cy = worldY,
+                radius = radius
+            )
+            if (decomposed == null) {
+                nextShapes.add(shape)
+            } else {
+                anyErased = true
+                nextStrokes.addAll(decomposed)
+            }
+        }
+
         if (!anyErased) return false
         if (saveSnapshot) saveUndoSnapshot()
-        _uiState.update {
-            val stillHasSelected = nextStrokes.any { s -> s.id == it.selectedStrokeId }
-            it.withUpdatedBoard { b -> b.copy(strokes = nextStrokes) }.copy(
-                selectedStrokeId = if (stillHasSelected) it.selectedStrokeId else null
+        _uiState.update { cur ->
+            val survivingStrokeIds = nextStrokes.map { it.id }.toSet()
+            val survivingShapeIds = nextShapes.map { it.id }.toSet()
+            cur.withUpdatedBoard { b ->
+                b.copy(strokes = nextStrokes, shapes = nextShapes)
+            }.copy(
+                selectedStrokeId = cur.selectedStrokeId?.takeIf { it in survivingStrokeIds },
+                selectedStrokeIds = cur.selectedStrokeIds.filter { it in survivingStrokeIds }.toSet(),
+                selectedShapeId = cur.selectedShapeId?.takeIf { it in survivingShapeIds },
+                selectedShapeIds = cur.selectedShapeIds.filter { it in survivingShapeIds }.toSet()
             )
         }
         return true
-    }
-
-    private fun splitStrokeOutsideCircle(
-        points: List<StrokePoint>,
-        cx: Float,
-        cy: Float,
-        radius: Float
-    ): List<List<StrokePoint>> {
-        if (points.size < 2) return emptyList()
-        val result = mutableListOf<MutableList<StrokePoint>>()
-        var current = mutableListOf<StrokePoint>()
-
-        fun isInside(p: StrokePoint): Boolean = hypot(p.x - cx, p.y - cy) <= radius
-
-        var prev = points.first()
-        var prevIn = isInside(prev)
-        if (!prevIn) {
-            current.add(prev)
-        }
-
-        for (i in 1 until points.size) {
-            val cur = points[i]
-            val curIn = isInside(cur)
-            val segHitsCircle = !prevIn && !curIn && pointToSegmentDistance(cx, cy, prev, cur) <= radius
-
-            if (curIn || segHitsCircle) {
-                if (current.size >= 2) {
-                    result.add(current)
-                }
-                current = mutableListOf()
-                if (!curIn) {
-                    current.add(cur)
-                }
-            } else {
-                current.add(cur)
-            }
-            prev = cur
-            prevIn = curIn
-        }
-
-        if (current.size >= 2) {
-            result.add(current)
-        }
-        return result
     }
 
     private fun isPointNearStroke(
@@ -521,14 +636,18 @@ class WhiteboardViewModel : ViewModel() {
         val board = _uiState.value.board
 
         val enclosedShapeIds = board.shapes.filter { s ->
-            val cx = s.x + s.width / 2f
-            val cy = s.y + s.height / 2f
-            isPointInPolygon(cx, cy, lassoPolygon) || (
-                isPointInPolygon(s.x, s.y, lassoPolygon) &&
-                isPointInPolygon(s.x + s.width, s.y, lassoPolygon) &&
-                isPointInPolygon(s.x + s.width, s.y + s.height, lassoPolygon) &&
-                isPointInPolygon(s.x, s.y + s.height, lassoPolygon)
-            ) || (s.vertices.isNotEmpty() && s.vertices.any { isPointInPolygon(it.x, it.y, lassoPolygon) })
+            if (s.isLocked || s.isHiddenByCollapse) {
+                false
+            } else {
+                val cx = s.x + s.width / 2f
+                val cy = s.y + s.height / 2f
+                isPointInPolygon(cx, cy, lassoPolygon) || (
+                    isPointInPolygon(s.x, s.y, lassoPolygon) &&
+                    isPointInPolygon(s.x + s.width, s.y, lassoPolygon) &&
+                    isPointInPolygon(s.x + s.width, s.y + s.height, lassoPolygon) &&
+                    isPointInPolygon(s.x, s.y + s.height, lassoPolygon)
+                ) || (s.vertices.isNotEmpty() && s.vertices.any { isPointInPolygon(it.x, it.y, lassoPolygon) })
+            }
         }.map { it.id }.toSet()
 
         val enclosedStrokeIds = board.strokes.filter { s ->
@@ -540,12 +659,16 @@ class WhiteboardViewModel : ViewModel() {
         }.map { it.id }.toSet()
 
         val enclosedNoteIds = board.stickyNotes.filter { n ->
-            val cx = n.x + n.width / 2f
-            val cy = n.y + n.height / 2f
-            isPointInPolygon(cx, cy, lassoPolygon) || (
-                isPointInPolygon(n.x, n.y, lassoPolygon) &&
-                isPointInPolygon(n.x + n.width, n.y, lassoPolygon)
-            )
+            if (n.isLocked || n.isHiddenByCollapse) {
+                false
+            } else {
+                val cx = n.x + n.width / 2f
+                val cy = n.y + n.height / 2f
+                isPointInPolygon(cx, cy, lassoPolygon) || (
+                    isPointInPolygon(n.x, n.y, lassoPolygon) &&
+                    isPointInPolygon(n.x + n.width, n.y, lassoPolygon)
+                )
+            }
         }.map { it.id }.toSet()
 
         if (enclosedShapeIds.isNotEmpty() || enclosedStrokeIds.isNotEmpty() || enclosedNoteIds.isNotEmpty()) {
@@ -622,7 +745,23 @@ class WhiteboardViewModel : ViewModel() {
     fun updateStickyNoteText(id: String, newText: String) {
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.map { n -> if (n.id == id) n.copy(text = newText) else n })
+                b.copy(stickyNotes = b.stickyNotes.map { n ->
+                    if (n.id == id) {
+                        val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
+                            text = newText,
+                            noteWidthWorld = n.width,
+                            currentHeightWorld = n.height,
+                            isAspectRatioLocked = n.isAspectRatioLocked
+                        )
+                        if (n.isAspectRatioLocked && adaptedH > n.height) {
+                            n.copy(text = newText, width = adaptedH, height = adaptedH)
+                        } else if (adaptedH > n.height) {
+                            n.copy(text = newText, height = adaptedH)
+                        } else {
+                            n.copy(text = newText)
+                        }
+                    } else n
+                })
             }
         }
     }
@@ -648,7 +787,7 @@ class WhiteboardViewModel : ViewModel() {
     fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
         val state = _uiState.value
         val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id) {
+            if (note.id == id && !note.isLocked) {
                 var nextX = note.x + (deltaX / state.scale)
                 var nextY = note.y + (deltaY / state.scale)
                 if (state.isSnapToGrid) {
@@ -658,15 +797,128 @@ class WhiteboardViewModel : ViewModel() {
                 note.copy(x = nextX, y = nextY)
             } else note
         }
-        _uiState.update { it.withUpdatedBoard { b -> b.copy(stickyNotes = updated) } }
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+            }
+        }
+    }
+
+    fun resizeStickyNoteHandle(
+        id: String,
+        handle: StickyNoteResizeHandle,
+        deltaScreenX: Float,
+        deltaScreenY: Float
+    ) {
+        val state = _uiState.value
+        var modified = false
+        val updated = state.board.stickyNotes.map { note ->
+            if (note.id == id && !note.isLocked) {
+                modified = true
+                val next = StickyNoteGeometry.resizeByHandle(
+                    bounds = StickyNoteBounds(note.x, note.y, note.width, note.height),
+                    handle = handle,
+                    deltaScreenX = deltaScreenX,
+                    deltaScreenY = deltaScreenY,
+                    scale = state.scale,
+                    lockAspectRatio = note.isAspectRatioLocked,
+                    targetAspectRatio = 1.0f
+                )
+                note.copy(
+                    x = next.x,
+                    y = next.y,
+                    width = next.width,
+                    height = next.height
+                )
+            } else note
+        }
+        if (!modified) return
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+            }
+        }
+    }
+
+    fun resizeStickyNoteBounds(
+        id: String,
+        newX: Float,
+        newY: Float,
+        newWidth: Float,
+        newHeight: Float,
+        saveSnapshot: Boolean = false
+    ) {
+        val state = _uiState.value
+        val cleanW = newWidth.coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
+        val cleanH = newHeight.coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
+        if (saveSnapshot) saveUndoSnapshot()
+        val updated = state.board.stickyNotes.map { note ->
+            if (note.id == id && !note.isLocked) {
+                note.copy(x = newX, y = newY, width = cleanW, height = cleanH)
+            } else note
+        }
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+            }
+        }
+    }
+
+    fun toggleStickyNoteAspectRatioLock(id: String) {
+        val target = _uiState.value.board.stickyNotes.find { it.id == id } ?: return
+        saveUndoSnapshot()
+        val nextLocked = !target.isAspectRatioLocked
+        val updated = _uiState.value.board.stickyNotes.map { note ->
+            if (note.id != id) {
+                note
+            } else if (nextLocked) {
+                val side = ((note.width + note.height) * 0.5f)
+                    .coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
+                note.copy(
+                    width = side,
+                    height = side,
+                    isAspectRatioLocked = true
+                )
+            } else {
+                note.copy(isAspectRatioLocked = false)
+            }
+        }
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+            }
+        }
+    }
+
+    fun rotateStickyNote(
+        id: String,
+        rotationDegrees: Float,
+        saveSnapshot: Boolean = false
+    ) {
+        if (saveSnapshot) saveUndoSnapshot()
+        val cleanAngle = ((rotationDegrees % 360f) + 360f) % 360f
+        _uiState.update { state ->
+            val updated = state.board.stickyNotes.map { note ->
+                if (note.id == id && !note.isLocked) {
+                    note.copy(rotation = cleanAngle)
+                } else note
+            }
+            state.withUpdatedBoard { b -> b.copy(stickyNotes = updated) }
+        }
     }
 
     fun deleteStickyNote(id: String) {
         saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
-            }.copy(selectedNoteId = null)
+        _uiState.update { state ->
+            val remainingNoteIds = state.selectedNoteIds - id
+            state.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
+                )
+            }.copy(
+                selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
+                selectedNoteIds = remainingNoteIds
+            )
         }
     }
 
@@ -686,10 +938,12 @@ class WhiteboardViewModel : ViewModel() {
 
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(
-                    strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
-                    shapes = b.shapes.filter { sh -> !shapeIds.contains(sh.id) },
-                    stickyNotes = b.stickyNotes.filter { n -> !noteIds.contains(n.id) }
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    b.copy(
+                        strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
+                        shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
+                        stickyNotes = b.stickyNotes.filter { n -> !noteIds.contains(n.id) }
+                    )
                 )
             }.copy(
                 selectedStrokeId = null,
@@ -711,7 +965,8 @@ class WhiteboardViewModel : ViewModel() {
         isFilled: Boolean,
         strokeColor: String,
         fillColor: String,
-        style: StrokeStyle
+        style: StrokeStyle,
+        capStyle: LineCapStyle = LineCapStyle.NONE
     ) {
         _uiState.update {
             it.copy(
@@ -721,9 +976,13 @@ class WhiteboardViewModel : ViewModel() {
                 pendingStrokeColor = strokeColor,
                 pendingFillColor = fillColor,
                 pendingStrokeStyle = style,
+                pendingCapStyle = capStyle,
                 selectedShapeId = null,
                 selectedStrokeId = null,
-                selectedNoteId = null
+                selectedNoteId = null,
+                selectedShapeIds = emptySet(),
+                selectedStrokeIds = emptySet(),
+                selectedNoteIds = emptySet()
             )
         }
     }
@@ -744,7 +1003,9 @@ class WhiteboardViewModel : ViewModel() {
             )
             _uiState.update {
                 it.withUpdatedBoard { b ->
-                    b.copy(stickyNotes = b.stickyNotes + newNote)
+                    IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                        b.copy(stickyNotes = b.stickyNotes + newNote)
+                    )
                 }.copy(
                     pendingStickyNoteColor = null,
                     selectedNoteId = newNote.id
@@ -761,7 +1022,7 @@ class WhiteboardViewModel : ViewModel() {
         saveUndoSnapshot()
 
         val dragDist = kotlin.math.hypot(end.x - start.x, end.y - start.y)
-        val newShape: ShapeItem = if (shapeType == ShapeType.LINE) {
+        val newShape: ShapeItem = if (shapeType.isLineLike) {
             val v0: StrokePoint
             val v1: StrokePoint
             if (dragDist < 14f) {
@@ -776,7 +1037,7 @@ class WhiteboardViewModel : ViewModel() {
             val minY = kotlin.math.min(v0.y, v1.y)
             val maxY = kotlin.math.max(v0.y, v1.y)
             ShapeItem(
-                shapeType = ShapeType.LINE,
+                shapeType = shapeType,
                 x = minX,
                 y = minY,
                 width = (maxX - minX).coerceAtLeast(1f),
@@ -786,6 +1047,11 @@ class WhiteboardViewModel : ViewModel() {
                 strokeWidth = state.penWidth.coerceIn(2f, 16f),
                 isFilled = false,
                 strokeStyle = state.pendingStrokeStyle,
+                capStyle = when (shapeType) {
+                    ShapeType.ARROW -> LineCapStyle.END_ARROW
+                    ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
+                    else -> state.pendingCapStyle
+                },
                 vertices = listOf(v0, v1)
             )
         } else if (dragDist < 14f) {
@@ -833,8 +1099,11 @@ class WhiteboardViewModel : ViewModel() {
             }.copy(
                 pendingShapeType = null,
                 selectedShapeId = newShape.id,
+                selectedShapeIds = setOf(newShape.id),
                 selectedStrokeId = null,
+                selectedStrokeIds = emptySet(),
                 selectedNoteId = null,
+                selectedNoteIds = emptySet(),
                 currentTool = ToolType.SELECT_LASSO
             )
         }
@@ -846,10 +1115,11 @@ class WhiteboardViewModel : ViewModel() {
         strokeColor: String,
         fillColor: String,
         style: StrokeStyle,
+        capStyle: LineCapStyle = LineCapStyle.NONE,
         screenW: Float = 1080f,
         screenH: Float = 1920f
     ) {
-        requestAddCustomShape(type, isFilled, strokeColor, fillColor, style)
+        requestAddCustomShape(type, isFilled, strokeColor, fillColor, style, capStyle)
     }
 
     fun selectStroke(id: String?) {
@@ -946,6 +1216,20 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    fun updateSelectedStrokeCapStyle(capStyle: LineCapStyle) {
+        val strokeIds = if (_uiState.value.selectedStrokeIds.isNotEmpty()) {
+            _uiState.value.selectedStrokeIds
+        } else {
+            _uiState.value.selectedStrokeId?.let { setOf(it) } ?: return
+        }
+        saveUndoSnapshot()
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                b.copy(strokes = b.strokes.map { s -> if (strokeIds.contains(s.id)) s.copy(capStyle = capStyle) else s })
+            }
+        }
+    }
+
     fun toggleSelectedStrokeHighlighter() {
         val strokeIds = if (_uiState.value.selectedStrokeIds.isNotEmpty()) {
             _uiState.value.selectedStrokeIds
@@ -974,7 +1258,11 @@ class WhiteboardViewModel : ViewModel() {
                     )
                 }.copy(
                     selectedStrokeId = null,
-                    selectedShapeId = recognized.shapeItem.id
+                    selectedStrokeIds = emptySet(),
+                    selectedShapeId = recognized.shapeItem.id,
+                    selectedShapeIds = setOf(recognized.shapeItem.id),
+                    selectedNoteId = null,
+                    selectedNoteIds = emptySet()
                 )
             }
         }
@@ -1021,7 +1309,8 @@ class WhiteboardViewModel : ViewModel() {
         fillColor: String? = null,
         isFilled: Boolean? = null,
         width: Float? = null,
-        style: StrokeStyle? = null
+        style: StrokeStyle? = null,
+        capStyle: LineCapStyle? = null
     ) {
         val state = _uiState.value
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: return
@@ -1034,7 +1323,8 @@ class WhiteboardViewModel : ViewModel() {
                     fillColorHex = fillColor ?: it.fillColorHex,
                     isFilled = isFilled ?: it.isFilled,
                     strokeWidth = width ?: it.strokeWidth,
-                    strokeStyle = style ?: it.strokeStyle
+                    strokeStyle = style ?: it.strokeStyle,
+                    capStyle = capStyle ?: it.capStyle
                 )
             } else it
         }
@@ -1055,7 +1345,7 @@ class WhiteboardViewModel : ViewModel() {
             } else s
         }
         val updatedShapes = if (shapeIds.isEmpty()) state.board.shapes else state.board.shapes.map { sh ->
-            if (shapeIds.contains(sh.id)) {
+            if (shapeIds.contains(sh.id) && !sh.isLocked) {
                 sh.copy(
                     x = sh.x + dxWorld,
                     y = sh.y + dyWorld,
@@ -1064,13 +1354,15 @@ class WhiteboardViewModel : ViewModel() {
             } else sh
         }
         val updatedNotes = if (noteIds.isEmpty()) state.board.stickyNotes else state.board.stickyNotes.map { n ->
-            if (noteIds.contains(n.id)) {
+            if (noteIds.contains(n.id) && !n.isLocked) {
                 n.copy(x = n.x + dxWorld, y = n.y + dyWorld)
             } else n
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
+                )
             }
         }
     }
@@ -1084,20 +1376,49 @@ class WhiteboardViewModel : ViewModel() {
         val updated = _uiState.value.board.shapes.map { s ->
             if (s.id != shapeId) {
                 s
-            } else if (s.shapeType == ShapeType.LINE && s.vertices.size >= 2) {
-                val v0 = if (handleIndex == 0) StrokePoint(newWorldX, newWorldY) else s.vertices[0]
-                val v1 = if (handleIndex == 1) StrokePoint(newWorldX, newWorldY) else s.vertices[1]
-                val minX = kotlin.math.min(v0.x, v1.x)
-                val maxX = kotlin.math.max(v0.x, v1.x)
-                val minY = kotlin.math.min(v0.y, v1.y)
-                val maxY = kotlin.math.max(v0.y, v1.y)
-                s.copy(
-                    x = minX,
-                    y = minY,
-                    width = (maxX - minX).coerceAtLeast(1f),
-                    height = (maxY - minY).coerceAtLeast(1f),
-                    vertices = listOf(v0, v1)
-                )
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
+                if (handleIndex == 2 || handleIndex == 3) {
+                    val p0 = s.vertices[0]
+                    val p1 = s.vertices[1]
+                    val cx = (p0.x + p1.x) / 2f
+                    val cy = (p0.y + p1.y) / 2f
+                    val halfLen = kotlin.math.hypot(p1.x - p0.x, p1.y - p0.y) / 2f
+                    val angle = kotlin.math.atan2(newWorldY - cy, newWorldX - cx)
+                    val nv0: StrokePoint
+                    val nv1: StrokePoint
+                    if (handleIndex == 2) {
+                        nv0 = StrokePoint(cx + halfLen * cos(angle), cy + halfLen * sin(angle))
+                        nv1 = StrokePoint(cx - halfLen * cos(angle), cy - halfLen * sin(angle))
+                    } else {
+                        nv1 = StrokePoint(cx + halfLen * cos(angle), cy + halfLen * sin(angle))
+                        nv0 = StrokePoint(cx - halfLen * cos(angle), cy - halfLen * sin(angle))
+                    }
+                    val minX = kotlin.math.min(nv0.x, nv1.x)
+                    val maxX = kotlin.math.max(nv0.x, nv1.x)
+                    val minY = kotlin.math.min(nv0.y, nv1.y)
+                    val maxY = kotlin.math.max(nv0.y, nv1.y)
+                    s.copy(
+                        x = minX,
+                        y = minY,
+                        width = (maxX - minX).coerceAtLeast(1f),
+                        height = (maxY - minY).coerceAtLeast(1f),
+                        vertices = listOf(nv0, nv1)
+                    )
+                } else {
+                    val v0 = if (handleIndex == 0) StrokePoint(newWorldX, newWorldY) else s.vertices[0]
+                    val v1 = if (handleIndex == 1) StrokePoint(newWorldX, newWorldY) else s.vertices[1]
+                    val minX = kotlin.math.min(v0.x, v1.x)
+                    val maxX = kotlin.math.max(v0.x, v1.x)
+                    val minY = kotlin.math.min(v0.y, v1.y)
+                    val maxY = kotlin.math.max(v0.y, v1.y)
+                    s.copy(
+                        x = minX,
+                        y = minY,
+                        width = (maxX - minX).coerceAtLeast(1f),
+                        height = (maxY - minY).coerceAtLeast(1f),
+                        vertices = listOf(v0, v1)
+                    )
+                }
             } else {
                 // Corner handles: 0=TL, 1=TR, 2=BL, 3=BR
                 val anchorX = if (handleIndex == 0 || handleIndex == 2) s.x + s.width else s.x
@@ -1146,7 +1467,7 @@ class WhiteboardViewModel : ViewModel() {
         val updated = state.board.shapes.map { s ->
             if (!shapeIds.contains(s.id)) {
                 s
-            } else if (s.shapeType == ShapeType.LINE && s.vertices.size >= 2) {
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
                 val p0 = s.vertices[0]
                 val p1 = s.vertices[1]
                 val mx = (p0.x + p1.x) / 2f
@@ -1193,11 +1514,37 @@ class WhiteboardViewModel : ViewModel() {
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: return
         if (shapeIds.isEmpty()) return
         saveUndoSnapshot()
+        val rad = deltaDegrees * (PI.toFloat() / 180f)
+        val cosA = cos(rad)
+        val sinA = sin(rad)
         val updated = state.board.shapes.map { s ->
-            if (shapeIds.contains(s.id)) {
+            if (!shapeIds.contains(s.id)) {
+                s
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
+                val p0 = s.vertices[0]
+                val p1 = s.vertices[1]
+                val mx = (p0.x + p1.x) / 2f
+                val my = (p0.y + p1.y) / 2f
+                val nv0 = StrokePoint(
+                    mx + (p0.x - mx) * cosA - (p0.y - my) * sinA,
+                    my + (p0.x - mx) * sinA + (p0.y - my) * cosA
+                )
+                val nv1 = StrokePoint(
+                    mx + (p1.x - mx) * cosA - (p1.y - my) * sinA,
+                    my + (p1.x - mx) * sinA + (p1.y - my) * cosA
+                )
+                s.copy(
+                    x = kotlin.math.min(nv0.x, nv1.x),
+                    y = kotlin.math.min(nv0.y, nv1.y),
+                    width = kotlin.math.abs(nv1.x - nv0.x).coerceAtLeast(1f),
+                    height = kotlin.math.abs(nv1.y - nv0.y).coerceAtLeast(1f),
+                    rotation = 0f,
+                    vertices = listOf(nv0, nv1)
+                )
+            } else {
                 val next = ((s.rotation + deltaDegrees) % 360f + 360f) % 360f
                 s.copy(rotation = next)
-            } else s
+            }
         }
         _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
     }
@@ -1362,56 +1709,362 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    fun updateCurrentSelectionColor(colorHex: String) {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        saveUndoSnapshot()
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                b.copy(
+                    strokes = if (strokeIds.isEmpty()) b.strokes else b.strokes.map { s ->
+                        if (strokeIds.contains(s.id)) s.copy(colorHex = colorHex) else s
+                    },
+                    shapes = if (shapeIds.isEmpty()) b.shapes else b.shapes.map { sh ->
+                        if (shapeIds.contains(sh.id)) sh.copy(strokeColorHex = colorHex) else sh
+                    }
+                )
+            }
+        }
+    }
+
+    fun scaleCurrentSelection(factor: Float) {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        saveUndoSnapshot()
+        val updatedStrokes = if (strokeIds.isEmpty()) state.board.strokes else state.board.strokes.map { s ->
+            if (!strokeIds.contains(s.id) || s.points.isEmpty()) {
+                s
+            } else {
+                val minX = s.points.minOf { it.x }
+                val maxX = s.points.maxOf { it.x }
+                val minY = s.points.minOf { it.y }
+                val maxY = s.points.maxOf { it.y }
+                val cx = (minX + maxX) / 2f
+                val cy = (minY + maxY) / 2f
+                val span = kotlin.math.hypot(maxX - minX, maxY - minY).coerceAtLeast(1f)
+                val safeFactor = if (span * factor < 20f) 20f / span else if (span * factor > 3000f) 3000f / span else factor
+                s.copy(points = s.points.map { p ->
+                    StrokePoint(cx + (p.x - cx) * safeFactor, cy + (p.y - cy) * safeFactor)
+                })
+            }
+        }
+        val updatedShapes = if (shapeIds.isEmpty()) state.board.shapes else state.board.shapes.map { s ->
+            if (!shapeIds.contains(s.id)) {
+                s
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
+                val p0 = s.vertices[0]
+                val p1 = s.vertices[1]
+                val mx = (p0.x + p1.x) / 2f
+                val my = (p0.y + p1.y) / 2f
+                val len = kotlin.math.hypot(p1.x - p0.x, p1.y - p0.y).coerceAtLeast(1f)
+                val clampedFactor = if (len * factor < 20f) 20f / len else if (len * factor > 3000f) 3000f / len else factor
+                val nv0 = StrokePoint(mx + (p0.x - mx) * clampedFactor, my + (p0.y - my) * clampedFactor)
+                val nv1 = StrokePoint(mx + (p1.x - mx) * clampedFactor, my + (p1.y - my) * clampedFactor)
+                s.copy(
+                    x = kotlin.math.min(nv0.x, nv1.x),
+                    y = kotlin.math.min(nv0.y, nv1.y),
+                    width = kotlin.math.abs(nv1.x - nv0.x).coerceAtLeast(1f),
+                    height = kotlin.math.abs(nv1.y - nv0.y).coerceAtLeast(1f),
+                    vertices = listOf(nv0, nv1)
+                )
+            } else {
+                val cx = s.x + s.width / 2f
+                val cy = s.y + s.height / 2f
+                val newW = (s.width * factor).coerceIn(24f, 3000f)
+                val newH = (s.height * factor).coerceIn(24f, 3000f)
+                val newX = cx - newW / 2f
+                val newY = cy - newH / 2f
+                val oldW = s.width.coerceAtLeast(1f)
+                val oldH = s.height.coerceAtLeast(1f)
+                val remappedVerts = s.vertices.map { v ->
+                    val rx = (v.x - s.x) / oldW
+                    val ry = (v.y - s.y) / oldH
+                    StrokePoint(newX + rx * newW, newY + ry * newH)
+                }
+                s.copy(x = newX, y = newY, width = newW, height = newH, vertices = remappedVerts)
+            }
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes) } }
+    }
+
+    fun rotateCurrentSelection(deltaDegrees: Float) {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        saveUndoSnapshot()
+        val rad = deltaDegrees * (PI.toFloat() / 180f)
+        val cosA = cos(rad)
+        val sinA = sin(rad)
+        val updatedStrokes = if (strokeIds.isEmpty()) state.board.strokes else state.board.strokes.map { s ->
+            if (!strokeIds.contains(s.id) || s.points.isEmpty()) {
+                s
+            } else {
+                val cx = (s.points.minOf { it.x } + s.points.maxOf { it.x }) / 2f
+                val cy = (s.points.minOf { it.y } + s.points.maxOf { it.y }) / 2f
+                s.copy(points = s.points.map { p ->
+                    val dx = p.x - cx
+                    val dy = p.y - cy
+                    StrokePoint(cx + dx * cosA - dy * sinA, cy + dx * sinA + dy * cosA)
+                })
+            }
+        }
+        val updatedShapes = if (shapeIds.isEmpty()) state.board.shapes else state.board.shapes.map { s ->
+            if (!shapeIds.contains(s.id)) {
+                s
+            } else if (s.shapeType.isLineLike && s.vertices.size >= 2) {
+                val p0 = s.vertices[0]
+                val p1 = s.vertices[1]
+                val mx = (p0.x + p1.x) / 2f
+                val my = (p0.y + p1.y) / 2f
+                val nv0 = StrokePoint(
+                    mx + (p0.x - mx) * cosA - (p0.y - my) * sinA,
+                    my + (p0.x - mx) * sinA + (p0.y - my) * cosA
+                )
+                val nv1 = StrokePoint(
+                    mx + (p1.x - mx) * cosA - (p1.y - my) * sinA,
+                    my + (p1.x - mx) * sinA + (p1.y - my) * cosA
+                )
+                s.copy(
+                    x = kotlin.math.min(nv0.x, nv1.x),
+                    y = kotlin.math.min(nv0.y, nv1.y),
+                    width = kotlin.math.abs(nv1.x - nv0.x).coerceAtLeast(1f),
+                    height = kotlin.math.abs(nv1.y - nv0.y).coerceAtLeast(1f),
+                    rotation = 0f,
+                    vertices = listOf(nv0, nv1)
+                )
+            } else {
+                val next = ((s.rotation + deltaDegrees) % 360f + 360f) % 360f
+                s.copy(rotation = next)
+            }
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes) } }
+    }
+
+    fun duplicateCurrentSelection() {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
+        val strokesToDup = state.board.strokes.filter { strokeIds.contains(it.id) }
+        val shapesToDup = state.board.shapes.filter { shapeIds.contains(it.id) }
+        if (strokesToDup.isEmpty() && shapesToDup.isEmpty()) return
+        saveUndoSnapshot()
+        val newStrokes = strokesToDup.map { s ->
+            s.copy(id = UUID.randomUUID().toString(), points = s.points.map { StrokePoint(it.x + 30f, it.y + 30f) })
+        }
+        val newShapes = shapesToDup.map { shape ->
+            shape.copy(
+                id = UUID.randomUUID().toString(),
+                x = shape.x + 30f,
+                y = shape.y + 30f,
+                vertices = shape.vertices.map { StrokePoint(it.x + 30f, it.y + 30f) }
+            )
+        }
+        val newStrokeIds = newStrokes.map { it.id }.toSet()
+        val newShapeIds = newShapes.map { it.id }.toSet()
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                b.copy(strokes = b.strokes + newStrokes, shapes = b.shapes + newShapes)
+            }.copy(
+                selectedStrokeId = newStrokeIds.firstOrNull(),
+                selectedStrokeIds = newStrokeIds,
+                selectedShapeId = newShapeIds.firstOrNull(),
+                selectedShapeIds = newShapeIds
+            )
+        }
+    }
+
     fun applyTemplate(type: TemplateType, screenW: Float = 1080f, screenH: Float = 1920f) {
         saveUndoSnapshot()
         val state = _uiState.value
         val worldCenterX = (screenW / 2f - state.panX) / state.scale
         val worldCenterY = (screenH / 2f - state.panY) / state.scale
-        val worldX = worldCenterX - 400f
-        val worldY = worldCenterY - 220f
+        val generated = IdeationTemplateFactory.createTemplate(type, worldCenterX, worldCenterY)
 
-        when (type) {
-            TemplateType.KANBAN -> {
-                val colWidth = 260f
-                val colHeight = 440f
-                val cols = listOf("Por Hacer", "En Curso", "Terminado")
-                val colors = listOf("#FFF275", "#86E3CE", "#A1F0A6")
+        val wasEmpty = state.board.strokes.isEmpty() &&
+            state.board.shapes.isEmpty() &&
+            state.board.stickyNotes.isEmpty() &&
+            state.board.textItems.isEmpty()
 
-                val newShapes = cols.mapIndexed { idx, _ ->
-                    ShapeItem(
-                        shapeType = ShapeType.ROUNDED_RECT,
-                        x = worldX + (idx * (colWidth + 20f)),
-                        y = worldY,
-                        width = colWidth,
-                        height = colHeight,
-                        strokeColorHex = "#0078D4",
-                        fillColorHex = "#F3F7FC",
-                        isFilled = true,
-                        strokeWidth = 2.5f
+        val fitScale = if (wasEmpty && screenW < 980f) {
+            (screenW * 0.90f / 980f).coerceIn(0.45f, 1.0f)
+        } else {
+            state.scale
+        }
+        val fitPanX = if (wasEmpty && fitScale != state.scale) {
+            screenW / 2f - worldCenterX * fitScale
+        } else {
+            state.panX
+        }
+        val fitPanY = if (wasEmpty && fitScale != state.scale) {
+            screenH / 2f - worldCenterY * fitScale
+        } else {
+            state.panY
+        }
+
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    b.copy(
+                        shapes = b.shapes + generated.shapes,
+                        stickyNotes = b.stickyNotes + generated.stickyNotes,
+                        textItems = b.textItems + generated.textItems
                     )
-                }
+                )
+            }.copy(
+                scale = fitScale,
+                panX = fitPanX,
+                panY = fitPanY,
+                pendingStickyNoteColor = null,
+                pendingShapeType = null,
+                shouldAutoOpenTemplatePicker = false
+            )
+        }
+    }
 
-                val newNotes = cols.mapIndexed { idx, title ->
-                    StickyNote(
-                        text = "📋 $title:\n• Tarea 1\n• Tarea 2",
-                        x = worldX + (idx * (colWidth + 20f)) + 20f,
-                        y = worldY + 30f,
-                        width = 220f,
-                        height = 180f,
-                        colorHex = colors[idx]
-                    )
-                }
+    fun addClusterBranch(clusterShapeId: String) {
+        saveUndoSnapshot()
+        _uiState.update {
+            it.withUpdatedBoard { b -> IdeationTemplateFactory.addClusterBranch(b, clusterShapeId) }
+        }
+    }
 
-                _uiState.update {
-                    it.withUpdatedBoard { b ->
-                        b.copy(
-                            shapes = b.shapes + newShapes,
-                            stickyNotes = b.stickyNotes + newNotes
-                        )
-                    }
-                }
+    fun toggleConceptBranchCollapse(nodeId: String) {
+        saveUndoSnapshot()
+        _uiState.update {
+            it.withUpdatedBoard { b -> IdeationTemplateFactory.toggleConceptBranchCollapse(b, nodeId) }
+        }
+    }
+
+    fun addNoteToColumn(columnShapeId: String) {
+        saveUndoSnapshot()
+        _uiState.update {
+            it.withUpdatedBoard { b -> IdeationTemplateFactory.addNoteToColumn(b, columnShapeId) }
+        }
+    }
+
+    fun updateTextItem(id: String, newText: String) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(textItems = b.textItems.map { t -> if (t.id == id && !t.isLocked) t.copy(text = newText) else t })
             }
-            else -> {}
+        }
+    }
+
+    fun updateShapeLabel(id: String, newLabel: String) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(shapes = b.shapes.map { s -> if (s.id == id) s.copy(label = newLabel) else s })
+            }
+        }
+    }
+
+    fun toggleShowTemplatesOnNewBoard(enabled: Boolean? = null) {
+        _uiState.update {
+            it.copy(showTemplatesOnNewBoard = enabled ?: !it.showTemplatesOnNewBoard)
+        }
+    }
+
+    fun consumeAutoOpenTemplatePicker() {
+        _uiState.update { it.copy(shouldAutoOpenTemplatePicker = false) }
+    }
+
+    fun saveCurrentBoardAsTemplate(
+        title: String,
+        description: String = ""
+    ): CustomBoardTemplate {
+        val state = _uiState.value
+        val board = state.board
+        val serialized = BoardSnapshotSerializer.serializeBoard(board)
+        val cleanTitle = title.trim().ifBlank {
+            board.title.ifBlank { "Mi plantilla ${state.customTemplates.size + 1}" }
+        }
+        val template = CustomBoardTemplate(
+            title = cleanTitle,
+            description = description.trim(),
+            strokeCount = board.strokes.size,
+            shapeCount = board.shapes.size,
+            noteCount = board.stickyNotes.size,
+            textCount = board.textItems.size,
+            serializedData = serialized
+        )
+        _uiState.update {
+            it.copy(customTemplates = listOf(template) + it.customTemplates)
+        }
+        return template
+    }
+
+    fun applyCustomTemplate(template: CustomBoardTemplate): Boolean {
+        val current = _uiState.value.board
+        val restored = BoardSnapshotSerializer.deserializeIntoBoard(template.serializedData, current)
+            ?: return false
+        saveUndoSnapshot()
+        // Generate fresh IDs so elements from applied custom templates remain independent across boards
+        val idMap = mutableMapOf<String, String>()
+        fun remap(oldId: String?): String? {
+            if (oldId == null) return null
+            return idMap.getOrPut(oldId) { UUID.randomUUID().toString() }
+        }
+        val freshShapes = restored.shapes.map { sh ->
+            sh.copy(
+                id = remap(sh.id)!!,
+                groupId = remap(sh.groupId),
+                parentId = remap(sh.parentId)
+            )
+        }
+        val freshNotes = restored.stickyNotes.map { n ->
+            n.copy(
+                id = remap(n.id)!!,
+                groupId = remap(n.groupId),
+                parentId = remap(n.parentId)
+            )
+        }
+        val freshTexts = restored.textItems.map { t ->
+            t.copy(
+                id = remap(t.id)!!,
+                groupId = remap(t.groupId),
+                parentId = remap(t.parentId)
+            )
+        }
+        val freshStrokes = restored.strokes.map { s ->
+            s.copy(id = UUID.randomUUID().toString())
+        }
+        val freshStickers = restored.stickers.map { st ->
+            st.copy(id = UUID.randomUUID().toString())
+        }
+
+        val appliedBoard = restored.copy(
+            strokes = freshStrokes,
+            shapes = freshShapes,
+            stickyNotes = freshNotes,
+            textItems = freshTexts,
+            stickers = freshStickers
+        )
+
+        _uiState.update {
+            it.withUpdatedBoard { appliedBoard }.copy(
+                selectedStrokeId = null,
+                selectedShapeId = null,
+                selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet(),
+                pendingStickyNoteColor = null,
+                pendingShapeType = null,
+                shouldAutoOpenTemplatePicker = false
+            )
+        }
+        return true
+    }
+
+    fun deleteCustomTemplate(templateId: String) {
+        _uiState.update { state ->
+            state.copy(customTemplates = state.customTemplates.filter { it.id != templateId })
         }
     }
 
@@ -1426,6 +2079,9 @@ class WhiteboardViewModel : ViewModel() {
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet(),
                 pendingShapeType = null,
                 pendingStickyNoteColor = null,
                 canUndo = false,
@@ -1445,6 +2101,9 @@ class WhiteboardViewModel : ViewModel() {
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet(),
                 pendingShapeType = null,
                 pendingStickyNoteColor = null
             )
@@ -1472,16 +2131,20 @@ class WhiteboardViewModel : ViewModel() {
                 board = if (openImmediately) newBoard else it.board,
                 allBoards = listOf(newBoard) + it.allBoards,
                 isViewingBoardsHome = !openImmediately,
-                selectedStrokeId = null,
-                selectedShapeId = null,
-                selectedNoteId = null,
-                pendingShapeType = null,
-                pendingStickyNoteColor = null,
+                selectedStrokeId = if (openImmediately) null else it.selectedStrokeId,
+                selectedShapeId = if (openImmediately) null else it.selectedShapeId,
+                selectedNoteId = if (openImmediately) null else it.selectedNoteId,
+                selectedStrokeIds = if (openImmediately) emptySet() else it.selectedStrokeIds,
+                selectedShapeIds = if (openImmediately) emptySet() else it.selectedShapeIds,
+                selectedNoteIds = if (openImmediately) emptySet() else it.selectedNoteIds,
+                pendingShapeType = if (openImmediately) null else it.pendingShapeType,
+                pendingStickyNoteColor = if (openImmediately) null else it.pendingStickyNoteColor,
                 canUndo = if (openImmediately) false else it.canUndo,
                 canRedo = if (openImmediately) false else it.canRedo,
                 panX = if (openImmediately) 0f else it.panX,
                 panY = if (openImmediately) 0f else it.panY,
-                scale = if (openImmediately) 1.0f else it.scale
+                scale = if (openImmediately) 1.0f else it.scale,
+                shouldAutoOpenTemplatePicker = if (openImmediately) it.showTemplatesOnNewBoard else it.shouldAutoOpenTemplatePicker
             )
         }
     }
@@ -1565,7 +2228,10 @@ class WhiteboardViewModel : ViewModel() {
             }.copy(
                 selectedStrokeId = null,
                 selectedShapeId = null,
-                selectedNoteId = null
+                selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet()
             )
         }
     }
@@ -1599,7 +2265,10 @@ class WhiteboardViewModel : ViewModel() {
             it.withUpdatedBoard { restored }.copy(
                 selectedStrokeId = null,
                 selectedShapeId = null,
-                selectedNoteId = null
+                selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet()
             )
         }
         return true
@@ -1638,7 +2307,11 @@ class WhiteboardViewModel : ViewModel() {
                 canUndo = undoStack.isNotEmpty(),
                 canRedo = true,
                 selectedStrokeId = null,
-                selectedShapeId = null
+                selectedShapeId = null,
+                selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet()
             )
         }
     }
@@ -1659,7 +2332,13 @@ class WhiteboardViewModel : ViewModel() {
                 )
             }.copy(
                 canUndo = true,
-                canRedo = redoStack.isNotEmpty()
+                canRedo = redoStack.isNotEmpty(),
+                selectedStrokeId = null,
+                selectedShapeId = null,
+                selectedNoteId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = emptySet()
             )
         }
     }
@@ -1674,6 +2353,10 @@ class WhiteboardViewModel : ViewModel() {
 
     fun setPenStyle(style: StrokeStyle) {
         _uiState.update { it.copy(penStyle = style) }
+    }
+
+    fun setPenCapStyle(capStyle: LineCapStyle) {
+        _uiState.update { it.copy(penCapStyle = capStyle) }
     }
 
     fun toggleAutoShapeRecognition() {

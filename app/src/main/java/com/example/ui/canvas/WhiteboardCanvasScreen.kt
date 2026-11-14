@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
@@ -22,9 +23,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -38,30 +46,43 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.ink.IdeationTemplateFactory
 import com.example.ink.StrokeStabilizer
+import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
+import com.example.model.isLineLike
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
+import com.example.model.StrokeStyle
 import com.example.model.ToolType
 import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.WhiteboardPenDock
@@ -71,6 +92,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private enum class CanvasGestureMode {
@@ -101,11 +123,20 @@ fun WhiteboardCanvasScreen(
     var showTemplatePicker by remember { mutableStateOf(false) }
     var showBackgroundSettings by remember { mutableStateOf(false) }
     var showBoardsManager by remember { mutableStateOf(false) }
-    var showSnapshotsModal by remember { mutableStateOf(false) }
     var showExportModal by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
+    var editingLabelText by remember { mutableStateOf("") }
     var newTitleInput by remember { mutableStateOf(state.board.title) }
     var canvasSizePx by remember { mutableStateOf(IntSize(1080, 1920)) }
+    val density = LocalDensity.current
+
+    LaunchedEffect(state.shouldAutoOpenTemplatePicker) {
+        if (state.shouldAutoOpenTemplatePicker) {
+            showTemplatePicker = true
+            viewModel.consumeAutoOpenTemplatePicker()
+        }
+    }
 
     var pendingDragStart by remember { mutableStateOf<StrokePoint?>(null) }
     var pendingDragEnd by remember { mutableStateOf<StrokePoint?>(null) }
@@ -118,12 +149,37 @@ fun WhiteboardCanvasScreen(
     var lastDrawMoveMs by remember { mutableLongStateOf(0L) }
     var snappedDuringHold by remember { mutableStateOf(false) }
 
+    val hasAnimatedContent = state.penStyle == StrokeStyle.ANIMATED_PULSE ||
+        state.pendingStrokeStyle == StrokeStyle.ANIMATED_PULSE ||
+        state.board.strokes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE } ||
+        state.board.shapes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE }
+    var animPhase by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(hasAnimatedContent) {
+        if (hasAnimatedContent) {
+            var startMs = -1L
+            while (true) {
+                withFrameMillis { frameMs ->
+                    if (startMs < 0L) startMs = frameMs
+                    val elapsed = (frameMs - startMs) % 1200L
+                    animPhase = elapsed / 1200f
+                }
+            }
+        } else {
+            animPhase = 0f
+        }
+    }
+
     // Hold-still Snap-to-shape (~480ms at stroke end converts crooked circles/lines into clean geometry)
     LaunchedEffect(isDrawingGestureActive, lastDrawMoveMs) {
         if (isDrawingGestureActive && !snappedDuringHold) {
             delay(480L)
             val tool = viewModel.uiState.value.currentTool
-            val isSnapEligible = tool == ToolType.PEN || tool == ToolType.PENCIL || tool == ToolType.FINE_MARKER
+            val isSnapEligible = tool == ToolType.PEN ||
+                tool == ToolType.PENCIL ||
+                tool == ToolType.FINE_MARKER ||
+                tool == ToolType.BRUSH ||
+                tool == ToolType.HIGHLIGHTER
             if (isDrawingGestureActive && isSnapEligible && localActivePoints.size >= 6) {
                 val snapped = viewModel.commitSnapToShapeFromPoints(localActivePoints.toList())
                 if (snapped) {
@@ -140,24 +196,54 @@ fun WhiteboardCanvasScreen(
         Color.White
     }
 
+    val isPanOnlyMode = state.currentTool == ToolType.HAND &&
+        state.pendingStickyNoteColor == null &&
+        state.pendingShapeType == null
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(canvasBg)
-            .onSizeChanged { canvasSizePx = it }
+            .onSizeChanged { newSize ->
+                canvasSizePx = newSize
+                viewModel.onViewportSizeChanged(newSize.width.toFloat(), newSize.height.toFloat())
+            }
             .testTag("whiteboard_screen")
     ) {
         val screenWidthPx = canvasSizePx.width.toFloat().coerceAtLeast(1f)
         val screenHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f)
 
-        // Main Drawing Canvas
-        Canvas(
+        // Global Camera / Viewport Transform Layer (handles 2-finger pinch-to-zoom & pan over both canvas and sticky notes)
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .testTag("infinite_canvas")
-                .pointerInput(state.currentTool) {
+                .pointerInput("global_viewport_multitouch") {
                     awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val activePointers = event.changes.filter { it.pressed }
+                            if (activePointers.size >= 2) {
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                val centroid = event.calculateCentroid(useCurrent = true)
+                                val fx = if (centroid != Offset.Unspecified) centroid.x else null
+                                val fy = if (centroid != Offset.Unspecified) centroid.y else null
+                                viewModel.onPanZoom(pan.x, pan.y, zoom, fx, fy)
+                                event.changes.forEach { it.consume() }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
+        ) {
+            // Main Drawing Canvas
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("infinite_canvas")
+                    .pointerInput(state.currentTool) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
                         var isMultiTouch = false
                         var gestureMode = CanvasGestureMode.NONE
                         var activeHandleIndex = -1
@@ -178,18 +264,20 @@ fun WhiteboardCanvasScreen(
                             curState.currentTool == ToolType.HIGHLIGHTER ||
                             curState.currentTool == ToolType.BRUSH
 
-                        val activeShape = curState.board.shapes.find { it.id == curState.selectedShapeId }
+                        val activeShape = curState.board.shapes.find { it.id == curState.selectedShapeId && !it.isLocked && !it.isHiddenByCollapse }
                         val activeStroke = curState.board.strokes.find { it.id == curState.selectedStrokeId }
 
                         val hitSelectedShape = curState.board.shapes.any { s ->
+                            !s.isLocked && !s.isHiddenByCollapse &&
                             (s.id == curState.selectedShapeId || curState.selectedShapeIds.contains(s.id)) &&
                             isPointHittingShape(s, wX, wY, hitTolerance)
                         }
                         val hitSelectedStroke = curState.board.strokes.any { s ->
                             (s.id == curState.selectedStrokeId || curState.selectedStrokeIds.contains(s.id)) &&
-                            s.points.any { p -> hypot(p.x - wX, p.y - wY) < hitTolerance }
+                            isPointHittingStroke(s, wX, wY, hitTolerance)
                         }
                         val hitSelectedNote = curState.board.stickyNotes.any { n ->
+                            !n.isLocked && !n.isHiddenByCollapse &&
                             (n.id == curState.selectedNoteId || curState.selectedNoteIds.contains(n.id)) &&
                             wX >= n.x && wX <= (n.x + n.width) && wY >= n.y && wY <= (n.y + n.height)
                         }
@@ -201,24 +289,27 @@ fun WhiteboardCanvasScreen(
                             pendingDragStart = startPt
                             pendingDragEnd = startPt
                             gestureMode = CanvasGestureMode.PLACE_SHAPE
+                        } else if (curState.currentTool == ToolType.HAND) {
+                            // Standalone Hand button: strictly pan-only, disable any accidental object selection/drag
+                            gestureMode = CanvasGestureMode.PAN
                         } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance) != -1) {
                             activeHandleIndex = getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance)
                             gestureMode = CanvasGestureMode.RESIZE_SHAPE
                         } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance) != -1) {
                             activeHandleIndex = getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance)
                             gestureMode = CanvasGestureMode.RESIZE_STROKE
-                        } else if ((curState.currentTool == ToolType.SELECT_LASSO || curState.currentTool == ToolType.HAND) &&
+                        } else if (curState.currentTool == ToolType.SELECT_LASSO &&
                             (hitSelectedShape || hitSelectedStroke || hitSelectedNote)
                         ) {
                             gestureMode = CanvasGestureMode.MOVE_SHAPE
                         } else if (activeShape != null &&
-                            (curState.currentTool == ToolType.SELECT_LASSO || curState.currentTool == ToolType.HAND) &&
+                            curState.currentTool == ToolType.SELECT_LASSO &&
                             isPointHittingShape(activeShape, wX, wY, hitTolerance)
                         ) {
                             gestureMode = CanvasGestureMode.MOVE_SHAPE
                         } else if (activeStroke != null &&
-                            (curState.currentTool == ToolType.SELECT_LASSO || curState.currentTool == ToolType.HAND) &&
-                            activeStroke.points.any { p -> hypot(p.x - wX, p.y - wY) < hitTolerance }
+                            curState.currentTool == ToolType.SELECT_LASSO &&
+                            isPointHittingStroke(activeStroke, wX, wY, hitTolerance)
                         ) {
                             gestureMode = CanvasGestureMode.MOVE_STROKE
                         } else if (isDrawingTool) {
@@ -247,15 +338,17 @@ fun WhiteboardCanvasScreen(
                             }
                             gestureMode = CanvasGestureMode.ERASE_PIXEL
                         } else {
-                            // Hit test topmost shapes, notes, strokes
+                            // Hit test topmost unlocked & visible shapes, notes, strokes
                             val hitShape = curState.board.shapes.lastOrNull { s ->
+                                !s.isLocked && !s.isHiddenByCollapse &&
                                 isPointHittingShape(s, wX, wY, hitTolerance)
                             }
                             val hitNote = curState.board.stickyNotes.lastOrNull { n ->
+                                !n.isLocked && !n.isHiddenByCollapse &&
                                 wX >= n.x && wX <= (n.x + n.width) && wY >= n.y && wY <= (n.y + n.height)
                             }
                             val hitStroke = curState.board.strokes.lastOrNull { s ->
-                                s.points.any { p -> hypot(p.x - wX, p.y - wY) < (24f / curState.scale) }
+                                isPointHittingStroke(s, wX, wY, (24f / curState.scale))
                             }
 
                             if (hitShape != null) {
@@ -281,18 +374,12 @@ fun WhiteboardCanvasScreen(
                             val event = awaitPointerEvent()
                             val activePointers = event.changes.filter { it.pressed }
 
-                            if (activePointers.size >= 2) {
+                            if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
                                 isMultiTouch = true
                                 isDrawingGestureActive = false
                                 localActivePoints.clear()
                                 localLassoPoints.clear()
                                 pixelEraserCursorWorld = null
-
-                                val zoom = event.calculateZoom()
-                                val pan = event.calculatePan()
-                                viewModel.onPanZoom(pan.x, pan.y, zoom)
-
-                                event.changes.forEach { it.consume() }
                             } else if (activePointers.size == 1 && !isMultiTouch) {
                                 val change = activePointers.first()
                                 val liveState = viewModel.uiState.value
@@ -393,8 +480,10 @@ fun WhiteboardCanvasScreen(
                                         val nwX = (change.position.x - liveState.panX) / liveState.scale
                                         val nwY = (change.position.y - liveState.panY) / liveState.scale
                                         val eraseRadius = (liveState.penWidth * 2.2f).coerceIn(14f, 36f) / liveState.scale
-                                        pixelEraserCursorWorld = StrokePoint(nwX, nwY)
-                                        if (viewModel.erasePixelAt(nwX, nwY, eraseRadius, saveSnapshot = !hasTransformed)) {
+                                        val prevCursor = pixelEraserCursorWorld ?: StrokePoint(nwX, nwY)
+                                        val nextCursor = StrokePoint(nwX, nwY)
+                                        pixelEraserCursorWorld = nextCursor
+                                        if (viewModel.erasePixelSegment(prevCursor, nextCursor, eraseRadius, saveSnapshot = !hasTransformed)) {
                                             hasTransformed = true
                                         }
                                         change.consume()
@@ -451,6 +540,7 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
+                    animPhase = animPhase,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard
                 )
@@ -466,6 +556,7 @@ fun WhiteboardCanvasScreen(
                     isHighlighter = activeBrush == StrokeBrushType.HIGHLIGHTER,
                     isRainbow = state.isRainbowPen && activeBrush != StrokeBrushType.HIGHLIGHTER && activeBrush != StrokeBrushType.SOFT_BRUSH,
                     strokeStyle = state.penStyle,
+                    capStyle = state.penCapStyle,
                     brushType = activeBrush,
                     opacity = activeBrush.defaultOpacity
                 )
@@ -474,6 +565,7 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
+                    animPhase = animPhase,
                     isDarkBoard = isDarkBoard
                 )
             }
@@ -520,7 +612,9 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
-                    isSelected = isSelected
+                    animPhase = animPhase,
+                    isSelected = isSelected,
+                    isDarkBoard = isDarkBoard
                 )
             }
 
@@ -538,16 +632,23 @@ fun WhiteboardCanvasScreen(
                     strokeColorHex = state.pendingStrokeColor,
                     fillColorHex = state.pendingFillColor,
                     strokeWidth = state.penWidth.coerceIn(2f, 16f),
-                    isFilled = state.pendingIsFilled && state.pendingShapeType != ShapeType.LINE,
+                    isFilled = state.pendingIsFilled && !state.pendingShapeType!!.isLineLike,
                     strokeStyle = state.pendingStrokeStyle,
-                    vertices = if (state.pendingShapeType == ShapeType.LINE) listOf(pStart, pEnd) else emptyList()
+                    capStyle = when (state.pendingShapeType!!) {
+                        ShapeType.ARROW -> LineCapStyle.END_ARROW
+                        ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
+                        else -> state.pendingCapStyle
+                    },
+                    vertices = if (state.pendingShapeType!!.isLineLike) listOf(pStart, pEnd) else emptyList()
                 )
                 drawShapeVector(
                     shape = previewShape,
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
-                    isSelected = true
+                    animPhase = animPhase,
+                    isSelected = true,
+                    isDarkBoard = isDarkBoard
                 )
             }
 
@@ -566,8 +667,187 @@ fun WhiteboardCanvasScreen(
             drawLaserTrail(state.laserTrail)
         }
 
-        // Render Sticky Notes
-        state.board.stickyNotes.forEach { note ->
+        // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
+        state.board.textItems.forEach { tItem ->
+            if (tItem.isHiddenByCollapse) return@forEach
+            val sx = (tItem.x * state.scale + state.panX).roundToInt()
+            val sy = (tItem.y * state.scale + state.panY).roundToInt()
+            val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
+            val widthDp = with(density) { (tItem.width * state.scale).coerceAtLeast(80f).toDp() }
+            val fontSizeSp = (tItem.fontSize * state.scale).coerceIn(10f, 28f).sp
+
+            if (tItem.isLocked) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(sx, sy) }
+                        .widthIn(min = widthDp, max = widthDp)
+                        .testTag("locked_text_item_${tItem.id}")
+                ) {
+                    Text(
+                        text = tItem.text,
+                        color = tColor,
+                        fontSize = fontSizeSp,
+                        fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium,
+                        lineHeight = (fontSizeSp.value * 1.25f).sp
+                    )
+                }
+            } else {
+                val cardBg = tItem.backgroundColorHex?.let { parseColor(it, Color.White) } ?: Color.White
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = cardBg,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(sx, sy) }
+                        .width(widthDp)
+                        .border(1.5.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
+                        .testTag("editable_text_item_${tItem.id}")
+                ) {
+                    BasicTextField(
+                        value = tItem.text,
+                        onValueChange = { viewModel.updateTextItem(tItem.id, it) },
+                        enabled = !isPanOnlyMode,
+                        readOnly = isPanOnlyMode,
+                        textStyle = TextStyle(
+                            color = tColor,
+                            fontSize = fontSizeSp,
+                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(tColor),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .testTag("editable_text_input_${tItem.id}")
+                    )
+                }
+            }
+        }
+
+        // Render Interactive Template Overlays (+ branch on cluster center, collapse chip on concept nodes, + note in columns, edit label)
+        state.board.shapes.forEach { shape ->
+            if (shape.isHiddenByCollapse) return@forEach
+            val shapeScreenRight = ((shape.x + shape.width) * state.scale + state.panX).roundToInt()
+            val shapeScreenCenterX = ((shape.x + shape.width / 2f) * state.scale + state.panX).roundToInt()
+            val shapeScreenTop = (shape.y * state.scale + state.panY).roundToInt()
+            val shapeScreenBottom = ((shape.y + shape.height) * state.scale + state.panY).roundToInt()
+
+            if (shape.templateRole == "CLUSTER_CENTER") {
+                val offsetPx = with(density) { 18.dp.roundToPx() }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(shapeScreenRight - offsetPx, shapeScreenBottom - offsetPx * 2) }
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable { viewModel.addClusterBranch(shape.id) }
+                        .testTag("cluster_add_branch_${shape.id}")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Agregar rama al cluster",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            if (shape.templateRole == "CONCEPT_NODE") {
+                val hasChildren = state.board.shapes.any { it.parentId == shape.id && it.templateRole != "CONCEPT_CONNECTOR" } ||
+                    state.board.stickyNotes.any { it.parentId == shape.id }
+                if (hasChildren) {
+                    val hiddenCount = if (shape.isCollapsed) IdeationTemplateFactory.countHiddenDescendants(state.board, shape.id) else 0
+                    val badgeHalfW = with(density) { 18.dp.roundToPx() }
+                    val badgeHalfH = with(density) { 12.dp.roundToPx() }
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (shape.isCollapsed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                        contentColor = if (shape.isCollapsed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+                        shadowElevation = 3.dp,
+                        modifier = Modifier
+                            .offset { IntOffset(shapeScreenCenterX - badgeHalfW, shapeScreenBottom - badgeHalfH) }
+                            .heightIn(min = 24.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { viewModel.toggleConceptBranchCollapse(shape.id) }
+                            .testTag("concept_toggle_collapse_${shape.id}")
+                    ) {
+                        Text(
+                            text = if (shape.isCollapsed) "+$hiddenCount" else "−",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            if (shape.templateRole == "COLUMN_CONTAINER") {
+                val btnMargin = with(density) { 38.dp.roundToPx() }
+                val topPad = with(density) { 8.dp.roundToPx() }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(shapeScreenRight - btnMargin, shapeScreenTop + topPad) }
+                        .size(28.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                        .clip(CircleShape)
+                        .clickable { viewModel.addNoteToColumn(shape.id) }
+                        .testTag("column_add_note_${shape.id}")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Agregar nota a columna",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+
+            if (shape.id == state.selectedShapeId && shape.label.isNotBlank() && shape.shapeType != ShapeType.LINE) {
+                val editHalfW = with(density) { 18.dp.roundToPx() }
+                val editTop = with(density) { 32.dp.roundToPx() }
+                Surface(
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(shapeScreenCenterX - editHalfW, shapeScreenTop - editTop) }
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            editingLabelShape = shape
+                            editingLabelText = shape.label
+                        }
+                        .testTag("edit_shape_label_${shape.id}")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Editar etiqueta de forma",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Render Sticky Notes (unselected first, selected last so resize handles sit cleanly on top)
+        val orderedNotes = state.board.stickyNotes
+            .filter { !it.isHiddenByCollapse }
+            .sortedBy { n ->
+                if (n.id == state.selectedNoteId || state.selectedNoteIds.contains(n.id)) 1 else 0
+            }
+
+        orderedNotes.forEach { note ->
             val isSelected = note.id == state.selectedNoteId || state.selectedNoteIds.contains(note.id)
             StickyNoteView(
                 note = note,
@@ -575,21 +855,52 @@ fun WhiteboardCanvasScreen(
                 panX = state.panX,
                 panY = state.panY,
                 isSelected = isSelected,
+                isPanOnlyMode = isPanOnlyMode,
+                onSelect = { viewModel.selectNote(note.id) },
+                onBeginTransform = { viewModel.beginTransformSnapshot() },
                 onUpdateText = { viewModel.updateStickyNoteText(note.id, it) },
                 onUpdateColor = { viewModel.updateStickyNoteColor(note.id, it) },
                 onTogglePin = { viewModel.toggleStickyNotePin(note.id) },
                 onDelete = { viewModel.deleteStickyNote(note.id) },
                 onDragDelta = { dx, dy ->
                     if (state.selectedNoteIds.contains(note.id) && (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1) {
-                        viewModel.moveSelectedObjects(dx, dy)
+                        viewModel.moveSelectedObjects(dx / state.scale, dy / state.scale)
                     } else {
                         viewModel.moveStickyNote(note.id, dx, dy)
                     }
+                },
+                onResizeHandle = { handle, dxScreen, dyScreen ->
+                    viewModel.resizeStickyNoteHandle(note.id, handle, dxScreen, dyScreen)
                 }
             )
         }
 
-        // Interactive Ruler below handles this cleanly; old antiquated selection banner removed in favor of bottom SelectionEditDock
+        // Strict pan-only touch shield when standalone Hand tool is active: prevents any accidental object selection/editing
+        if (isPanOnlyMode) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput("pan_only_shield") {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                val activePointers = event.changes.filter { it.pressed }
+                                if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                                    break
+                                }
+                                val pan = event.calculatePan()
+                                if (pan != Offset.Zero) {
+                                    viewModel.onPanZoom(pan.x, pan.y, 1.0f)
+                                }
+                                event.changes.forEach { it.consume() }
+                            } while (event.changes.any { it.pressed })
+                        }
+                    }
+                    .testTag("pan_only_overlay")
+            )
+        }
+        } // End Global Viewport Box
 
         // Interactive Ruler
         InteractiveRulerView(
@@ -620,7 +931,6 @@ fun WhiteboardCanvasScreen(
                 onEnterZenMode = { viewModel.toggleZenMode() },
                 onOpenBoardsManager = { showBoardsManager = true },
                 onOpenBackgroundSettings = { showBackgroundSettings = true },
-                onOpenSnapshotModal = { showSnapshotsModal = true },
                 onClearBoard = { viewModel.clearBoard() },
                 onExportBoard = { showExportModal = true },
                 onRenameBoard = {
@@ -648,22 +958,10 @@ fun WhiteboardCanvasScreen(
                     selectedNote = selectedNote,
                     totalSelectedCount = totalSelectedCount.coerceAtLeast(1),
                     onDeleteAll = { viewModel.deleteCurrentSelection() },
-                    onDuplicateAll = {
-                        viewModel.duplicateSelectedStroke()
-                        viewModel.duplicateSelectedShape()
-                    },
-                    onScaleAll = { factor ->
-                        viewModel.scaleSelectedStroke(factor)
-                        viewModel.scaleSelectedShape(factor)
-                    },
-                    onRotateAll = { delta ->
-                        viewModel.rotateSelectedStroke(delta)
-                        viewModel.rotateSelectedShape(delta)
-                    },
-                    onUpdateAllColor = { col ->
-                        viewModel.updateSelectedStrokeColor(col)
-                        viewModel.updateSelectedShape(strokeColor = col)
-                    },
+                    onDuplicateAll = { viewModel.duplicateCurrentSelection() },
+                    onScaleAll = { factor -> viewModel.scaleCurrentSelection(factor) },
+                    onRotateAll = { delta -> viewModel.rotateCurrentSelection(delta) },
+                    onUpdateAllColor = { col -> viewModel.updateCurrentSelectionColor(col) },
                     onUpdateShapeColor = { viewModel.updateSelectedShape(strokeColor = it) },
                     onUpdateShapeFillColor = { viewModel.updateSelectedShape(fillColor = it, isFilled = true) },
                     onToggleShapeFilled = {
@@ -672,6 +970,7 @@ fun WhiteboardCanvasScreen(
                     },
                     onUpdateShapeWidth = { viewModel.updateSelectedShape(width = it) },
                     onUpdateShapeStyle = { viewModel.updateSelectedShape(style = it) },
+                    onUpdateShapeCapStyle = { viewModel.updateSelectedShape(capStyle = it) },
                     onScaleShape = { viewModel.scaleSelectedShape(it) },
                     onRotateShape = { viewModel.rotateSelectedShape(it) },
                     onResetShapeRotation = { viewModel.resetSelectedShapeRotation() },
@@ -682,6 +981,7 @@ fun WhiteboardCanvasScreen(
                     onUpdateStrokeColor = { viewModel.updateSelectedStrokeColor(it) },
                     onUpdateStrokeWidth = { viewModel.updateSelectedStrokeWidth(it) },
                     onUpdateStrokeStyle = { viewModel.updateSelectedStrokeStyle(it) },
+                    onUpdateStrokeCapStyle = { viewModel.updateSelectedStrokeCapStyle(it) },
                     onScaleStroke = { viewModel.scaleSelectedStroke(it) },
                     onRotateStroke = { viewModel.rotateSelectedStroke(it) },
                     onConvertStrokeToShape = { viewModel.convertSelectedStrokeToShape() },
@@ -692,6 +992,9 @@ fun WhiteboardCanvasScreen(
                     },
                     onToggleNotePin = {
                         selectedNote?.let { viewModel.toggleStickyNotePin(it.id) }
+                    },
+                    onToggleNoteAspectRatioLock = {
+                        selectedNote?.let { viewModel.toggleStickyNoteAspectRatioLock(it.id) }
                     },
                     onDeleteNote = { viewModel.deleteSelectedNote() },
                     onDone = { viewModel.clearSelection() },
@@ -705,6 +1008,7 @@ fun WhiteboardCanvasScreen(
                     currentPenColor = state.penColorHex,
                     currentPenWidth = state.penWidth,
                     currentPenStyle = state.penStyle,
+                    currentPenCapStyle = state.penCapStyle,
                     isRainbowPen = state.isRainbowPen,
                     autoShapeRecognition = state.autoShapeRecognition,
                     isRulerActive = state.isRulerActive,
@@ -716,6 +1020,7 @@ fun WhiteboardCanvasScreen(
                     onUpdatePenColor = { col, isRainbow -> viewModel.setPenColor(col, isRainbow) },
                     onUpdatePenWidth = { viewModel.setPenWidth(it) },
                     onUpdatePenStyle = { viewModel.setPenStyle(it) },
+                    onUpdatePenCapStyle = { viewModel.setPenCapStyle(it) },
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
                     onOpenShapePicker = { showShapePicker = true },
@@ -826,8 +1131,10 @@ fun WhiteboardCanvasScreen(
         if (showShapePicker) {
             ShapePickerBottomSheet(
                 initialColorHex = state.penColorHex,
-                onSelectShapeType = { shapeType, isFilled, strokeColor, fillColor, style ->
-                    viewModel.requestAddCustomShape(shapeType, isFilled, strokeColor, fillColor, style)
+                initialStrokeStyle = state.penStyle,
+                initialCapStyle = state.penCapStyle,
+                onSelectShapeType = { shapeType, isFilled, strokeColor, fillColor, style, capStyle ->
+                    viewModel.requestAddCustomShape(shapeType, isFilled, strokeColor, fillColor, style, capStyle)
                 },
                 onDismiss = { showShapePicker = false }
             )
@@ -835,8 +1142,35 @@ fun WhiteboardCanvasScreen(
 
         if (showTemplatePicker) {
             TemplatePickerModal(
+                showOnNewBoard = state.showTemplatesOnNewBoard,
+                onToggleShowOnNewBoard = { viewModel.toggleShowTemplatesOnNewBoard(it) },
+                onStartBlankCanvas = {
+                    val hasAny = state.board.strokes.isNotEmpty() ||
+                        state.board.shapes.isNotEmpty() ||
+                        state.board.stickyNotes.isNotEmpty() ||
+                        state.board.textItems.isNotEmpty()
+                    if (hasAny) {
+                        viewModel.clearBoard()
+                    }
+                    showTemplatePicker = false
+                },
                 onSelectTemplate = { viewModel.applyTemplate(it, screenWidthPx, screenHeightPx) },
-                onDismiss = { showTemplatePicker = false }
+                onDismiss = { showTemplatePicker = false },
+                customTemplates = state.customTemplates,
+                currentBoardTitle = state.board.title,
+                onSaveCurrentAsTemplate = { title, desc ->
+                    val saved = viewModel.saveCurrentBoardAsTemplate(title, desc)
+                    Toast.makeText(context, "Plantilla '${saved.title}' guardada", Toast.LENGTH_SHORT).show()
+                },
+                onSelectCustomTemplate = { tmpl ->
+                    val ok = viewModel.applyCustomTemplate(tmpl)
+                    if (!ok) {
+                        Toast.makeText(context, "No se pudo aplicar esta plantilla", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDeleteCustomTemplate = { templateId ->
+                    viewModel.deleteCustomTemplate(templateId)
+                }
             )
         }
 
@@ -847,27 +1181,6 @@ fun WhiteboardCanvasScreen(
                 onSelectGrid = { viewModel.setGridType(it) },
                 onSelectColorTheme = { viewModel.setColorTheme(it) },
                 onDismiss = { showBackgroundSettings = false }
-            )
-        }
-
-        if (showSnapshotsModal) {
-            SnapshotsModal(
-                board = state.board,
-                onCreateSnapshot = { version, desc ->
-                    viewModel.createSnapshot(version, desc)
-                    Toast.makeText(context, "Snapshot '$version' guardado", Toast.LENGTH_SHORT).show()
-                },
-                onRestoreSnapshot = { snap ->
-                    val ok = viewModel.restoreSnapshot(snap)
-                    if (ok) {
-                        Toast.makeText(context, "Snapshot '${snap.versionName}' restaurado", Toast.LENGTH_SHORT).show()
-                        showSnapshotsModal = false
-                    } else {
-                        Toast.makeText(context, "No se pudo restaurar este snapshot", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDeleteSnapshot = { viewModel.deleteSnapshot(it) },
-                onDismiss = { showSnapshotsModal = false }
             )
         }
 
@@ -912,6 +1225,39 @@ fun WhiteboardCanvasScreen(
                 }
             )
         }
+        if (editingLabelShape != null) {
+            AlertDialog(
+                onDismissRequest = { editingLabelShape = null },
+                title = { Text("Editar texto del nodo") },
+                text = {
+                    OutlinedTextField(
+                        value = editingLabelText,
+                        onValueChange = { editingLabelText = it },
+                        label = { Text("Etiqueta") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("input_shape_label")
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            editingLabelShape?.let { viewModel.updateShapeLabel(it.id, editingLabelText.trim()) }
+                            editingLabelShape = null
+                        }
+                    ) {
+                        Text("Guardar")
+                    }
+                },
+                dismissButton = {
+                    Button(
+                        onClick = { editingLabelShape = null },
+                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
+                    ) {
+                        Text("Cancelar")
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -933,9 +1279,13 @@ private fun getShapeHandleHitIndex(
     wY: Float,
     tolerance: Float
 ): Int {
-    if (shape.shapeType == ShapeType.LINE && shape.vertices.size >= 2) {
-        if (hypot(wX - shape.vertices[0].x, wY - shape.vertices[0].y) <= tolerance) return 0
-        if (hypot(wX - shape.vertices[1].x, wY - shape.vertices[1].y) <= tolerance) return 1
+    if (shape.shapeType.isLineLike && shape.vertices.size >= 2) {
+        val p0 = shape.vertices[0]
+        val p1 = shape.vertices[1]
+        if (hypot(wX - p0.x, wY - p0.y) <= tolerance) return 0
+        if (hypot(wX - p1.x, wY - p1.y) <= tolerance) return 1
+        if (hypot(wX - p0.x, wY - (p0.y - 32f)) <= tolerance) return 2
+        if (hypot(wX - p1.x, wY - (p1.y - 32f)) <= tolerance) return 3
         return -1
     }
     val (lx, ly) = toLocalUnrotated(shape, wX, wY)
@@ -980,8 +1330,13 @@ private fun isPointHittingShape(
     wY: Float,
     tolerance: Float
 ): Boolean {
-    if (shape.shapeType == ShapeType.LINE && shape.vertices.size >= 2) {
-        return distanceToSegment(wX, wY, shape.vertices[0], shape.vertices[1]) <= tolerance
+    if (shape.shapeType.isLineLike && shape.vertices.size >= 2) {
+        for (i in 0 until shape.vertices.lastIndex) {
+            if (distanceToSegment(wX, wY, shape.vertices[i], shape.vertices[i + 1]) <= tolerance) {
+                return true
+            }
+        }
+        return false
     }
     val (lx, ly) = toLocalUnrotated(shape, wX, wY)
     if (shape.vertices.size >= 3) {
@@ -995,6 +1350,22 @@ private fun isPointHittingShape(
         lx <= (shape.x + shape.width + tolerance) &&
         ly >= (shape.y - tolerance) &&
         ly <= (shape.y + shape.height + tolerance)
+}
+
+private fun isPointHittingStroke(
+    stroke: WhiteboardStroke,
+    wX: Float,
+    wY: Float,
+    tolerance: Float
+): Boolean {
+    val pts = stroke.points
+    if (pts.isEmpty()) return false
+    val effTol = tolerance + stroke.width * 0.4f
+    if (pts.size == 1) return hypot(pts[0].x - wX, pts[0].y - wY) <= effTol
+    for (i in 0 until pts.lastIndex) {
+        if (distanceToSegment(wX, wY, pts[i], pts[i + 1]) <= effTol) return true
+    }
+    return false
 }
 
 private fun distanceToSegment(px: Float, py: Float, a: StrokePoint, b: StrokePoint): Float {

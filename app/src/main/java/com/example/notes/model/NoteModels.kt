@@ -13,12 +13,28 @@ data class ChecklistItem(
     val isDone: Boolean = false
 )
 
+data class CanvasNoteData(
+    val boardId: String,
+    val x: Float,
+    val y: Float,
+    val width: Float = 220f,
+    val height: Float = 200f,
+    val rotation: Float = 0f,
+    val color: String = "#FFF275",
+    val isLocked: Boolean = false,
+    val isAspectRatioLocked: Boolean = false,
+    val groupId: String? = null,
+    val parentId: String? = null,
+    val isHiddenByCollapse: Boolean = false
+)
+
 data class NoteFolder(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val iconName: String = "folder",
     val colorHex: String = "#0078D4",
-    val isDefault: Boolean = false
+    val isDefault: Boolean = false,
+    val linkedBoardId: String? = null
 )
 
 data class NoteVersion(
@@ -45,6 +61,9 @@ data class NoteItem(
     val voiceAudioUri: String? = null,
     val checklists: List<ChecklistItem> = emptyList(),
     val versionHistory: List<NoteVersion> = emptyList(),
+    val canvasData: CanvasNoteData? = null,
+    val isDeleted: Boolean = false,
+    val deletedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 )

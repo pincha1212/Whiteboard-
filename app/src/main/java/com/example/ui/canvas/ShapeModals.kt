@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.model.LineCapStyle
+import com.example.model.isLineLike
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StrokeStyle
@@ -54,7 +56,9 @@ import com.example.model.StrokeStyle
 @Composable
 fun ShapePickerBottomSheet(
     initialColorHex: String = "#2563EB",
-    onSelectShapeType: (ShapeType, isFilled: Boolean, strokeColor: String, fillColor: String, style: StrokeStyle) -> Unit,
+    initialStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
+    initialCapStyle: LineCapStyle = LineCapStyle.NONE,
+    onSelectShapeType: (ShapeType, isFilled: Boolean, strokeColor: String, fillColor: String, style: StrokeStyle, capStyle: LineCapStyle) -> Unit,
     onDismiss: () -> Unit
 ) {
     val palette = listOf(
@@ -189,10 +193,17 @@ fun ShapePickerBottomSheet(
                                 .clickable {
                                     onSelectShapeType(
                                         shapeType,
-                                        isFilled && shapeType != ShapeType.LINE,
+                                        isFilled && !shapeType.isLineLike,
                                         selectedColorPair.first,
                                         selectedColorPair.second,
-                                        StrokeStyle.SOLID
+                                        initialStrokeStyle,
+                                        if (shapeType.isLineLike) {
+                                            when (shapeType) {
+                                                ShapeType.ARROW -> LineCapStyle.END_ARROW
+                                                ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
+                                                else -> initialCapStyle
+                                            }
+                                        } else LineCapStyle.NONE
                                     )
                                     onDismiss()
                                 }
@@ -210,6 +221,8 @@ fun ShapePickerBottomSheet(
                                     strokeHex = selectedColorPair.first,
                                     fillHex = selectedColorPair.second,
                                     isFilled = isFilled && shapeType != ShapeType.LINE,
+                                    strokeStyle = initialStrokeStyle,
+                                    capStyle = if (shapeType == ShapeType.LINE) initialCapStyle else LineCapStyle.NONE,
                                     modifier = Modifier.size(34.dp)
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
@@ -237,6 +250,8 @@ private fun PresetShapeGlyph(
     strokeHex: String,
     fillHex: String,
     isFilled: Boolean,
+    strokeStyle: StrokeStyle = StrokeStyle.SOLID,
+    capStyle: LineCapStyle = LineCapStyle.NONE,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
@@ -252,7 +267,9 @@ private fun PresetShapeGlyph(
             strokeColorHex = strokeHex,
             fillColorHex = fillHex,
             strokeWidth = 2.6f,
-            isFilled = isFilled
+            isFilled = isFilled,
+            strokeStyle = strokeStyle,
+            capStyle = capStyle
         )
         drawShapeVector(shape = item, panX = 0f, panY = 0f, scale = 1f, isSelected = false)
     }

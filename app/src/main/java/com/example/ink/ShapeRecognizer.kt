@@ -110,7 +110,10 @@ object ShapeRecognizer {
                     strokeColorHex = stroke.colorHex,
                     strokeWidth = stroke.width,
                     strokeStyle = stroke.strokeStyle,
-                    vertices = listOf(finalStart, finalEnd)
+                    capStyle = stroke.capStyle,
+                    vertices = listOf(finalStart, finalEnd),
+                    opacity = stroke.opacity,
+                    isRainbow = stroke.isRainbow
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.LINE,
@@ -124,7 +127,7 @@ object ShapeRecognizer {
         // ------------------------------------------------------------------
         // 2. CLOSED SHAPE CHECK (open curves / crescents stop right here)
         // ------------------------------------------------------------------
-        val closeLimit = max(36f, min(diag * 0.28f, rawLength * 0.22f))
+        val closeLimit = max(max(36f, stroke.width * 2.2f), min(diag * 0.28f, rawLength * 0.22f))
         if (directDist > closeLimit || min(width, height) < 20f || diag < 36f) {
             return null
         }
@@ -212,7 +215,9 @@ object ShapeRecognizer {
                     strokeColorHex = stroke.colorHex,
                     strokeWidth = stroke.width,
                     strokeStyle = stroke.strokeStyle,
-                    vertices = corners
+                    vertices = corners,
+                    opacity = stroke.opacity,
+                    isRainbow = stroke.isRainbow
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.TRIANGLE,
@@ -248,7 +253,9 @@ object ShapeRecognizer {
                 height = finalH,
                 strokeColorHex = stroke.colorHex,
                 strokeWidth = stroke.width,
-                strokeStyle = stroke.strokeStyle
+                strokeStyle = stroke.strokeStyle,
+                opacity = stroke.opacity,
+                isRainbow = stroke.isRainbow
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.CIRCLE,
@@ -275,7 +282,9 @@ object ShapeRecognizer {
                 strokeColorHex = stroke.colorHex,
                 strokeWidth = stroke.width,
                 strokeStyle = stroke.strokeStyle,
-                vertices = diamondVerts
+                vertices = diamondVerts,
+                opacity = stroke.opacity,
+                isRainbow = stroke.isRainbow
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.DIAMOND,
@@ -307,7 +316,9 @@ object ShapeRecognizer {
                 height = finalH,
                 strokeColorHex = stroke.colorHex,
                 strokeWidth = stroke.width,
-                strokeStyle = stroke.strokeStyle
+                strokeStyle = stroke.strokeStyle,
+                opacity = stroke.opacity,
+                isRainbow = stroke.isRainbow
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.RECTANGLE,

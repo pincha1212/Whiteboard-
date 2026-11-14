@@ -625,10 +625,10 @@ private fun BoardCardMiniPreview(
         val offsetY = (h - contentH * scale) / 2f - (minY - pad) * scale
 
         board.strokes.forEach { stroke ->
-            drawStrokeVector(stroke = stroke, panX = offsetX, panY = offsetY, scale = scale, isSelected = false)
+            drawStrokeVector(stroke = stroke, panX = offsetX, panY = offsetY, scale = scale, isSelected = false, isDarkBoard = board.colorTheme.isDark)
         }
         board.shapes.forEach { shape ->
-            drawShapeVector(shape = shape, panX = offsetX, panY = offsetY, scale = scale, isSelected = false)
+            drawShapeVector(shape = shape, panX = offsetX, panY = offsetY, scale = scale, isSelected = false, isDarkBoard = board.colorTheme.isDark)
         }
         board.stickyNotes.forEach { note ->
             val nx = note.x * scale + offsetX

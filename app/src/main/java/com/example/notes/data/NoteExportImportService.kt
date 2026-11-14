@@ -1,5 +1,6 @@
 package com.example.notes.data
 
+import com.example.notes.model.CanvasNoteData
 import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteFolder
 import com.example.notes.model.NoteItem
@@ -84,6 +85,7 @@ object NoteExportImportService {
             fo.put("iconName", f.iconName)
             fo.put("colorHex", f.colorHex)
             fo.put("isDefault", f.isDefault)
+            f.linkedBoardId?.let { fo.put("linkedBoardId", it) }
             foldersArray.put(fo)
         }
         root.put("folders", foldersArray)
@@ -101,6 +103,25 @@ object NoteExportImportService {
             no.put("pinHash", n.pinHash ?: "")
             no.put("isVoiceNote", n.isVoiceNote)
             no.put("voiceDurationSec", n.voiceDurationSec)
+            n.voiceAudioUri?.let { no.put("voiceAudioUri", it) }
+            no.put("isDeleted", n.isDeleted)
+            n.deletedAt?.let { no.put("deletedAt", it) }
+            n.canvasData?.let { cd ->
+                no.put("canvasData", JSONObject().apply {
+                    put("boardId", cd.boardId)
+                    put("x", cd.x.toDouble())
+                    put("y", cd.y.toDouble())
+                    put("width", cd.width.toDouble())
+                    put("height", cd.height.toDouble())
+                    put("rotation", cd.rotation.toDouble())
+                    put("color", cd.color)
+                    put("isLocked", cd.isLocked)
+                    put("isAspectRatioLocked", cd.isAspectRatioLocked)
+                    cd.groupId?.let { put("groupId", it) }
+                    cd.parentId?.let { put("parentId", it) }
+                    put("isHiddenByCollapse", cd.isHiddenByCollapse)
+                })
+            }
             no.put("createdAt", n.createdAt)
             no.put("updatedAt", n.updatedAt)
 
@@ -161,7 +182,8 @@ object NoteExportImportService {
                         name = fo.optString("name", "General"),
                         iconName = fo.optString("iconName", "folder"),
                         colorHex = fo.optString("colorHex", "#0078D4"),
-                        isDefault = fo.optBoolean("isDefault", false)
+                        isDefault = fo.optBoolean("isDefault", false),
+                        linkedBoardId = fo.optString("linkedBoardId", "").takeIf { it.isNotBlank() }
                     )
                 )
             }
@@ -215,6 +237,26 @@ object NoteExportImportService {
                 }
 
                 val pinHash = no.optString("pinHash").takeIf { it.isNotBlank() }
+                val voiceAudioUri = no.optString("voiceAudioUri", "").takeIf { it.isNotBlank() }
+                val cdObj = no.optJSONObject("canvasData")
+                val canvasData = if (cdObj != null && cdObj.optString("boardId").isNotBlank()) {
+                    CanvasNoteData(
+                        boardId = cdObj.optString("boardId"),
+                        x = cdObj.optDouble("x", 0.0).toFloat(),
+                        y = cdObj.optDouble("y", 0.0).toFloat(),
+                        width = cdObj.optDouble("width", 220.0).toFloat(),
+                        height = cdObj.optDouble("height", 200.0).toFloat(),
+                        rotation = cdObj.optDouble("rotation", 0.0).toFloat(),
+                        color = cdObj.optString("color", "#FFF275"),
+                        isLocked = cdObj.optBoolean("isLocked", false),
+                        isAspectRatioLocked = cdObj.optBoolean("isAspectRatioLocked", false),
+                        groupId = cdObj.optString("groupId", "").takeIf { it.isNotBlank() },
+                        parentId = cdObj.optString("parentId", "").takeIf { it.isNotBlank() },
+                        isHiddenByCollapse = cdObj.optBoolean("isHiddenByCollapse", false)
+                    )
+                } else null
+                val isDeleted = no.optBoolean("isDeleted", false)
+                val deletedAt = if (no.has("deletedAt")) no.optLong("deletedAt") else null
 
                 importedNotes.add(
                     NoteItem(
@@ -229,8 +271,12 @@ object NoteExportImportService {
                         pinHash = pinHash,
                         isVoiceNote = no.optBoolean("isVoiceNote", false),
                         voiceDurationSec = no.optInt("voiceDurationSec", 0),
+                        voiceAudioUri = voiceAudioUri,
                         checklists = checklists,
                         versionHistory = versions,
+                        canvasData = canvasData,
+                        isDeleted = isDeleted,
+                        deletedAt = deletedAt,
                         createdAt = no.optLong("createdAt", System.currentTimeMillis()),
                         updatedAt = no.optLong("updatedAt", System.currentTimeMillis())
                     )

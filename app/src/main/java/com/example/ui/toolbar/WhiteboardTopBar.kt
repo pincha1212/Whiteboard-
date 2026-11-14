@@ -20,7 +20,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Dashboard
@@ -74,9 +73,8 @@ fun WhiteboardTopBar(
     onSetZoomPreset: (Float) -> Unit,
     onToggleSnapToGrid: () -> Unit,
     onEnterZenMode: () -> Unit,
-    onOpenBoardsManager: () -> Unit,
+    onOpenBoardsManager: () -> Unit = {},
     onOpenBackgroundSettings: () -> Unit,
-    onOpenSnapshotModal: () -> Unit,
     onClearBoard: () -> Unit,
     onExportBoard: () -> Unit,
     onRenameBoard: () -> Unit,
@@ -396,16 +394,6 @@ fun WhiteboardTopBar(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                            DropdownMenuItem(
-                                text = { Text("Mis pizarras", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Dashboard, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                },
-                                onClick = {
-                                    showHeaderMenu = false
-                                    onOpenBoardsManager()
-                                }
-                            )
 
                             DropdownMenuItem(
                                 text = { Text("Renombrar pizarra", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
@@ -415,17 +403,6 @@ fun WhiteboardTopBar(
                                 onClick = {
                                     showHeaderMenu = false
                                     onRenameBoard()
-                                }
-                            )
-
-                            DropdownMenuItem(
-                                text = { Text("Snapshots / Versiones", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.BookmarkAdd, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                },
-                                onClick = {
-                                    showHeaderMenu = false
-                                    onOpenSnapshotModal()
                                 }
                             )
 

@@ -101,12 +101,87 @@ enum class ShapeType(val displayName: String, val category: String) {
     CYLINDER("Cilindro de Datos", "Diagrama")
 }
 
-enum class TemplateType(val title: String, val iconName: String, val description: String) {
-    KANBAN("Tablero Kanban", "view_kanban", "Columnas: Por hacer, En curso, Terminado"),
-    SWOT("Análisis DAFO", "grid_view", "Fortalezas, Oportunidades, Debilidades, Amenazas"),
-    BRAINSTORM("Lluvia de Ideas", "lightbulb", "Nodo central con racimo de notas creativas"),
-    RETROSPECTIVE("Retrospectiva Ágil", "history_edu", "Qué funcionó, qué mejorar y acciones clave"),
-    PROS_CONS("Pros y Contras", "balance", "Comparación de ventajas y desventajas")
+val ShapeType.isLineLike: Boolean
+    get() = this == ShapeType.LINE || this == ShapeType.ARROW || this == ShapeType.DOUBLE_ARROW
+
+
+enum class TemplateCategory(val title: String) {
+    RECOMMENDED("Recomendado"),
+    MY_TEMPLATES("Mis plantillas"),
+    BRAINSTORMING("Lluvia de ideas"),
+    STRATEGY("Estrategia"),
+    LEARNING("Aprendizaje"),
+    PROCESS("Procesos y flujos"),
+    PLANNING("Planificación"),
+    PROBLEM_SOLVING("Solución de problemas")
+}
+
+enum class TemplateType(
+    val title: String,
+    val iconName: String,
+    val description: String,
+    val category: TemplateCategory,
+    val isRecommended: Boolean = true,
+    val badgeText: String? = null
+) {
+    BRAINSTORM_CLUSTER(
+        title = "Lluvia de Ideas Libre (Cluster)",
+        iconName = "lightbulb",
+        description = "Nodo central + 6 notas satélite radiales con botón '+' rápido",
+        category = TemplateCategory.BRAINSTORMING,
+        isRecommended = true,
+        badgeText = "Nueva"
+    ),
+    IMPACT_EFFORT(
+        title = "Matriz Impacto / Esfuerzo",
+        iconName = "grid_view",
+        description = "Plano 2×2 (Hacer ya, Planificar, Delegar, Descartar) con ejes fijos",
+        category = TemplateCategory.STRATEGY,
+        isRecommended = true
+    ),
+    CONCEPT_MAP(
+        title = "Mapa Conceptual / Jerárquico",
+        iconName = "account_tree",
+        description = "Árbol de 3 niveles con conectores ortogonales y ramas colapsables",
+        category = TemplateCategory.LEARNING,
+        isRecommended = true
+    ),
+    USER_FLOW(
+        title = "Flujo de Usuario / Proceso",
+        iconName = "schema",
+        description = "Carriles horizontales (Swimlanes) con inicio, pasos y decisión",
+        category = TemplateCategory.PROCESS,
+        isRecommended = true
+    ),
+    RETROSPECTIVE(
+        title = "Retrospectiva / Kanban Rápido",
+        iconName = "history_edu",
+        description = "3 columnas auto-expansibles: Qué funcionó, Qué mejorar, Próximos pasos",
+        category = TemplateCategory.PLANNING,
+        isRecommended = true
+    ),
+    KANBAN(
+        title = "Kanban Rápido",
+        iconName = "view_kanban",
+        description = "3 columnas auto-expansibles: Por hacer, Haciendo, Hecho",
+        category = TemplateCategory.PLANNING,
+        isRecommended = true
+    ),
+    ISHIKAWA(
+        title = "Diagrama de Ishikawa (Causa-Efecto)",
+        iconName = "polyline",
+        description = "Espina central al Problema con 6 espinas fijas y cajas editables",
+        category = TemplateCategory.PROBLEM_SOLVING,
+        isRecommended = true,
+        badgeText = "Nueva"
+    ),
+    SWOT(
+        title = "Análisis DAFO / FODA",
+        iconName = "grid_view",
+        description = "Fortalezas, Oportunidades, Debilidades y Amenazas",
+        category = TemplateCategory.STRATEGY,
+        isRecommended = false
+    )
 }
 
 data class StrokePoint(
@@ -155,7 +230,12 @@ data class StickyNote(
     val isPinned: Boolean = false,
     val isVoiceNote: Boolean = false,
     val voiceDurationSec: Int = 0,
-    val tags: List<String> = emptyList()
+    val tags: List<String> = emptyList(),
+    val isLocked: Boolean = false,
+    val isAspectRatioLocked: Boolean = false,
+    val groupId: String? = null,
+    val parentId: String? = null,
+    val isHiddenByCollapse: Boolean = false
 )
 
 data class ImageCardItem(
@@ -185,7 +265,16 @@ data class ShapeItem(
     val strokeStyle: StrokeStyle = StrokeStyle.SOLID,
     val capStyle: LineCapStyle = LineCapStyle.NONE,
     val rotation: Float = 0f,
-    val vertices: List<StrokePoint> = emptyList()
+    val vertices: List<StrokePoint> = emptyList(),
+    val opacity: Float = 1.0f,
+    val isRainbow: Boolean = false,
+    val label: String = "",
+    val isLocked: Boolean = false,
+    val templateRole: String? = null,
+    val groupId: String? = null,
+    val parentId: String? = null,
+    val isCollapsed: Boolean = false,
+    val isHiddenByCollapse: Boolean = false
 )
 
 data class TextItem(
@@ -195,7 +284,14 @@ data class TextItem(
     val y: Float,
     val fontSize: Float = 24f,
     val colorHex: String = "#1E1E1E",
-    val isBold: Boolean = false
+    val isBold: Boolean = false,
+    val isLocked: Boolean = false,
+    val isEditableCard: Boolean = false,
+    val backgroundColorHex: String? = null,
+    val width: Float = 190f,
+    val groupId: String? = null,
+    val parentId: String? = null,
+    val isHiddenByCollapse: Boolean = false
 )
 
 data class StickerItem(
@@ -223,6 +319,18 @@ data class BoardVersionSnapshot(
     val strokeCount: Int,
     val noteCount: Int,
     val shapeCount: Int,
+    val serializedData: String
+)
+
+data class CustomBoardTemplate(
+    val id: String = UUID.randomUUID().toString(),
+    val title: String,
+    val description: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val strokeCount: Int = 0,
+    val shapeCount: Int = 0,
+    val noteCount: Int = 0,
+    val textCount: Int = 0,
     val serializedData: String
 )
 

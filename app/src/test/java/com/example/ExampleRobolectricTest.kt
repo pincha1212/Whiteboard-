@@ -1,20 +1,58 @@
 package com.example
 
 import android.content.Context
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertWidthIsAtLeast
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeRight
+import androidx.compose.ui.unit.dp
+import com.example.data.BoardExportService
+import com.example.data.BoardSnapshotSerializer
 import com.example.ink.ShapeRecognizer
+import com.example.ink.StickyNoteBounds
+import com.example.ink.StickyNoteGeometry
+import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.ViewportTransform
+import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.LineCapStyle
+import com.example.model.ShapeItem
 import com.example.model.ShapeType
+import com.example.model.StickyNote
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
+import com.example.model.TemplateCategory
+import com.example.model.TemplateType
 import com.example.model.ToolType
 import com.example.model.WhiteboardStroke
+import com.example.ui.canvas.IdeationTemplatesDialog
+import com.example.ui.canvas.StickyNoteComputedFontSpKey
+import com.example.ui.canvas.StickyNoteView
+import com.example.ui.canvas.WhiteboardCanvasScreen
+import com.example.ui.toolbar.WhiteboardPenDock
+import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -26,6 +64,9 @@ import kotlin.math.sin
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
 class ExampleRobolectricTest {
+
+  @get:Rule
+  val composeTestRule = createComposeRule()
 
   @Test
   fun `read string from context`() {
@@ -270,5 +311,954 @@ class ExampleRobolectricTest {
     viewModel.undo()
     val undone = viewModel.uiState.value.board.strokes.first()
     assertEquals(250f, undone.points.maxOf { it.x }, 0.5f)
+  }
+
+  @Test
+  fun `test advanced line styles arrow caps serialization and bitmap export`() {
+    val viewModel = WhiteboardViewModel()
+    viewModel.openBoard(viewModel.uiState.value.allBoards.first().id)
+
+    viewModel.setPenStyle(StrokeStyle.NEON_GLOW)
+    viewModel.setPenCapStyle(LineCapStyle.BOTH_ARROWS)
+    assertEquals(StrokeStyle.NEON_GLOW, viewModel.uiState.value.penStyle)
+    assertEquals(LineCapStyle.BOTH_ARROWS, viewModel.uiState.value.penCapStyle)
+
+    viewModel.commitCompletedStroke(
+      listOf(StrokePoint(40f, 80f), StrokePoint(180f, 120f), StrokePoint(280f, 90f)),
+      isHighlighter = false
+    )
+    val stroke = viewModel.uiState.value.board.strokes.last()
+    assertEquals(StrokeStyle.NEON_GLOW, stroke.strokeStyle)
+    assertEquals(LineCapStyle.BOTH_ARROWS, stroke.capStyle)
+
+    viewModel.selectStroke(stroke.id)
+    viewModel.updateSelectedStrokeStyle(StrokeStyle.RAILWAY)
+    viewModel.updateSelectedStrokeCapStyle(LineCapStyle.END_ARROW)
+    val editedStroke = viewModel.uiState.value.board.strokes.last()
+    assertEquals(StrokeStyle.RAILWAY, editedStroke.strokeStyle)
+    assertEquals(LineCapStyle.END_ARROW, editedStroke.capStyle)
+
+    viewModel.requestAddCustomShape(
+      type = ShapeType.LINE,
+      isFilled = false,
+      strokeColor = "#2563EB",
+      fillColor = "#DBEAFE",
+      style = StrokeStyle.WAVY,
+      capStyle = LineCapStyle.START_ARROW
+    )
+    viewModel.placePendingShapeInBounds(StrokePoint(60f, 220f), StrokePoint(320f, 260f))
+    val lineShape = viewModel.uiState.value.board.shapes.last()
+    assertEquals(StrokeStyle.WAVY, lineShape.strokeStyle)
+    assertEquals(LineCapStyle.START_ARROW, lineShape.capStyle)
+
+    viewModel.updateSelectedShape(style = StrokeStyle.TAPERED, capStyle = LineCapStyle.BOTH_ARROWS)
+    val updatedLineShape = viewModel.uiState.value.board.shapes.last()
+    assertEquals(StrokeStyle.TAPERED, updatedLineShape.strokeStyle)
+    assertEquals(LineCapStyle.BOTH_ARROWS, updatedLineShape.capStyle)
+
+    // Verify all 17 styles render cleanly in bitmap export
+    StrokeStyle.values().forEachIndexed { idx, s ->
+      viewModel.setPenStyle(s)
+      viewModel.setPenCapStyle(LineCapStyle.END_ARROW)
+      viewModel.commitCompletedStroke(
+        listOf(StrokePoint(20f, 300f + idx * 25f), StrokePoint(240f, 320f + idx * 25f)),
+        isHighlighter = false
+      )
+    }
+
+    val json = BoardSnapshotSerializer.serializeBoard(viewModel.uiState.value.board)
+    val restored = BoardSnapshotSerializer.deserializeIntoBoard(json, viewModel.uiState.value.board)
+    assertNotNull(restored)
+    assertEquals(StrokeStyle.RAILWAY, restored!!.strokes.first().strokeStyle)
+    assertEquals(LineCapStyle.END_ARROW, restored.strokes.first().capStyle)
+    assertEquals(StrokeStyle.TAPERED, restored.shapes.first().strokeStyle)
+    assertEquals(LineCapStyle.BOTH_ARROWS, restored.shapes.first().capStyle)
+
+    val bitmap = BoardExportService.renderBoardToBitmap(restored, includeBackground = true, includeGrid = true, maxDimensionPx = 900)
+    assertTrue(bitmap.width > 0 && bitmap.height > 0)
+  }
+
+  @Test
+  fun `test bug fixes for recognizer caps line vertex rotation multiselect reset and arrow exports`() {
+    // 1. ShapeRecognizer preserves capStyle when converting freehand straight stroke to LINE
+    val straightPts = (0..18).map { i -> StrokePoint(50f + i * 12f, 120f + i * 12f) }
+    val recognized = ShapeRecognizer.recognizeStroke(
+      WhiteboardStroke(
+        points = straightPts,
+        colorHex = "#2563EB",
+        width = 6f,
+        strokeStyle = StrokeStyle.CALLIGRAPHIC,
+        capStyle = LineCapStyle.BOTH_ARROWS
+      )
+    )
+    assertNotNull(recognized)
+    assertEquals(ShapeType.LINE, recognized!!.shapeType)
+    assertEquals(LineCapStyle.BOTH_ARROWS, recognized.shapeItem.capStyle)
+    assertEquals(StrokeStyle.CALLIGRAPHIC, recognized.shapeItem.strokeStyle)
+
+    // 2. Rotating a ShapeType.LINE rotates its vertices directly and keeps rotation == 0f
+    val viewModel = WhiteboardViewModel()
+    viewModel.requestAddCustomShape(
+      type = ShapeType.LINE,
+      isFilled = false,
+      strokeColor = "#0F172A",
+      fillColor = "#DBEAFE",
+      style = StrokeStyle.SOLID,
+      capStyle = LineCapStyle.END_ARROW
+    )
+    viewModel.placePendingShapeInBounds(StrokePoint(100f, 200f), StrokePoint(300f, 200f))
+    val initialLine = viewModel.uiState.value.board.shapes.last()
+    viewModel.selectShape(initialLine.id)
+    viewModel.rotateSelectedShape(90f)
+    val rotatedLine = viewModel.uiState.value.board.shapes.last()
+    assertEquals(0f, rotatedLine.rotation, 0.001f)
+    assertEquals(200f, rotatedLine.vertices[0].x, 0.5f)
+    assertEquals(100f, rotatedLine.vertices[0].y, 0.5f)
+    assertEquals(200f, rotatedLine.vertices[1].x, 0.5f)
+    assertEquals(300f, rotatedLine.vertices[1].y, 0.5f)
+
+    // 3. Multi-selection resets on undo/redo/clearBoard and batch operations push a single undo snapshot
+    viewModel.commitCompletedStroke(
+      listOf(StrokePoint(400f, 100f), StrokePoint(480f, 180f)),
+      isHighlighter = false
+    )
+    val selectedViaLasso = viewModel.selectByLasso(
+      listOf(
+        StrokePoint(50f, 50f),
+        StrokePoint(550f, 50f),
+        StrokePoint(550f, 350f),
+        StrokePoint(50f, 350f)
+      )
+    )
+    assertTrue(selectedViaLasso)
+    assertTrue(viewModel.uiState.value.selectedStrokeIds.isNotEmpty())
+    assertTrue(viewModel.uiState.value.selectedShapeIds.isNotEmpty())
+
+    viewModel.duplicateCurrentSelection()
+    assertEquals(2, viewModel.uiState.value.board.strokes.size)
+    assertEquals(2, viewModel.uiState.value.board.shapes.size)
+    viewModel.undo()
+    assertEquals(1, viewModel.uiState.value.board.strokes.size)
+    assertEquals(1, viewModel.uiState.value.board.shapes.size)
+    assertTrue(viewModel.uiState.value.selectedStrokeIds.isEmpty())
+    assertTrue(viewModel.uiState.value.selectedShapeIds.isEmpty())
+    assertTrue(viewModel.uiState.value.selectedNoteIds.isEmpty())
+
+    viewModel.redo()
+    assertEquals(2, viewModel.uiState.value.board.strokes.size)
+    assertTrue(viewModel.uiState.value.selectedStrokeIds.isEmpty())
+
+    viewModel.selectByLasso(
+      listOf(
+        StrokePoint(50f, 50f),
+        StrokePoint(550f, 50f),
+        StrokePoint(550f, 350f),
+        StrokePoint(50f, 350f)
+      )
+    )
+    viewModel.clearBoard()
+    assertTrue(viewModel.uiState.value.selectedStrokeIds.isEmpty())
+    assertTrue(viewModel.uiState.value.selectedShapeIds.isEmpty())
+
+    // 4. Bitmap export handles ShapeType.ARROW / DOUBLE_ARROW, 45-deg CALLIGRAPHIC, and zero-length DYNAMIC_GRADIENT safely
+    viewModel.setColorTheme(CanvasColorTheme.CHARCOAL)
+    val exportBoard = viewModel.uiState.value.board.copy(
+      strokes = listOf(
+        WhiteboardStroke(
+          points = listOf(StrokePoint(40f, 40f), StrokePoint(140f, 140f)),
+          colorHex = "#38BDF8",
+          width = 10f,
+          strokeStyle = StrokeStyle.CALLIGRAPHIC,
+          capStyle = LineCapStyle.END_ARROW
+        ),
+        WhiteboardStroke(
+          points = listOf(StrokePoint(80f, 80f), StrokePoint(80f, 80f)),
+          colorHex = "#F43F5E",
+          width = 8f,
+          strokeStyle = StrokeStyle.DYNAMIC_GRADIENT,
+          capStyle = LineCapStyle.START_ARROW
+        )
+      ),
+      shapes = listOf(
+        ShapeItem(
+          shapeType = ShapeType.ARROW,
+          x = 60f,
+          y = 200f,
+          width = 180f,
+          height = 60f,
+          strokeColorHex = "#22D3EE",
+          strokeWidth = 6f,
+          strokeStyle = StrokeStyle.NEON_GLOW
+        ),
+        ShapeItem(
+          shapeType = ShapeType.DOUBLE_ARROW,
+          x = 60f,
+          y = 290f,
+          width = 180f,
+          height = 60f,
+          strokeColorHex = "#F59E0B",
+          strokeWidth = 6f,
+          strokeStyle = StrokeStyle.RAILWAY
+        )
+      )
+    )
+    val exportBitmap = BoardExportService.renderBoardToBitmap(exportBoard, includeBackground = true, includeGrid = false, maxDimensionPx = 800)
+    assertTrue(exportBitmap.width > 0 && exportBitmap.height > 0)
+  }
+
+  @Test
+  fun `test physical icon dock has no tools dropdown and separates hand pan button`() {
+    val viewModel = WhiteboardViewModel()
+    composeTestRule.setContent {
+      val state by viewModel.uiState.collectAsState()
+      MaterialTheme {
+        WhiteboardPenDock(
+          currentTool = state.currentTool,
+          currentPenColor = state.penColorHex,
+          currentPenWidth = state.penWidth,
+          currentPenStyle = state.penStyle,
+          currentPenCapStyle = state.penCapStyle,
+          isRainbowPen = state.isRainbowPen,
+          autoShapeRecognition = state.autoShapeRecognition,
+          isRulerActive = state.isRulerActive,
+          pendingShapeType = state.pendingShapeType,
+          onSelectTool = { viewModel.setTool(it) },
+          onUpdatePenColor = { hex, rainbow -> viewModel.setPenColor(hex, rainbow) },
+          onUpdatePenWidth = { viewModel.setPenWidth(it) },
+          onUpdatePenStyle = { viewModel.setPenStyle(it) },
+          onUpdatePenCapStyle = { viewModel.setPenCapStyle(it) },
+          onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
+          onToggleRuler = { viewModel.toggleRuler() },
+          onOpenShapePicker = {},
+          onAddStickyNote = {},
+          onAddText = {},
+          onOpenTemplates = {},
+          onClearBoard = {}
+        )
+      }
+    }
+
+    // Old text-based tools dropdown must not exist
+    composeTestRule.onNodeWithTag("dock_tools_menu_button").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("dock_tools_dropdown_menu").assertDoesNotExist()
+
+    // Compact two-tier structure: upper inking tray + lower main bar + separated Hand button
+    composeTestRule.onNodeWithTag("inking_tray_card").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("dock_main_bar").assertIsDisplayed()
+    val dockBounds = composeTestRule.onNodeWithTag("whiteboard_pen_dock").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val handBounds = composeTestRule.onNodeWithTag("dock_tool_hand").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    assertTrue("Hand pan button must sit separated next to dock", handBounds.left > dockBounds.right)
+
+    // Clicking physical tool icons directly switches tools without any dropdown
+    composeTestRule.onNodeWithTag("dock_menu_tool_pencil").performScrollTo().performClick()
+    assertEquals(ToolType.PENCIL, viewModel.uiState.value.currentTool)
+
+    composeTestRule.onNodeWithTag("dock_menu_tool_fine_marker").performScrollTo().performClick()
+    assertEquals(ToolType.FINE_MARKER, viewModel.uiState.value.currentTool)
+
+    composeTestRule.onNodeWithTag("dock_menu_tool_highlighter").performScrollTo().performClick()
+    assertEquals(ToolType.HIGHLIGHTER, viewModel.uiState.value.currentTool)
+
+    composeTestRule.onNodeWithTag("dock_menu_tool_laser").performScrollTo().performClick()
+    assertEquals(ToolType.LASER_POINTER, viewModel.uiState.value.currentTool)
+
+    composeTestRule.onNodeWithTag("dock_menu_tool_eraser").performScrollTo().performClick()
+    assertEquals(ToolType.ERASER, viewModel.uiState.value.currentTool)
+
+    composeTestRule.onNodeWithTag("dock_menu_toggle_ruler").performScrollTo().performClick()
+    assertTrue(viewModel.uiState.value.isRulerActive)
+
+    // Closing the upper tray via X hides it, and pen toggle button in lower bar restores it
+    composeTestRule.onNodeWithTag("dock_close_inking_tray").performClick()
+    composeTestRule.onNodeWithTag("inking_tray_card").assertDoesNotExist()
+    composeTestRule.onNodeWithTag("dock_toggle_inking_tray").performClick()
+    composeTestRule.onNodeWithTag("inking_tray_card").assertIsDisplayed()
+
+    // Clicking separated Hand pan button switches straight to HAND
+    composeTestRule.onNodeWithTag("dock_tool_hand").performClick()
+    assertEquals(ToolType.HAND, viewModel.uiState.value.currentTool)
+  }
+
+  @Test
+  fun `test all preset shapes and auto-shape recognition honor chosen tool and non-solid line style`() {
+    // 1. Auto-shape recognition works for ALL drawing tools (including BRUSH, HIGHLIGHTER, FINE_MARKER)
+    //    and preserves chosen non-solid StrokeStyles + brush opacity.
+    val viewModel = WhiteboardViewModel()
+    viewModel.toggleAutoShapeRecognition()
+    assertTrue(viewModel.uiState.value.autoShapeRecognition)
+
+    val circlePts = (0..48).map { i ->
+      val angle = (2.0 * PI * i) / 48.0
+      StrokePoint(300f + 110f * cos(angle).toFloat(), 300f + 110f * sin(angle).toFloat())
+    }
+
+    val toolStylePairs = listOf(
+      ToolType.BRUSH to StrokeStyle.ZIGZAG,
+      ToolType.HIGHLIGHTER to StrokeStyle.NEON_GLOW,
+      ToolType.FINE_MARKER to StrokeStyle.DOUBLE,
+      ToolType.PENCIL to StrokeStyle.RAILWAY,
+      ToolType.PEN to StrokeStyle.WAVY
+    )
+
+    toolStylePairs.forEach { (tool, style) ->
+      val prevCount = viewModel.uiState.value.board.shapes.size
+      viewModel.setTool(tool)
+      viewModel.setPenStyle(style)
+      viewModel.commitCompletedStroke(circlePts, isHighlighter = (tool == ToolType.HIGHLIGHTER))
+
+      assertEquals("Tool $tool with style $style should auto-convert circle", prevCount + 1, viewModel.uiState.value.board.shapes.size)
+      val shape = viewModel.uiState.value.board.shapes.last()
+      assertEquals(ShapeType.CIRCLE, shape.shapeType)
+      assertEquals(style, shape.strokeStyle)
+    }
+
+    // Verify sharp-corner square drawn with FINE_MARKER (high stabilization) + SQUARE_WAVE still recognizes cleanly
+    val sqPts = mutableListOf<StrokePoint>()
+    val corners = listOf(
+      StrokePoint(100f, 100f),
+      StrokePoint(300f, 100f),
+      StrokePoint(300f, 300f),
+      StrokePoint(100f, 300f)
+    )
+    for (edge in 0 until 4) {
+      val a = corners[edge]
+      val b = corners[(edge + 1) % 4]
+      for (step in 0..14) {
+        val t = step / 15f
+        sqPts.add(StrokePoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t))
+      }
+    }
+    sqPts.add(corners[0])
+    viewModel.setTool(ToolType.FINE_MARKER)
+    viewModel.setPenStyle(StrokeStyle.SQUARE_WAVE)
+    viewModel.commitCompletedStroke(sqPts, isHighlighter = false)
+    val sqShape = viewModel.uiState.value.board.shapes.last()
+    assertEquals(ShapeType.RECTANGLE, sqShape.shapeType)
+    assertEquals(StrokeStyle.SQUARE_WAVE, sqShape.strokeStyle)
+
+    // 2. ShapePickerBottomSheet forwards chosen StrokeStyle to ALL 12 preset ShapeTypes (closed + open)
+    var pickedShapeType: ShapeType? = null
+    var pickedStyle: StrokeStyle? = null
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.canvas.ShapePickerBottomSheet(
+          initialColorHex = "#2563EB",
+          initialStrokeStyle = StrokeStyle.NEON_GLOW,
+          initialCapStyle = LineCapStyle.END_ARROW,
+          onSelectShapeType = { type, _, _, _, style, _ ->
+            pickedShapeType = type
+            pickedStyle = style
+          },
+          onDismiss = {}
+        )
+      }
+    }
+    composeTestRule.onNodeWithTag("preset_shape_${ShapeType.STAR.name}").performScrollTo().performClick()
+    assertEquals(ShapeType.STAR, pickedShapeType)
+    assertEquals(StrokeStyle.NEON_GLOW, pickedStyle)
+
+    // 3. All 12 ShapeTypes x all 17 StrokeStyles serialize & render cleanly to Bitmap
+    val styles = StrokeStyle.values()
+    val allPresetShapes = ShapeType.values().flatMapIndexed { sIdx, shapeType ->
+      styles.mapIndexed { stIdx, style ->
+        ShapeItem(
+          shapeType = shapeType,
+          x = 40f + stIdx * 90f,
+          y = 40f + sIdx * 90f,
+          width = 72f,
+          height = 56f,
+          strokeColorHex = "#2563EB",
+          fillColorHex = "#DBEAFE",
+          strokeWidth = 4f,
+          isFilled = stIdx % 2 == 0,
+          strokeStyle = style
+        )
+      }
+    }
+    val matrixBoard = viewModel.uiState.value.board.copy(shapes = allPresetShapes)
+    val bitmap = BoardExportService.renderBoardToBitmap(matrixBoard, includeBackground = true, includeGrid = false, maxDimensionPx = 1200)
+    assertTrue(bitmap.width > 0 && bitmap.height > 0)
+  }
+
+  @Test
+  fun `test pixel eraser erases auto-created shapes and splits when completely separated`() {
+    val viewModel = WhiteboardViewModel()
+    viewModel.toggleAutoShapeRecognition()
+    viewModel.setTool(ToolType.PEN)
+    viewModel.setPenStyle(StrokeStyle.NEON_GLOW)
+    viewModel.setPenWidth(6f)
+
+    // 1. Auto-create a CIRCLE centered around (300, 300) with radius ~110
+    val circlePts = (0..48).map { i ->
+      val angle = (2.0 * PI * i) / 48.0
+      StrokePoint(300f + 110f * cos(angle).toFloat(), 300f + 110f * sin(angle).toFloat())
+    }
+    viewModel.commitCompletedStroke(circlePts, isHighlighter = false)
+    assertEquals(1, viewModel.uiState.value.board.shapes.size)
+    assertEquals(0, viewModel.uiState.value.board.strokes.size)
+    val circle = viewModel.uiState.value.board.shapes.single()
+    assertEquals(ShapeType.CIRCLE, circle.shapeType)
+    assertEquals(StrokeStyle.NEON_GLOW, circle.strokeStyle)
+
+    // First cut at the left side (vertex index n/2, NOT vertex 0) should open 1 continuous C-arc (not split yet!)
+    val leftEdgeX = circle.x
+    val midY = circle.y + circle.height / 2f
+    assertTrue(viewModel.erasePixelAt(leftEdgeX, midY, radius = 22f, saveSnapshot = true))
+    assertEquals(0, viewModel.uiState.value.board.shapes.size)
+    assertEquals(
+      "Opening a closed auto-shape in one place must keep 1 continuous stroke",
+      1,
+      viewModel.uiState.value.board.strokes.size
+    )
+    assertEquals(StrokeStyle.NEON_GLOW, viewModel.uiState.value.board.strokes.single().strokeStyle)
+
+    // Second cut across the opposite right edge must completely separate it into 2 distinct strokes
+    val rightEdgeX = circle.x + circle.width
+    assertTrue(viewModel.erasePixelAt(rightEdgeX, midY, radius = 22f, saveSnapshot = false))
+    val dividedCircleParts = viewModel.uiState.value.board.strokes
+    assertEquals(
+      "Erasing opposite edge must split the auto-shape into 2 independent strokes",
+      2,
+      dividedCircleParts.size
+    )
+    assertTrue(dividedCircleParts[0].id != dividedCircleParts[1].id)
+    assertTrue(dividedCircleParts.all { it.strokeStyle == StrokeStyle.NEON_GLOW })
+
+    // Undo restores the original closed ShapeItem
+    viewModel.undo()
+    assertEquals(1, viewModel.uiState.value.board.shapes.size)
+    assertEquals(0, viewModel.uiState.value.board.strokes.size)
+
+    // 2. Auto-create a straight LINE with BOTH_ARROWS & DOUBLE style -> erase middle -> splits cleanly into 2 lines
+    viewModel.clearBoard()
+    viewModel.setPenStyle(StrokeStyle.DOUBLE)
+    viewModel.setPenCapStyle(LineCapStyle.BOTH_ARROWS)
+    val linePts = (0..12).map { i -> StrokePoint(100f + i * 25f, 200f) }
+    viewModel.commitCompletedStroke(linePts, isHighlighter = false)
+    assertEquals(1, viewModel.uiState.value.board.shapes.size)
+    val autoLine = viewModel.uiState.value.board.shapes.single()
+    assertEquals(ShapeType.LINE, autoLine.shapeType)
+    assertEquals(LineCapStyle.BOTH_ARROWS, autoLine.capStyle)
+
+    assertTrue(viewModel.erasePixelAt(250f, 200f, radius = 24f, saveSnapshot = true))
+    assertEquals(0, viewModel.uiState.value.board.shapes.size)
+    val splitLineParts = viewModel.uiState.value.board.strokes
+    assertEquals(2, splitLineParts.size)
+    assertEquals(LineCapStyle.START_ARROW, splitLineParts[0].capStyle)
+    assertEquals(LineCapStyle.END_ARROW, splitLineParts[1].capStyle)
+    assertTrue(splitLineParts.all { it.strokeStyle == StrokeStyle.DOUBLE })
+
+    // 3. Auto-create a RECTANGLE -> fast swept drag erasePixelSegment top-to-bottom splits it into 2 halves
+    viewModel.clearBoard()
+    viewModel.setPenStyle(StrokeStyle.ZIGZAG)
+    viewModel.setPenCapStyle(LineCapStyle.NONE)
+    val rectCorners = listOf(
+      StrokePoint(100f, 100f),
+      StrokePoint(300f, 100f),
+      StrokePoint(300f, 260f),
+      StrokePoint(100f, 260f)
+    )
+    val rectPts = mutableListOf<StrokePoint>()
+    for (edge in 0 until 4) {
+      val a = rectCorners[edge]
+      val b = rectCorners[(edge + 1) % 4]
+      for (step in 0..14) {
+        val t = step / 15f
+        rectPts.add(StrokePoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t))
+      }
+    }
+    rectPts.add(rectCorners[0])
+    viewModel.commitCompletedStroke(rectPts, isHighlighter = false)
+    assertEquals(1, viewModel.uiState.value.board.shapes.size)
+
+    assertTrue(
+      viewModel.erasePixelSegment(
+        from = StrokePoint(200f, 70f),
+        to = StrokePoint(200f, 290f),
+        radius = 20f,
+        saveSnapshot = true
+      )
+    )
+    assertEquals(0, viewModel.uiState.value.board.shapes.size)
+    val rectHalves = viewModel.uiState.value.board.strokes
+    assertEquals(2, rectHalves.size)
+    assertTrue(rectHalves.all { it.strokeStyle == StrokeStyle.ZIGZAG })
+  }
+
+  @Test
+  fun `test ideation templates modal search categories blank canvas and new board toggle`() {
+    var showOnNewBoard = false
+    var startedBlank = false
+    var pickedTemplate: TemplateType? = null
+    var dismissed = false
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        IdeationTemplatesDialog(
+          showOnNewBoard = showOnNewBoard,
+          onToggleShowOnNewBoard = { showOnNewBoard = it },
+          onStartBlankCanvas = { startedBlank = true },
+          onSelectTemplate = { pickedTemplate = it },
+          onDismiss = { dismissed = true }
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("template_picker_modal").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("template_card_${TemplateType.BRAINSTORM_CLUSTER.name}").assertIsDisplayed()
+
+    // Filter by search input
+    composeTestRule.onNodeWithTag("template_search_input").performTextInput("Ishikawa")
+    composeTestRule.onNodeWithTag("template_card_${TemplateType.ISHIKAWA.name}").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("template_card_${TemplateType.BRAINSTORM_CLUSTER.name}").assertDoesNotExist()
+
+    // Clear search by selecting a category directly
+    composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.STRATEGY.name}").performClick()
+    composeTestRule.onNodeWithTag("template_card_${TemplateType.IMPACT_EFFORT.name}").assertIsDisplayed()
+
+    // Toggle "Mostrar para nuevas pizarras"
+    composeTestRule.onNodeWithTag("checkbox_show_templates_new_board").performClick()
+    assertTrue(showOnNewBoard)
+
+    // Pick Impact/Effort template
+    composeTestRule.onNodeWithTag("template_card_${TemplateType.IMPACT_EFFORT.name}").performClick()
+    assertEquals(TemplateType.IMPACT_EFFORT, pickedTemplate)
+    assertTrue(dismissed)
+
+    // Blank canvas trigger
+    composeTestRule.onNodeWithTag("start_blank_canvas_button").performClick()
+    assertTrue(startedBlank)
+  }
+
+  @Test
+  fun `test all six ideation templates generate interactive structures and export cleanly`() {
+    val viewModel = WhiteboardViewModel()
+
+    // 1. Lluvia de Ideas Libre (Cluster): central node + 6 satellite notes + quick '+' branch expansion
+    viewModel.applyTemplate(TemplateType.BRAINSTORM_CLUSTER, 1080f, 1920f)
+    val clusterCenter = viewModel.uiState.value.board.shapes.find { it.templateRole == "CLUSTER_CENTER" }
+    assertNotNull(clusterCenter)
+    assertEquals(6, viewModel.uiState.value.board.stickyNotes.size)
+    assertEquals(6, viewModel.uiState.value.board.shapes.count { it.templateRole == "CLUSTER_SPOKE" })
+
+    viewModel.addClusterBranch(clusterCenter!!.id)
+    assertEquals(7, viewModel.uiState.value.board.stickyNotes.size)
+    assertEquals(7, viewModel.uiState.value.board.shapes.count { it.templateRole == "CLUSTER_SPOKE" })
+
+    // 2. Matriz Impacto / Esfuerzo: 4 locked quadrants + 2 locked axes + locked axis labels + 4 priority notes
+    viewModel.clearBoard()
+    viewModel.applyTemplate(TemplateType.IMPACT_EFFORT, 1080f, 1920f)
+    val matrixBoard = viewModel.uiState.value.board
+    assertEquals(4, matrixBoard.shapes.count { it.templateRole == "MATRIX_QUADRANT" && it.isLocked })
+    assertEquals(2, matrixBoard.shapes.count { it.templateRole == "MATRIX_AXIS" && it.isLocked })
+    assertTrue(matrixBoard.textItems.count { it.isLocked } >= 8)
+    assertEquals(4, matrixBoard.stickyNotes.size)
+    // Locked axes/quadrants must survive object eraser hits
+    val firstQuad = matrixBoard.shapes.first { it.templateRole == "MATRIX_QUADRANT" }
+    assertFalse(viewModel.eraseObjectAt(firstQuad.x + 20f, firstQuad.y + 20f, 30f))
+
+    // 3. Mapa Conceptual / Jerárquico: 3-level tree, 90-degree orthogonal connectors, branch collapsing
+    viewModel.clearBoard()
+    viewModel.applyTemplate(TemplateType.CONCEPT_MAP, 1080f, 1920f)
+    val conceptNodes = viewModel.uiState.value.board.shapes.filter { it.templateRole == "CONCEPT_NODE" }
+    assertEquals(4, conceptNodes.size) // 1 root + 3 subtopics
+    assertEquals(6, viewModel.uiState.value.board.stickyNotes.size) // 6 level-3 details
+    val connectors = viewModel.uiState.value.board.shapes.filter { it.templateRole == "CONCEPT_CONNECTOR" }
+    assertEquals(9, connectors.size)
+    assertTrue(connectors.all { it.vertices.size == 4 }) // orthogonal right-angle 4-point elbows
+
+    val rootNode = conceptNodes.first { it.parentId == null }
+    viewModel.toggleConceptBranchCollapse(rootNode.id)
+    assertTrue(viewModel.uiState.value.board.stickyNotes.all { it.isHiddenByCollapse })
+    assertTrue(viewModel.uiState.value.board.shapes.filter { it.id != rootNode.id }.all { it.isHiddenByCollapse })
+
+    viewModel.toggleConceptBranchCollapse(rootNode.id)
+    assertTrue(viewModel.uiState.value.board.stickyNotes.none { it.isHiddenByCollapse })
+
+    // 4. Flujo de Usuario / Proceso: 3 locked swimlanes + connected Start/Process/Decision shapes
+    viewModel.clearBoard()
+    viewModel.applyTemplate(TemplateType.USER_FLOW, 1080f, 1920f)
+    val flowBoard = viewModel.uiState.value.board
+    assertEquals(3, flowBoard.shapes.count { it.templateRole == "SWIMLANE" && it.isLocked })
+    assertTrue(flowBoard.shapes.any { it.shapeType == ShapeType.DIAMOND && it.label == "¿Válido?" })
+    assertTrue(flowBoard.shapes.count { it.shapeType == ShapeType.LINE } >= 5)
+
+    // 5. Retrospectiva / Kanban Rápido: 3 vertical columns that grow downward as notes stack
+    viewModel.clearBoard()
+    viewModel.applyTemplate(TemplateType.RETROSPECTIVE, 1080f, 1920f)
+    val col0 = viewModel.uiState.value.board.shapes.first { it.templateRole == "COLUMN_CONTAINER" }
+    val initialHeight = col0.height
+    repeat(3) { viewModel.addNoteToColumn(col0.id) }
+    val expandedCol0 = viewModel.uiState.value.board.shapes.first { it.id == col0.id }
+    assertTrue("Column height should grow downward as notes stack", expandedCol0.height > initialHeight)
+
+    // 6. Diagrama de Ishikawa (Causa-Efecto): locked horizontal spine + 6 locked bones + editable cause boxes
+    viewModel.clearBoard()
+    viewModel.applyTemplate(TemplateType.ISHIKAWA, 1080f, 1920f)
+    val ishikawaBoard = viewModel.uiState.value.board
+    assertEquals(1, ishikawaBoard.shapes.count { it.templateRole == "ISHIKAWA_SPINE" && it.isLocked })
+    assertEquals(6, ishikawaBoard.shapes.count { it.templateRole == "ISHIKAWA_BONE" && it.isLocked })
+    val causeBoxes = ishikawaBoard.textItems.filter { it.isEditableCard && !it.isLocked }
+    assertEquals(6, causeBoxes.size)
+    assertTrue(causeBoxes.any { it.text == "Método" })
+    assertTrue(causeBoxes.any { it.text == "Herramientas" })
+    assertTrue(causeBoxes.any { it.text == "Tiempo" })
+    assertTrue(causeBoxes.any { it.text == "Entorno" })
+
+    viewModel.updateTextItem(causeBoxes.first().id, "Método actualizado")
+    assertEquals("Método actualizado", viewModel.uiState.value.board.textItems.first { it.id == causeBoxes.first().id }.text)
+
+    // Verify Snapshot serialization round-trip and PNG bitmap export
+    val json = BoardSnapshotSerializer.serializeBoard(viewModel.uiState.value.board)
+    val restored = BoardSnapshotSerializer.deserializeIntoBoard(json, viewModel.uiState.value.board)
+    assertNotNull(restored)
+    assertEquals(6, restored!!.textItems.count { it.isEditableCard && !it.isLocked })
+    val bmp = BoardExportService.renderBoardToBitmap(restored, includeBackground = true, includeGrid = false, maxDimensionPx = 900)
+    assertTrue(bmp.width > 0 && bmp.height > 0)
+  }
+
+  @Test
+  fun `test mis plantillas tab sits below recomendado saves applies and deletes custom templates`() {
+    // 1. Verify category ordering: MY_TEMPLATES is immediately below RECOMMENDED and before BRAINSTORMING
+    val categories = TemplateCategory.values().toList()
+    assertEquals(TemplateCategory.RECOMMENDED, categories[0])
+    assertEquals(TemplateCategory.MY_TEMPLATES, categories[1])
+    assertEquals("Mis plantillas", TemplateCategory.MY_TEMPLATES.title)
+    assertEquals(TemplateCategory.BRAINSTORMING, categories[2])
+
+    val viewModel = WhiteboardViewModel()
+    viewModel.openBoard(viewModel.uiState.value.allBoards.first().id)
+    viewModel.applyTemplate(TemplateType.IMPACT_EFFORT, 1080f, 1920f)
+    val sourceShapeIds = viewModel.uiState.value.board.shapes.map { it.id }.toSet()
+
+    composeTestRule.setContent {
+      val state by viewModel.uiState.collectAsState()
+      MaterialTheme {
+        IdeationTemplatesDialog(
+          showOnNewBoard = state.showTemplatesOnNewBoard,
+          onToggleShowOnNewBoard = { viewModel.toggleShowTemplatesOnNewBoard(it) },
+          onStartBlankCanvas = {},
+          onSelectTemplate = {},
+          onDismiss = {},
+          customTemplates = state.customTemplates,
+          currentBoardTitle = state.board.title,
+          onSaveCurrentAsTemplate = { title, desc ->
+            viewModel.saveCurrentBoardAsTemplate(title, desc)
+          },
+          onSelectCustomTemplate = { viewModel.applyCustomTemplate(it) },
+          onDeleteCustomTemplate = { viewModel.deleteCustomTemplate(it) }
+        )
+      }
+    }
+
+    // Verify visual ordering in compact single-pane layout (horizontal LazyRow immediately after Recomendado)
+    val recBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.RECOMMENDED.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val myBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.MY_TEMPLATES.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val brainBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.BRAINSTORMING.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "Mis plantillas must appear immediately after Recomendado",
+      (myBounds.left >= recBounds.right - 1f && brainBounds.left >= myBounds.right - 1f) ||
+        (myBounds.top >= recBounds.bottom - 1f && brainBounds.top >= myBounds.bottom - 1f)
+    )
+
+    // Switch to "Mis plantillas" -> initially shows empty state with save CTA
+    composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.MY_TEMPLATES.name}").performClick()
+    composeTestRule.onNodeWithTag("my_templates_empty_state").assertIsDisplayed()
+
+    // Save current board as a custom template
+    composeTestRule.onNodeWithTag("btn_empty_save_custom_template").performClick()
+    composeTestRule.onNodeWithTag("save_custom_template_form").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("input_custom_template_name").performTextReplacement("Mi Sprint Base")
+    composeTestRule.onNodeWithTag("input_custom_template_desc").performTextInput("Matriz lista para el equipo")
+    composeTestRule.onNodeWithTag("btn_confirm_save_custom_template").performClick()
+
+    assertEquals(1, viewModel.uiState.value.customTemplates.size)
+    val savedTemplate = viewModel.uiState.value.customTemplates.first()
+    assertEquals("Mi Sprint Base", savedTemplate.title)
+    composeTestRule.onNodeWithTag("custom_template_card_${savedTemplate.id}").assertIsDisplayed()
+
+    // Create a brand new blank board and apply the saved custom template
+    viewModel.createNewBoard("Pizarra Nueva", openImmediately = true)
+    assertTrue(viewModel.uiState.value.board.shapes.isEmpty())
+
+    composeTestRule.onNodeWithTag("custom_template_card_${savedTemplate.id}").performClick()
+    assertEquals(sourceShapeIds.size, viewModel.uiState.value.board.shapes.size)
+    val appliedShapeIds = viewModel.uiState.value.board.shapes.map { it.id }.toSet()
+    assertTrue("Applied template elements must receive fresh independent IDs", (sourceShapeIds intersect appliedShapeIds).isEmpty())
+
+    // Undo restores the blank board
+    viewModel.undo()
+    assertTrue(viewModel.uiState.value.board.shapes.isEmpty())
+
+    // Delete the custom template via UI button
+    composeTestRule.onNodeWithTag("btn_delete_custom_template_${savedTemplate.id}").performClick()
+    assertTrue(viewModel.uiState.value.customTemplates.isEmpty())
+    composeTestRule.onNodeWithTag("my_templates_empty_state").assertIsDisplayed()
+  }
+
+  @Test
+  fun `test topbar overflow menu removes duplicated snapshots entry`() {
+    composeTestRule.setContent {
+      MaterialTheme {
+        WhiteboardTopBar(
+          boardTitle = "Pizarra Principal",
+          scale = 1.0f,
+          canUndo = false,
+          canRedo = false,
+          isSnapToGrid = false,
+          onUndo = {},
+          onRedo = {},
+          onZoomIn = {},
+          onZoomOut = {},
+          onResetZoom = {},
+          onFitToContent = {},
+          onSetZoomPreset = {},
+          onToggleSnapToGrid = {},
+          onEnterZenMode = {},
+          onOpenBoardsManager = {},
+          onOpenBackgroundSettings = {},
+          onClearBoard = {},
+          onExportBoard = {},
+          onRenameBoard = {}
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("btn_topbar_more_menu").performClick()
+    composeTestRule.onNodeWithTag("topbar_dropdown_menu").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Exportar pizarra").assertIsDisplayed()
+    composeTestRule.onNodeWithText("Snapshots / Versiones").assertDoesNotExist()
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w800dp-h600dp")
+  fun `test two pane templates sidebar places mis plantillas directly below recomendado`() {
+    composeTestRule.setContent {
+      MaterialTheme {
+        IdeationTemplatesDialog(
+          showOnNewBoard = false,
+          onToggleShowOnNewBoard = {},
+          onStartBlankCanvas = {},
+          onSelectTemplate = {},
+          onDismiss = {},
+          onSaveCurrentAsTemplate = { _, _ -> }
+        )
+      }
+    }
+
+    val recBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.RECOMMENDED.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val myBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.MY_TEMPLATES.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    val brainBounds = composeTestRule.onNodeWithTag("template_cat_${TemplateCategory.BRAINSTORMING.name}").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+    assertTrue(
+      "Mis plantillas must appear directly below Recomendado in two-pane sidebar",
+      myBounds.top >= recBounds.bottom - 1f && brainBounds.top >= myBounds.bottom - 1f
+    )
+  }
+
+  @Test
+  fun `test sticky note world coordinates and viewport resize preserve aspect ratio and distances`() {
+    val cam = ViewportTransform(
+      scale = 1.5f,
+      panX = 120f,
+      panY = 80f,
+      viewportWidthPx = 1080f,
+      viewportHeightPx = 1920f
+    )
+    val noteA = StickyNote(id = "a", text = "A", x = 100f, y = 200f, width = 220f, height = 160f)
+    val noteB = StickyNote(id = "b", text = "B", x = 420f, y = 200f, width = 220f, height = 160f)
+
+    // World aspect ratio & screen aspect ratio must stay identical
+    val screenW = cam.worldLengthToScreenPx(noteA.width)
+    val screenH = cam.worldLengthToScreenPx(noteA.height)
+    assertEquals(noteA.width / noteA.height, screenW / screenH, 0.0001f)
+
+    val distWorld = noteB.x - noteA.x
+    val distScreenBefore = cam.worldToScreenX(noteB.x) - cam.worldToScreenX(noteA.x)
+    assertEquals(distWorld * cam.scale, distScreenBefore, 0.001f)
+
+    // Viewport resize (e.g., portrait -> landscape) preserves world center, scale, aspect ratio, and relative distances
+    val resizedCam = cam.adaptToViewportResize(newWidthPx = 1920f, newHeightPx = 1080f)
+    assertEquals(cam.scale, resizedCam.scale, 0.0001f)
+    val worldCenterBeforeX = cam.screenToWorldX(cam.viewportWidthPx / 2f)
+    val worldCenterBeforeY = cam.screenToWorldY(cam.viewportHeightPx / 2f)
+    val worldCenterAfterX = resizedCam.screenToWorldX(resizedCam.viewportWidthPx / 2f)
+    val worldCenterAfterY = resizedCam.screenToWorldY(resizedCam.viewportHeightPx / 2f)
+    assertEquals(worldCenterBeforeX, worldCenterAfterX, 0.01f)
+    assertEquals(worldCenterBeforeY, worldCenterAfterY, 0.01f)
+
+    val distScreenAfter = resizedCam.worldToScreenX(noteB.x) - resizedCam.worldToScreenX(noteA.x)
+    assertEquals(distScreenBefore, distScreenAfter, 0.001f)
+  }
+
+  @Test
+  fun `test sticky note scale compensated handle resizing free and square aspect lock`() {
+    val vm = WhiteboardViewModel()
+    vm.openBoard(vm.uiState.value.allBoards.first().id)
+    vm.addStickyNote(1080f, 1920f, "#FFF275")
+    val note = vm.uiState.value.board.stickyNotes.first()
+    vm.selectNote(note.id)
+
+    // Zoom to 2.0x -> a +100px screen drag must resize world width/height by exactly +50 world units
+    vm.onPanZoom(0f, 0f, zoomChange = 2.0f)
+    assertEquals(2.0f, vm.uiState.value.scale, 0.001f)
+
+    vm.beginTransformSnapshot()
+    vm.resizeStickyNoteHandle(note.id, StickyNoteResizeHandle.BOTTOM_RIGHT, deltaScreenX = 100f, deltaScreenY = 60f)
+    var updated = vm.uiState.value.board.stickyNotes.first { it.id == note.id }
+    assertEquals(note.x, updated.x, 0.01f)
+    assertEquals(note.y, updated.y, 0.01f)
+    assertEquals(note.width + 50f, updated.width, 0.05f)
+    assertEquals(note.height + 30f, updated.height, 0.05f)
+
+    // Drag TOP_LEFT inward by (+40px, +20px) at scale=2.0 -> moves x/y by (+20, +10) while keeping bottom-right anchored
+    val anchorRight = updated.x + updated.width
+    val anchorBottom = updated.y + updated.height
+    vm.resizeStickyNoteHandle(note.id, StickyNoteResizeHandle.TOP_LEFT, deltaScreenX = 40f, deltaScreenY = 20f)
+    updated = vm.uiState.value.board.stickyNotes.first { it.id == note.id }
+    assertEquals(anchorRight, updated.x + updated.width, 0.05f)
+    assertEquals(anchorBottom, updated.y + updated.height, 0.05f)
+
+    // Toggle square (1:1) aspect-ratio lock ON -> becomes square and edge/corner drags preserve 1:1
+    vm.toggleStickyNoteAspectRatioLock(note.id)
+    updated = vm.uiState.value.board.stickyNotes.first { it.id == note.id }
+    assertTrue(updated.isAspectRatioLocked)
+    assertEquals(updated.width, updated.height, 0.01f)
+
+    vm.resizeStickyNoteHandle(note.id, StickyNoteResizeHandle.RIGHT, deltaScreenX = 120f, deltaScreenY = 0f)
+    updated = vm.uiState.value.board.stickyNotes.first { it.id == note.id }
+    assertEquals(updated.width, updated.height, 0.01f)
+    assertTrue(updated.width > 200f)
+
+    // Verify serializer round-trip preserves custom dimensions & aspect lock
+    val json = BoardSnapshotSerializer.serializeBoard(vm.uiState.value.board)
+    val restored = BoardSnapshotSerializer.deserializeIntoBoard(json, vm.uiState.value.board)!!
+    val restoredNote = restored.stickyNotes.first { it.id == note.id }
+    assertEquals(updated.width, restoredNote.width, 0.01f)
+    assertEquals(updated.height, restoredNote.height, 0.01f)
+    assertTrue(restoredNote.isAspectRatioLocked)
+
+    // Verify scale-compensated math directly for TOP edge anchor preservation
+    val topEdgeResized = StickyNoteGeometry.resizeByHandle(
+      bounds = StickyNoteBounds(100f, 100f, 200f, 200f),
+      handle = StickyNoteResizeHandle.TOP,
+      deltaScreenX = 0f,
+      deltaScreenY = -90f,
+      scale = 3.0f,
+      lockAspectRatio = false
+    )
+    assertEquals(70f, topEdgeResized.y, 0.01f)
+    assertEquals(230f, topEdgeResized.height, 0.01f)
+    assertEquals(300f, topEdgeResized.y + topEdgeResized.height, 0.01f)
+  }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w480dp-h800dp")
+  fun `test sticky note ui renders 48dp resize handles and autofits font size proportionally`() {
+    val noteState = androidx.compose.runtime.mutableStateOf(
+      StickyNote(
+        id = "note-autofit",
+        text = "Idea corta",
+        x = 40f,
+        y = 40f,
+        width = 160f,
+        height = 140f
+      )
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        androidx.compose.foundation.layout.Box(
+          modifier = androidx.compose.ui.Modifier.fillMaxSize()
+        ) {
+          StickyNoteView(
+            note = noteState.value,
+            scale = 1.0f,
+            panX = 0f,
+            panY = 0f,
+            isSelected = true,
+            onUpdateText = { noteState.value = noteState.value.copy(text = it) },
+            onUpdateColor = {},
+            onTogglePin = {},
+            onDelete = {},
+            onDragDelta = { _, _ -> }
+          )
+        }
+      }
+    }
+
+    composeTestRule.waitForIdle()
+
+    // All 8 resize handles must exist and meet >= 48.dp touch target (exceeding 44px mobile requirement)
+    StickyNoteResizeHandle.values().forEach { handle ->
+      val node = composeTestRule.onNodeWithTag("sticky_note_handle_${handle.name}_note-autofit")
+      node.assertIsDisplayed()
+      node.assertWidthIsAtLeast(48.dp)
+      node.assertHeightIsAtLeast(48.dp)
+    }
+
+    val smallFontSp = composeTestRule
+      .onNodeWithTag("sticky_note_input_note-autofit")
+      .fetchSemanticsNode()
+      .config[StickyNoteComputedFontSpKey]
+
+    // Enlarge sticky note -> auto-fit fontSize must scale up proportionally
+    noteState.value = noteState.value.copy(width = 360f, height = 320f)
+    composeTestRule.waitForIdle()
+    val enlargedFontSp = composeTestRule
+      .onNodeWithTag("sticky_note_input_note-autofit")
+      .fetchSemanticsNode()
+      .config[StickyNoteComputedFontSpKey]
+    assertTrue("Expected font size to scale up when note grows ($enlargedFontSp > $smallFontSp)", enlargedFontSp > smallFontSp)
+
+    // Add long multi-line text -> auto-fit fontSize must shrink so text fits without overflow or scroll
+    noteState.value = noteState.value.copy(
+      text = "Este es un bloque de texto mucho más largo diseñado para comprobar que la fuente se reduce automáticamente dentro de la nota sin desbordarse ni requerir scroll."
+    )
+    composeTestRule.waitForIdle()
+    val longTextFontSp = composeTestRule
+      .onNodeWithTag("sticky_note_input_note-autofit")
+      .fetchSemanticsNode()
+      .config[StickyNoteComputedFontSpKey]
+    assertTrue("Expected font size to shrink for long text ($longTextFontSp < $enlargedFontSp)", longTextFontSp < enlargedFontSp)
+  }
+
+  @Test
+  fun `test hand pan tool disables object selection and pans without moving sticky notes`() {
+    val vm = WhiteboardViewModel()
+    vm.openBoard(vm.uiState.value.allBoards.first().id)
+    vm.addStickyNote(1080f, 1920f, "#FFF275")
+    val note = vm.uiState.value.board.stickyNotes.first()
+    vm.selectNote(note.id)
+    assertEquals(note.id, vm.uiState.value.selectedNoteId)
+
+    // Activating standalone Hand tool immediately clears existing selection
+    vm.setTool(ToolType.HAND)
+    assertNull(vm.uiState.value.selectedNoteId)
+    assertEquals(ToolType.HAND, vm.uiState.value.currentTool)
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        WhiteboardCanvasScreen(viewModel = vm)
+      }
+    }
+    composeTestRule.waitForIdle()
+
+    // Pan-only shield must be active
+    composeTestRule.onNodeWithTag("pan_only_overlay").assertIsDisplayed()
+
+    val initialPanX = vm.uiState.value.panX
+    val initialNoteX = vm.uiState.value.board.stickyNotes.first().x
+
+    // Dragging directly across the screen (including over note bounds) only pans the board, never selects or moves the note
+    composeTestRule.onNodeWithTag("pan_only_overlay").performTouchInput {
+      swipeRight(startX = centerX - 100f, endX = centerX + 120f)
+    }
+    composeTestRule.waitForIdle()
+
+    assertNull("Hand pan tool must never select sticky notes", vm.uiState.value.selectedNoteId)
+    assertNull("Hand pan tool must never select shapes", vm.uiState.value.selectedShapeId)
+    assertNull("Hand pan tool must never select strokes", vm.uiState.value.selectedStrokeId)
+    assertEquals("Note world X must stay untouched while panning", initialNoteX, vm.uiState.value.board.stickyNotes.first().x, 0.01f)
+    assertTrue("Viewport panX must advance when dragging in Hand mode", vm.uiState.value.panX > initialPanX + 50f)
   }
 }

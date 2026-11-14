@@ -1,9 +1,17 @@
 package com.example.ui.toolbar
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,27 +20,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
-import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Create
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Gesture
-import androidx.compose.material.icons.filled.Highlight
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PanTool
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,22 +42,32 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.LineCapStyle
 import com.example.model.ShapeType
 import com.example.model.StrokeStyle
 import com.example.model.ToolType
+import com.example.ui.canvas.LineCapSelectorRow
+import com.example.ui.canvas.LineStyleSelectorPanel
 
 @Composable
 fun WhiteboardPenDock(
@@ -64,6 +75,7 @@ fun WhiteboardPenDock(
     currentPenColor: String,
     currentPenWidth: Float,
     currentPenStyle: StrokeStyle,
+    currentPenCapStyle: LineCapStyle = LineCapStyle.NONE,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -72,6 +84,7 @@ fun WhiteboardPenDock(
     onUpdatePenColor: (String, isRainbow: Boolean) -> Unit,
     onUpdatePenWidth: (Float) -> Unit,
     onUpdatePenStyle: (StrokeStyle) -> Unit,
+    onUpdatePenCapStyle: (LineCapStyle) -> Unit = {},
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onOpenShapePicker: () -> Unit,
@@ -81,17 +94,19 @@ fun WhiteboardPenDock(
     onClearBoard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showToolsMenu by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
-
-    var expandedWriting by remember { mutableStateOf(false) }
-    var expandedEmphasis by remember { mutableStateOf(false) }
-    var expandedEraser by remember { mutableStateOf(false) }
+    var isInkingTrayOpen by remember { mutableStateOf(true) }
 
     val parsedPenColor = try {
         Color(android.graphics.Color.parseColor(currentPenColor))
     } catch (_: Exception) {
         MaterialTheme.colorScheme.onSurface
+    }
+
+    val activeHighlightColor = if (currentPenColor.equals("#0F172A", true) || currentPenColor.equals("#1E1E1E", true)) {
+        Color(0xFFFACC15)
+    } else {
+        parsedPenColor
     }
 
     val colorPalette = listOf(
@@ -109,600 +124,487 @@ fun WhiteboardPenDock(
         12f to "Grueso"
     )
 
-    val isWritingTool = currentTool == ToolType.PEN || currentTool == ToolType.PENCIL || currentTool == ToolType.FINE_MARKER
-    val isEmphasisTool = currentTool == ToolType.HIGHLIGHTER || currentTool == ToolType.BRUSH
-    val isEraserTool = currentTool == ToolType.ERASER || currentTool == ToolType.PIXEL_ERASER
+    val isHandActive = pendingShapeType == null && currentTool == ToolType.HAND
+    val isDrawingOrInkingTool = pendingShapeType == null && currentTool != ToolType.HAND
 
-    val writingTitle = when (currentTool) {
-        ToolType.PENCIL -> "Lápiz"
-        ToolType.FINE_MARKER -> "Marcador fino"
-        else -> "Pluma"
-    }
-    val writingIcon = when (currentTool) {
-        ToolType.PENCIL -> Icons.Default.Create
-        ToolType.FINE_MARKER -> Icons.Default.Gesture
-        else -> Icons.Default.Edit
-    }
-
-    val emphasisTitle = when (currentTool) {
-        ToolType.BRUSH -> "Pincel"
-        else -> "Resaltador"
-    }
-    val emphasisIcon = when (currentTool) {
-        ToolType.BRUSH -> Icons.Default.Brush
-        else -> Icons.Default.Highlight
-    }
-
-    val eraserTitle = when (currentTool) {
-        ToolType.PIXEL_ERASER -> "Borrador de píxel"
-        else -> "Borrador de objeto"
-    }
-
-    val activeShortLabel = when (currentTool) {
-        ToolType.PEN -> "Pluma"
-        ToolType.PENCIL -> "Lápiz"
-        ToolType.FINE_MARKER -> "Marcador"
-        ToolType.HIGHLIGHTER -> "Resalt."
-        ToolType.BRUSH -> "Pincel"
-        ToolType.ERASER -> "Borr. objeto"
-        ToolType.PIXEL_ERASER -> "Borr. píxel"
-        ToolType.SELECT_LASSO -> "Lazo"
-        ToolType.HAND -> "Mover"
-        else -> "Pluma"
-    }
-
-    val activeToolIcon = when (currentTool) {
-        ToolType.PENCIL -> Icons.Default.Create
-        ToolType.FINE_MARKER -> Icons.Default.Gesture
-        ToolType.HIGHLIGHTER -> Icons.Default.Highlight
-        ToolType.BRUSH -> Icons.Default.Brush
-        ToolType.ERASER, ToolType.PIXEL_ERASER -> Icons.Default.CleaningServices
-        ToolType.SELECT_LASSO -> Icons.Default.NearMe
-        ToolType.HAND -> Icons.Default.PanTool
-        else -> Icons.Default.Edit
-    }
-
-    val isStrokeTool = isWritingTool || isEmphasisTool
-    val activeHighlightColor = if (currentTool == ToolType.HIGHLIGHTER &&
-        (currentPenColor.equals("#0F172A", true) || currentPenColor.equals("#1E1E1E", true))
-    ) {
-        Color(0xFFFACC15)
-    } else {
-        parsedPenColor
-    }
-
-    Column(
+    Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.Bottom
     ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 4.dp,
-            color = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+        // Two-tier compact floating dock (Upper upright tools tray + Lower compact action bar)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .weight(1f, fill = false)
                 .testTag("whiteboard_pen_dock")
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // 1. Upper Floating Inking Tray — upright physical tools peeking from bottom edge + close 'X'
+            AnimatedVisibility(
+                visible = isInkingTrayOpen,
+                enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
+                exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
             ) {
-                // 1. Selector "Trazos"
-                Box {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 4.dp,
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .padding(bottom = 6.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                        .testTag("inking_tray_card")
+                ) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .heightIn(min = 38.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(
-                                if (pendingShapeType == null) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (pendingShapeType == null) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(11.dp)
-                            )
-                            .clickable {
-                                // Default sub-panel opened to current tool category
-                                if (!showToolsMenu) {
-                                    expandedWriting = isWritingTool
-                                    expandedEmphasis = isEmphasisTool
-                                    expandedEraser = isEraserTool
-                                }
-                                showToolsMenu = !showToolsMenu
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                            .testTag("dock_tools_menu_button")
+                            .padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 0.dp)
+                            .clipToBounds(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.PEN,
+                                description = "Pluma",
+                                onClick = { onSelectTool(ToolType.PEN) },
+                                testTag = "dock_menu_tool_pen"
+                            ) {
+                                PhysicalFountainPenIcon(
+                                    inkColor = parsedPenColor,
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.PENCIL,
+                                description = "Lápiz",
+                                onClick = { onSelectTool(ToolType.PENCIL) },
+                                testTag = "dock_menu_tool_pencil"
+                            ) {
+                                PhysicalPencilIcon(
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.FINE_MARKER,
+                                description = "Fibra / Marcador fino",
+                                onClick = { onSelectTool(ToolType.FINE_MARKER) },
+                                testTag = "dock_menu_tool_fine_marker"
+                            ) {
+                                PhysicalMarkerIcon(
+                                    markerColor = parsedPenColor,
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.HIGHLIGHTER,
+                                description = "Resaltador",
+                                onClick = { onSelectTool(ToolType.HIGHLIGHTER) },
+                                testTag = "dock_menu_tool_highlighter"
+                            ) {
+                                PhysicalHighlighterIcon(
+                                    highlighterColor = activeHighlightColor,
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.BRUSH,
+                                description = "Pincel",
+                                onClick = { onSelectTool(ToolType.BRUSH) },
+                                testTag = "dock_menu_tool_brush"
+                            ) {
+                                PhysicalBrushIcon(
+                                    paintColor = parsedPenColor,
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.LASER_POINTER,
+                                description = "Puntero láser",
+                                onClick = { onSelectTool(ToolType.LASER_POINTER) },
+                                testTag = "dock_menu_tool_laser"
+                            ) {
+                                PhysicalLaserIcon(
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.ERASER,
+                                description = "Goma de borrar",
+                                onClick = { onSelectTool(ToolType.ERASER) },
+                                testTag = "dock_menu_tool_eraser"
+                            ) {
+                                PhysicalEraserIcon(
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.PIXEL_ERASER,
+                                description = "Goma de precisión",
+                                onClick = { onSelectTool(ToolType.PIXEL_ERASER) },
+                                testTag = "dock_menu_tool_pixel_eraser"
+                            ) {
+                                PhysicalPixelEraserIcon(
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = isRulerActive,
+                                description = "Regla",
+                                onClick = onToggleRuler,
+                                testTag = "dock_menu_toggle_ruler"
+                            ) {
+                                PhysicalRulerIcon(
+                                    isActive = isRulerActive,
+                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
+                                )
+                            }
+
+                            UprightTrayToolSlot(
+                                isSelected = pendingShapeType == null && currentTool == ToolType.SELECT_LASSO,
+                                description = "Lazo de selección",
+                                onClick = { onSelectTool(ToolType.SELECT_LASSO) },
+                                testTag = "dock_menu_tool_select_lasso",
+                                anchorBottom = false
+                            ) {
+                                PhysicalLassoIcon(
+                                    tint = if (pendingShapeType == null && currentTool == ToolType.SELECT_LASSO) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        // Compact close 'X' button on the right edge of the tray
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .padding(start = 2.dp)
+                                .size(width = 36.dp, height = 48.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(role = Role.Button) { isInkingTrayOpen = false }
+                                .semantics { contentDescription = "Ocultar panel de trazos" }
+                                .testTag("dock_close_inking_tray")
+                        ) {
                             Icon(
-                                imageVector = activeToolIcon,
-                                contentDescription = "Seleccionar herramienta de trazos",
-                                tint = if (pendingShapeType == null) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 2. Lower Compact Main Bar (matches Microsoft Whiteboard compact pill bar)
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                tonalElevation = 0.dp,
+                shadowElevation = 4.dp,
+                color = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                    .testTag("dock_main_bar")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Toggle upper inking tray (active highlight when tray is open or drawing tool active)
+                    val isInkBarActive = isInkingTrayOpen || isDrawingOrInkingTool
+                    CompactDockActionButton(
+                        isSelected = isInkingTrayOpen,
+                        description = if (isInkingTrayOpen) "Ocultar trazos" else "Mostrar panel de trazos",
+                        onClick = {
+                            if (!isInkingTrayOpen) {
+                                isInkingTrayOpen = true
+                                if (currentTool == ToolType.HAND) {
+                                    onSelectTool(ToolType.PEN)
+                                }
+                            } else {
+                                isInkingTrayOpen = false
+                            }
+                        },
+                        testTag = "dock_toggle_inking_tray"
+                    ) {
+                        PhysicalPenSquiggleIcon(
+                            tint = if (isInkBarActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Sticky Note
+                    CompactDockActionButton(
+                        isSelected = false,
+                        description = "Agregar nota adhesiva",
+                        onClick = onAddStickyNote,
+                        testTag = "dock_action_sticky_note"
+                    ) {
+                        PhysicalStickyNoteIcon(modifier = Modifier.size(22.dp))
+                    }
+
+                    // Geometric Shapes
+                    CompactDockActionButton(
+                        isSelected = pendingShapeType != null,
+                        description = "Formas geométricas",
+                        onClick = onOpenShapePicker,
+                        testTag = "dock_tool_shapes"
+                    ) {
+                        PhysicalShapesIcon(
+                            tint = if (pendingShapeType != null) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Templates
+                    CompactDockActionButton(
+                        isSelected = false,
+                        description = "Plantillas de pizarra",
+                        onClick = onOpenTemplates,
+                        testTag = "dock_action_templates"
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GridView,
+                            contentDescription = null,
+                            tint = Color(0xFF2563EB),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Color, Thickness, Line Style & Arrow Properties (...)
+                    Box {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer
+                                    else Color.Transparent
+                                )
+                                .border(
+                                    width = if (showMoreMenu) 1.5.dp else 0.dp,
+                                    color = if (showMoreMenu) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    shape = RoundedCornerShape(10.dp)
+                                )
+                                .clickable { showMoreMenu = !showMoreMenu }
+                                .padding(horizontal = 8.dp)
+                                .testTag("dock_more_menu_button")
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(13.dp)
+                                    .clip(CircleShape)
+                                    .then(
+                                        if (isRainbowPen) {
+                                            Modifier.background(
+                                                Brush.sweepGradient(
+                                                    listOf(Color.Red, Color.Yellow, Color.Green, Color.Cyan, Color.Magenta, Color.Red)
+                                                )
+                                            )
+                                        } else {
+                                            Modifier.background(parsedPenColor)
+                                        }
+                                    )
+                                    .border(1.2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Icon(
+                                imageVector = Icons.Default.MoreHoriz,
+                                contentDescription = "Color, grosor y estilo de trazo",
+                                tint = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(18.dp)
                             )
-                            if (isStrokeTool) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .align(Alignment.BottomEnd)
-                                        .clip(CircleShape)
-                                        .background(activeHighlightColor)
-                                        .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Column {
-                            Text(
-                                text = "Trazos",
-                                fontSize = 9.sp,
-                                lineHeight = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = activeShortLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (pendingShapeType == null) MaterialTheme.colorScheme.onPrimaryContainer
-                                else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Desplegar trazos",
-                            tint = if (pendingShapeType == null) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showToolsMenu,
-                        onDismissRequest = { showToolsMenu = false },
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .width(260.dp)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-                            .testTag("dock_tools_dropdown_menu")
-                    ) {
-                        // Grupo 1: Pluma (con sub-panel desplegable: Pluma, Lápiz, Marcador fino)
-                        ExpandableGroupRow(
-                            icon = writingIcon,
-                            label = writingTitle,
-                            isGroupActive = isWritingTool,
-                            isExpanded = expandedWriting,
-                            onToggleExpand = { expandedWriting = !expandedWriting },
-                            onSelectDefault = {
-                                onSelectTool(if (isWritingTool) currentTool else ToolType.PEN)
-                                showToolsMenu = false
-                            },
-                            testTag = "dock_menu_group_pen"
-                        )
-                        AnimatedVisibility(visible = expandedWriting) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                                    .padding(vertical = 2.dp)
-                            ) {
-                                CleanSubToolItem(
-                                    icon = Icons.Default.Edit,
-                                    label = "Pluma",
-                                    isSelected = currentTool == ToolType.PEN,
-                                    onClick = {
-                                        onSelectTool(ToolType.PEN)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_pen"
-                                )
-                                CleanSubToolItem(
-                                    icon = Icons.Default.Create,
-                                    label = "Lápiz",
-                                    isSelected = currentTool == ToolType.PENCIL,
-                                    onClick = {
-                                        onSelectTool(ToolType.PENCIL)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_pencil"
-                                )
-                                CleanSubToolItem(
-                                    icon = Icons.Default.Gesture,
-                                    label = "Marcador fino",
-                                    isSelected = currentTool == ToolType.FINE_MARKER,
-                                    onClick = {
-                                        onSelectTool(ToolType.FINE_MARKER)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_fine_marker"
-                                )
-                            }
                         }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
-
-                        // Grupo 2: Resaltador (con sub-panel desplegable: Resaltador, Pincel)
-                        ExpandableGroupRow(
-                            icon = emphasisIcon,
-                            label = emphasisTitle,
-                            isGroupActive = isEmphasisTool,
-                            isExpanded = expandedEmphasis,
-                            onToggleExpand = { expandedEmphasis = !expandedEmphasis },
-                            onSelectDefault = {
-                                onSelectTool(if (isEmphasisTool) currentTool else ToolType.HIGHLIGHTER)
-                                showToolsMenu = false
-                            },
-                            testTag = "dock_menu_group_emphasis"
-                        )
-                        AnimatedVisibility(visible = expandedEmphasis) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                                    .padding(vertical = 2.dp)
-                            ) {
-                                CleanSubToolItem(
-                                    icon = Icons.Default.Highlight,
-                                    label = "Resaltador",
-                                    isSelected = currentTool == ToolType.HIGHLIGHTER,
-                                    onClick = {
-                                        onSelectTool(ToolType.HIGHLIGHTER)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_highlighter"
-                                )
-                                CleanSubToolItem(
-                                    icon = Icons.Default.Brush,
-                                    label = "Pincel",
-                                    isSelected = currentTool == ToolType.BRUSH,
-                                    onClick = {
-                                        onSelectTool(ToolType.BRUSH)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_brush"
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
-
-                        // Grupo 3: Borrador (con sub-panel desplegable: Borrador de objeto, Borrador de píxel)
-                        ExpandableGroupRow(
-                            icon = Icons.Default.CleaningServices,
-                            label = eraserTitle,
-                            isGroupActive = isEraserTool,
-                            isExpanded = expandedEraser,
-                            onToggleExpand = { expandedEraser = !expandedEraser },
-                            onSelectDefault = {
-                                onSelectTool(if (isEraserTool) currentTool else ToolType.ERASER)
-                                showToolsMenu = false
-                            },
-                            testTag = "dock_menu_group_eraser"
-                        )
-                        AnimatedVisibility(visible = expandedEraser) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-                                    .padding(vertical = 2.dp)
-                            ) {
-                                CleanSubToolItem(
-                                    icon = Icons.Default.CleaningServices,
-                                    label = "Borrador de objeto",
-                                    isSelected = currentTool == ToolType.ERASER,
-                                    onClick = {
-                                        onSelectTool(ToolType.ERASER)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_eraser"
-                                )
-                                CleanSubToolItem(
-                                    icon = Icons.Default.CleaningServices,
-                                    label = "Borrador de píxel",
-                                    isSelected = currentTool == ToolType.PIXEL_ERASER,
-                                    onClick = {
-                                        onSelectTool(ToolType.PIXEL_ERASER)
-                                        showToolsMenu = false
-                                    },
-                                    testTag = "dock_menu_tool_pixel_eraser"
-                                )
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
-
-                        // Manipulación (sin títulos ni subtítulos)
-                        CleanToolRow(
-                            icon = Icons.Default.NearMe,
-                            label = "Lazo de selección",
-                            isSelected = pendingShapeType == null && currentTool == ToolType.SELECT_LASSO,
-                            onClick = {
-                                onSelectTool(ToolType.SELECT_LASSO)
-                                showToolsMenu = false
-                            },
-                            testTag = "dock_menu_tool_select_lasso"
-                        )
-
-                        CleanToolRow(
-                            icon = Icons.Default.PanTool,
-                            label = "Mover lienzo",
-                            isSelected = pendingShapeType == null && currentTool == ToolType.HAND,
-                            onClick = {
-                                onSelectTool(ToolType.HAND)
-                                showToolsMenu = false
-                            },
-                            testTag = "dock_menu_tool_hand"
-                        )
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
-
-                        // Regla Toggle (sin subtítulo)
-                        CleanToggleRow(
-                            icon = Icons.Default.Straighten,
-                            label = "Regla",
-                            isActive = isRulerActive,
-                            onClick = onToggleRuler,
-                            testTag = "dock_menu_toggle_ruler"
-                        )
-
-                        // Formas automáticas Toggle (sin subtítulo)
-                        CleanToggleRow(
-                            icon = Icons.Default.AutoFixHigh,
-                            label = "Formas automáticas",
-                            isActive = autoShapeRecognition,
-                            onClick = onToggleAutoShape,
-                            testTag = "dock_menu_toggle_auto_shape"
-                        )
-                    }
-                }
-
-                // 2. Botón Formas Preestablecidas
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .heightIn(min = 38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(
-                            if (pendingShapeType != null) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = if (pendingShapeType != null) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(11.dp)
-                        )
-                        .clickable(onClick = onOpenShapePicker)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .testTag("dock_tool_shapes")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Category,
-                        contentDescription = "Formas preestablecidas",
-                        tint = if (pendingShapeType != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(17.dp)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    Text(
-                        text = if (pendingShapeType != null) shortShapeDockLabel(pendingShapeType) else "Formas",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (pendingShapeType != null) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1
-                    )
-                }
-
-                // Hairline Divider
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(24.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant)
-                )
-
-                // 3. Status Pill
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .heightIn(min = 38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(
-                            width = 1.dp,
-                            color = if (autoShapeRecognition || isRulerActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
-                            else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(11.dp)
-                        )
-                        .clickable { showMoreMenu = true }
-                        .padding(horizontal = 9.dp, vertical = 6.dp)
-                        .testTag("dock_selected_indicator")
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(activeHighlightColor)
-                            .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    )
-                    Spacer(modifier = Modifier.width(5.dp))
-                    val statusBadges = buildString {
-                        append("${currentPenWidth.toInt()}px")
-                        if (autoShapeRecognition) append(" · Auto")
-                        if (isRulerActive) append(" · Regla")
-                    }
-                    Text(
-                        text = statusBadges,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                // 4. 3-Dots Menu (Color, Grosor, Estilo de Línea)
-                Box {
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(11.dp))
-                            .background(
-                                if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(11.dp)
-                            )
-                            .clickable { showMoreMenu = !showMoreMenu }
-                            .testTag("dock_more_menu_button"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Propiedades del trazo",
-                            tint = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = showMoreMenu,
-                        onDismissRequest = { showMoreMenu = false },
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .width(264.dp)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-                            .testTag("dock_more_dropdown_menu")
-                    ) {
-                        // Color de Trazo
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        DropdownMenu(
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false },
+                            scrollState = rememberScrollState(),
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .width(316.dp)
+                                .heightIn(max = 460.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                                .testTag("dock_more_dropdown_menu")
                         ) {
-                            colorPalette.forEach { (hex, label) ->
-                                val swatchColor = Color(android.graphics.Color.parseColor(hex))
-                                val isColorSelected = currentPenColor.equals(hex, ignoreCase = true) && !isRainbowPen
-                                Box(
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                // Color de Trazo
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(swatchColor)
-                                        .border(
-                                            width = if (isColorSelected) 2.5.dp else 1.dp,
-                                            color = if (isColorSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                            shape = CircleShape
-                                        )
-                                        .clickable {
-                                            onUpdatePenColor(hex, false)
-                                        }
-                                        .testTag("dock_color_$label"),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 8.dp)
                                 ) {
-                                    if (isColorSelected) {
+                                    colorPalette.forEach { (hex, label) ->
+                                        val swatchColor = Color(android.graphics.Color.parseColor(hex))
+                                        val isColorSelected = currentPenColor.equals(hex, ignoreCase = true) && !isRainbowPen
                                         Box(
                                             modifier = Modifier
-                                                .size(7.dp)
+                                                .size(26.dp)
                                                 .clip(CircleShape)
-                                                .background(Color.White)
-                                        )
+                                                .background(swatchColor)
+                                                .border(
+                                                    width = if (isColorSelected) 2.5.dp else 1.dp,
+                                                    color = if (isColorSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                                    shape = CircleShape
+                                                )
+                                                .clickable {
+                                                    onUpdatePenColor(hex, false)
+                                                }
+                                                .testTag("dock_color_$label"),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isColorSelected) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Color.White)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
 
-                        // Grosor
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            widthOptions.forEach { (widthVal, label) ->
-                                val isSelected = kotlin.math.abs(currentPenWidth - widthVal) < 1f
-                                Box(
+                                // Grosor
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable { onUpdatePenWidth(widthVal) }
-                                        .padding(vertical = 7.dp),
-                                    contentAlignment = Alignment.Center
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 6.dp)
                                 ) {
-                                    Text(
-                                        text = label,
-                                        fontSize = 11.sp,
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                    widthOptions.forEach { (widthVal, label) ->
+                                        val isSelected = kotlin.math.abs(currentPenWidth - widthVal) < 1f
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(
+                                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                                    else MaterialTheme.colorScheme.surfaceVariant
+                                                )
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                                    shape = RoundedCornerShape(8.dp)
+                                                )
+                                                .clickable { onUpdatePenWidth(widthVal) }
+                                                .padding(vertical = 7.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
                                 }
-                            }
-                        }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
 
-                        // Estilo de Línea
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 8.dp)
-                        ) {
-                            StrokeStyle.values().forEach { style ->
-                                val isSelected = currentPenStyle == style
-                                Box(
+                                // Categorized Line Styles with live Canvas previews
+                                LineStyleSelectorPanel(
+                                    selectedStyle = currentPenStyle,
+                                    previewColorHex = currentPenColor,
+                                    onSelectStyle = onUpdatePenStyle,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
+                                )
+
+                                Spacer(modifier = Modifier.height(6.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                                // Arrow Caps (0, 1 or 2 arrows)
+                                LineCapSelectorRow(
+                                    selectedCapStyle = currentPenCapStyle,
+                                    onSelectCapStyle = onUpdatePenCapStyle,
+                                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 6.dp)
+                                )
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
+
+                                // Auto-shape recognition toggle inside properties menu
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(
-                                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant
+                                            if (autoShapeRecognition) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                                            else Color.Transparent
                                         )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = RoundedCornerShape(8.dp)
-                                        )
-                                        .clickable { onUpdatePenStyle(style) }
-                                        .padding(vertical = 7.dp),
-                                    contentAlignment = Alignment.Center
+                                        .clickable(onClick = onToggleAutoShape)
+                                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                                        .testTag("dock_menu_toggle_auto_shape")
                                 ) {
-                                    Text(
-                                        text = style.displayName,
-                                        fontSize = 10.sp,
-                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                    Icon(
+                                        imageVector = Icons.Default.AutoFixHigh,
+                                        contentDescription = null,
+                                        tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(17.dp)
                                     )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Formas automáticas",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = if (autoShapeRecognition) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(
+                                                if (autoShapeRecognition) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                                            )
+                                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                                    ) {
+                                        Text(
+                                            text = if (autoShapeRecognition) "ON" else "OFF",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (autoShapeRecognition) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -710,218 +612,189 @@ fun WhiteboardPenDock(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Separated Floating Swipe Segmented Switcher ("Selección" / "Mover") — mirrors Header Pizarra/Notas switcher
+        val isSelectSegmentActive = !isHandActive
+        var swipeAccumDx by remember { mutableFloatStateOf(0f) }
+
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            tonalElevation = 0.dp,
+            shadowElevation = 4.dp,
+            color = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                .pointerInput(currentTool) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { swipeAccumDx = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            swipeAccumDx += dragAmount
+                            if (swipeAccumDx > 24f) {
+                                onSelectTool(ToolType.HAND)
+                                swipeAccumDx = 0f
+                                change.consume()
+                            } else if (swipeAccumDx < -24f) {
+                                onSelectTool(ToolType.SELECT_LASSO)
+                                swipeAccumDx = 0f
+                                change.consume()
+                            }
+                        }
+                    )
+                }
+                .testTag("dock_navigation_swipe_switch")
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .padding(3.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(2.dp)
+            ) {
+                DockModeSegmentItem(
+                    icon = Icons.Default.NearMe,
+                    label = "Selec.",
+                    contentDesc = "Modo selección",
+                    isSelected = isSelectSegmentActive,
+                    onClick = { onSelectTool(ToolType.SELECT_LASSO) },
+                    testTag = "dock_tool_select"
+                )
+                Spacer(modifier = Modifier.width(2.dp))
+                DockModeSegmentItem(
+                    icon = Icons.Default.PanTool,
+                    label = "Mover",
+                    contentDesc = "Mover lienzo",
+                    isSelected = isHandActive,
+                    onClick = { onSelectTool(ToolType.HAND) },
+                    testTag = "dock_tool_hand"
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ExpandableGroupRow(
+private fun DockModeSegmentItem(
     icon: ImageVector,
     label: String,
-    isGroupActive: Boolean,
-    isExpanded: Boolean,
-    onToggleExpand: () -> Unit,
-    onSelectDefault: () -> Unit,
+    contentDesc: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
     testTag: String
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    val bgColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+    val fgColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                if (isGroupActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                else Color.Transparent
-            )
-            .clickable(onClick = onToggleExpand)
-            .padding(horizontal = 10.dp, vertical = 7.dp)
+            .size(width = 44.dp, height = 46.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(bgColor)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = contentDesc
+                selected = isSelected
+            }
             .testTag(testTag)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (isGroupActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(17.dp)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isGroupActive) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isGroupActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        Icon(
-            imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-            contentDescription = if (isExpanded) "Plegar" else "Desplegar",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = fgColor,
             modifier = Modifier.size(16.dp)
         )
+        Spacer(modifier = Modifier.height(1.dp))
+        Text(
+            text = label,
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
+            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+            color = fgColor,
+            maxLines = 1
+        )
     }
 }
 
 @Composable
-private fun CleanSubToolItem(
-    icon: ImageVector,
-    label: String,
+private fun UprightTrayToolSlot(
     isSelected: Boolean,
+    description: String,
     onClick: () -> Unit,
-    testTag: String
+    testTag: String,
+    anchorBottom: Boolean = true,
+    iconContent: @Composable () -> Unit
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else Color.Transparent
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag(testTag)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(15.dp)
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        if (isSelected) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Activo",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(15.dp)
-            )
-        }
-    }
-}
+    val liftY by animateDpAsState(
+        targetValue = if (isSelected) (-3).dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 450f),
+        label = "tray_tool_lift"
+    )
 
-@Composable
-private fun CleanToolRow(
-    icon: ImageVector,
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        contentAlignment = if (anchorBottom) Alignment.BottomCenter else Alignment.Center,
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(width = 36.dp, height = 48.dp)
+            .padding(top = 2.dp, bottom = if (anchorBottom) 0.dp else 4.dp)
+            .clip(RoundedCornerShape(7.dp))
             .background(
-                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                 else Color.Transparent
             )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 7.dp)
+            .border(
+                width = if (isSelected) 1.5.dp else 0.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                shape = RoundedCornerShape(7.dp)
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                selected = isSelected
+            }
             .testTag(testTag)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(17.dp)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
-        if (isSelected) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Activo",
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(16.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun CleanToggleRow(
-    icon: ImageVector,
-    label: String,
-    isActive: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                else Color.Transparent
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag(testTag)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(17.dp)
-        )
-        Spacer(modifier = Modifier.width(10.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.weight(1f)
-        )
         Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(
-                    if (isActive) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                )
-                .padding(horizontal = 7.dp, vertical = 2.dp)
+            contentAlignment = if (anchorBottom) Alignment.BottomCenter else Alignment.Center,
+            modifier = Modifier.offset(y = liftY)
         ) {
-            Text(
-                text = if (isActive) "ON" else "OFF",
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isActive) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-            )
+            iconContent()
         }
     }
 }
 
-private fun shortShapeDockLabel(type: ShapeType): String {
-    return when (type) {
-        ShapeType.RECTANGLE -> "Rect."
-        ShapeType.ROUNDED_RECT -> "Redond."
-        ShapeType.CIRCLE -> "Círculo"
-        ShapeType.TRIANGLE -> "Triáng."
-        ShapeType.DIAMOND -> "Rombo"
-        ShapeType.LINE -> "Línea"
-        ShapeType.ARROW -> "Flecha"
-        ShapeType.DOUBLE_ARROW -> "Doble"
-        ShapeType.STAR -> "Estrella"
-        ShapeType.HEXAGON -> "Hexág."
-        ShapeType.CLOUD_CALLOUT -> "Diálogo"
-        ShapeType.CYLINDER -> "Cilindro"
+@Composable
+private fun CompactDockActionButton(
+    isSelected: Boolean,
+    description: String,
+    onClick: () -> Unit,
+    testTag: String,
+    content: @Composable () -> Unit
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(width = 42.dp, height = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.surfaceVariant
+                else Color.Transparent
+            )
+            .border(
+                width = if (isSelected) 1.5.dp else 0.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                shape = RoundedCornerShape(10.dp)
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics {
+                contentDescription = description
+                selected = isSelected
+            }
+            .testTag(testTag)
+    ) {
+        content()
     }
 }

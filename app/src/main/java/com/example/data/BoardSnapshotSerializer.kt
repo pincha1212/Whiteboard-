@@ -2,6 +2,7 @@ package com.example.data
 
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StickerItem
@@ -35,6 +36,7 @@ object BoardSnapshotSerializer {
             obj.put("isHighlighter", s.isHighlighter)
             obj.put("isRainbow", s.isRainbow)
             obj.put("strokeStyle", s.strokeStyle.name)
+            obj.put("capStyle", s.capStyle.name)
             obj.put("zIndex", s.zIndex)
             obj.put("brushType", s.brushType.name)
             obj.put("opacity", s.opacity.toDouble())
@@ -64,7 +66,17 @@ object BoardSnapshotSerializer {
             obj.put("strokeWidth", sh.strokeWidth.toDouble())
             obj.put("isFilled", sh.isFilled)
             obj.put("strokeStyle", sh.strokeStyle.name)
+            obj.put("capStyle", sh.capStyle.name)
             obj.put("rotation", sh.rotation.toDouble())
+            obj.put("opacity", sh.opacity.toDouble())
+            obj.put("isRainbow", sh.isRainbow)
+            obj.put("label", sh.label)
+            obj.put("isLocked", sh.isLocked)
+            sh.templateRole?.let { obj.put("templateRole", it) }
+            sh.groupId?.let { obj.put("groupId", it) }
+            sh.parentId?.let { obj.put("parentId", it) }
+            obj.put("isCollapsed", sh.isCollapsed)
+            obj.put("isHiddenByCollapse", sh.isHiddenByCollapse)
             val vertsArr = JSONArray()
             sh.vertices.forEach { v ->
                 vertsArr.put(JSONObject().apply {
@@ -91,6 +103,11 @@ object BoardSnapshotSerializer {
             obj.put("isPinned", n.isPinned)
             obj.put("isVoiceNote", n.isVoiceNote)
             obj.put("voiceDurationSec", n.voiceDurationSec)
+            obj.put("isLocked", n.isLocked)
+            obj.put("isAspectRatioLocked", n.isAspectRatioLocked)
+            n.groupId?.let { obj.put("groupId", it) }
+            n.parentId?.let { obj.put("parentId", it) }
+            obj.put("isHiddenByCollapse", n.isHiddenByCollapse)
             notesArr.put(obj)
         }
         root.put("stickyNotes", notesArr)
@@ -105,6 +122,13 @@ object BoardSnapshotSerializer {
                 put("fontSize", t.fontSize.toDouble())
                 put("colorHex", t.colorHex)
                 put("isBold", t.isBold)
+                put("isLocked", t.isLocked)
+                put("isEditableCard", t.isEditableCard)
+                t.backgroundColorHex?.let { put("backgroundColorHex", it) }
+                put("width", t.width.toDouble())
+                t.groupId?.let { put("groupId", it) }
+                t.parentId?.let { put("parentId", it) }
+                put("isHiddenByCollapse", t.isHiddenByCollapse)
             })
         }
         root.put("textItems", textsArr)
@@ -148,6 +172,8 @@ object BoardSnapshotSerializer {
                     }
                     val styleName = obj.optString("strokeStyle", StrokeStyle.SOLID.name)
                     val style = StrokeStyle.values().firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
+                    val capName = obj.optString("capStyle", LineCapStyle.NONE.name)
+                    val capStyle = LineCapStyle.values().firstOrNull { it.name == capName } ?: LineCapStyle.NONE
                     val isHL = obj.optBoolean("isHighlighter", false)
                     val defaultBrush = if (isHL) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN
                     val brushName = obj.optString("brushType", defaultBrush.name)
@@ -162,6 +188,7 @@ object BoardSnapshotSerializer {
                             isHighlighter = isHL,
                             isRainbow = obj.optBoolean("isRainbow", false),
                             strokeStyle = style,
+                            capStyle = capStyle,
                             zIndex = obj.optInt("zIndex", 0),
                             brushType = brushType,
                             opacity = opacity
@@ -179,6 +206,8 @@ object BoardSnapshotSerializer {
                     val shapeType = ShapeType.values().firstOrNull { it.name == typeName } ?: ShapeType.RECTANGLE
                     val styleName = obj.optString("strokeStyle", StrokeStyle.SOLID.name)
                     val style = StrokeStyle.values().firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
+                    val capName = obj.optString("capStyle", LineCapStyle.NONE.name)
+                    val capStyle = LineCapStyle.values().firstOrNull { it.name == capName } ?: LineCapStyle.NONE
                     val verts = mutableListOf<StrokePoint>()
                     val vertsArr = obj.optJSONArray("vertices")
                     if (vertsArr != null) {
@@ -200,8 +229,18 @@ object BoardSnapshotSerializer {
                             strokeWidth = obj.optDouble("strokeWidth", 4.0).toFloat(),
                             isFilled = obj.optBoolean("isFilled", false),
                             strokeStyle = style,
+                            capStyle = capStyle,
                             rotation = obj.optDouble("rotation", 0.0).toFloat(),
-                            vertices = verts
+                            vertices = verts,
+                            opacity = obj.optDouble("opacity", 1.0).toFloat().coerceIn(0.15f, 1.0f),
+                            isRainbow = obj.optBoolean("isRainbow", false),
+                            label = obj.optString("label", ""),
+                            isLocked = obj.optBoolean("isLocked", false),
+                            templateRole = obj.optString("templateRole", "").takeIf { it.isNotEmpty() },
+                            groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
+                            parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
+                            isCollapsed = obj.optBoolean("isCollapsed", false),
+                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
                         )
                     )
                 }
@@ -224,7 +263,12 @@ object BoardSnapshotSerializer {
                             rotation = obj.optDouble("rotation", 0.0).toFloat(),
                             isPinned = obj.optBoolean("isPinned", false),
                             isVoiceNote = obj.optBoolean("isVoiceNote", false),
-                            voiceDurationSec = obj.optInt("voiceDurationSec", 0)
+                            voiceDurationSec = obj.optInt("voiceDurationSec", 0),
+                            isLocked = obj.optBoolean("isLocked", false),
+                            isAspectRatioLocked = obj.optBoolean("isAspectRatioLocked", false),
+                            groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
+                            parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
+                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
                         )
                     )
                 }
@@ -243,7 +287,14 @@ object BoardSnapshotSerializer {
                             y = obj.getDouble("y").toFloat(),
                             fontSize = obj.optDouble("fontSize", 24.0).toFloat(),
                             colorHex = obj.optString("colorHex", "#1E1E1E"),
-                            isBold = obj.optBoolean("isBold", false)
+                            isBold = obj.optBoolean("isBold", false),
+                            isLocked = obj.optBoolean("isLocked", false),
+                            isEditableCard = obj.optBoolean("isEditableCard", false),
+                            backgroundColorHex = obj.optString("backgroundColorHex", "").takeIf { it.isNotEmpty() },
+                            width = obj.optDouble("width", 190.0).toFloat(),
+                            groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
+                            parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
+                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
                         )
                     )
                 }

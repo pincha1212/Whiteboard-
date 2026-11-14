@@ -2,6 +2,8 @@ package com.example.ui.canvas
 
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -12,13 +14,19 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.LaserPoint
+import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
+import com.example.model.isLineLike
 import com.example.model.StrokeBrushType
+import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
 import com.example.model.WhiteboardStroke
 import kotlin.math.PI
@@ -39,7 +47,7 @@ fun getPathEffect(style: StrokeStyle, width: Float, animPhase: Float = 0f): Path
         StrokeStyle.DASHED -> PathEffect.dashPathEffect(floatArrayOf(width * 3f, width * 2f), 0f)
         StrokeStyle.DOTTED -> PathEffect.dashPathEffect(floatArrayOf(width, width * 1.5f), 0f)
         StrokeStyle.DASH_DOT -> PathEffect.dashPathEffect(floatArrayOf(width * 4f, width * 1.6f, width * 1.2f, width * 1.6f), 0f)
-        StrokeStyle.ANIMATED_PULSE -> PathEffect.dashPathEffect(floatArrayOf(width * 3.5f, width * 2f), animPhase * width * 5.5f)
+        StrokeStyle.ANIMATED_PULSE -> PathEffect.dashPathEffect(floatArrayOf(width * 3.5f, width * 2f), -(animPhase * width * 5.5f))
         else -> null
     }
 }
@@ -142,50 +150,73 @@ fun DrawScope.drawShapeVector(
     panY: Float,
     scale: Float,
     animPhase: Float = 0f,
-    isSelected: Boolean = false
+    isSelected: Boolean = false,
+    isDarkBoard: Boolean = false
 ) {
+    if (shape.isHiddenByCollapse) return
     val x = shape.x * scale + panX
     val y = shape.y * scale + panY
     val w = shape.width * scale
     val h = shape.height * scale
 
-    val strokeColor = parseColor(shape.strokeColorHex)
+    val strokeColor = parseColor(shape.strokeColorHex).let {
+        it.copy(alpha = (it.alpha * shape.opacity.coerceIn(0.15f, 1.0f)))
+    }
     val fillColor = parseColor(shape.fillColorHex)
     val strokeW = (shape.strokeWidth * scale).coerceAtLeast(1.5f)
     val pathEffect = getPathEffect(shape.strokeStyle, strokeW, animPhase)
 
-    rotate(degrees = shape.rotation, pivot = Offset(x + w / 2f, y + h / 2f)) {
+    val effectiveRotation = if (shape.shapeType == ShapeType.LINE) 0f else shape.rotation
+    rotate(degrees = effectiveRotation, pivot = Offset(x + w / 2f, y + h / 2f)) {
         when (shape.shapeType) {
             ShapeType.RECTANGLE -> {
-                if (shape.isFilled) drawRect(color = fillColor, topLeft = Offset(x, y), size = Size(w, h))
-                drawRect(
-                    color = strokeColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, h),
-                    style = Stroke(width = strokeW, pathEffect = pathEffect)
-                )
+                val path = Path().apply {
+                    addRect(Rect(x, y, x + w, y + h))
+                }
+                if (shape.isFilled) drawPath(path = path, color = fillColor)
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.ROUNDED_RECT -> {
                 val cr = CornerRadius(16f * scale, 16f * scale)
-                if (shape.isFilled) drawRoundRect(color = fillColor, topLeft = Offset(x, y), size = Size(w, h), cornerRadius = cr)
-                drawRoundRect(
-                    color = strokeColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, h),
-                    cornerRadius = cr,
-                    style = Stroke(width = strokeW, pathEffect = pathEffect)
-                )
+                val path = Path().apply {
+                    addRoundRect(RoundRect(Rect(x, y, x + w, y + h), cr))
+                }
+                if (shape.isFilled) drawPath(path = path, color = fillColor)
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.CIRCLE -> {
-                if (shape.isFilled) {
-                    drawOval(color = fillColor, topLeft = Offset(x, y), size = Size(w, h))
+                val path = Path().apply {
+                    addOval(Rect(x, y, x + w, y + h))
                 }
-                drawOval(
-                    color = strokeColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, h),
-                    style = Stroke(width = strokeW, pathEffect = pathEffect)
-                )
+                if (shape.isFilled) drawPath(path = path, color = fillColor)
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.TRIANGLE -> {
                 val path = Path().apply {
@@ -204,11 +235,16 @@ fun DrawScope.drawShapeVector(
                     close()
                 }
                 if (shape.isFilled) drawPath(path = path, color = fillColor)
-                drawPath(
-                    path = path,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.DIAMOND -> {
                 val path = Path().apply {
@@ -228,11 +264,16 @@ fun DrawScope.drawShapeVector(
                     close()
                 }
                 if (shape.isFilled) drawPath(path = path, color = fillColor)
-                drawPath(
-                    path = path,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.LINE -> {
                 AdvancedLineEffects.run {
@@ -242,52 +283,42 @@ fun DrawScope.drawShapeVector(
                         panY = panY,
                         scale = scale,
                         animPhase = animPhase,
-                        isSelected = false
+                        isSelected = false,
+                        isDarkBoard = isDarkBoard
                     )
                 }
             }
             ShapeType.ARROW -> {
-                val head = kotlin.math.min(22f * scale, kotlin.math.min(w * 0.35f, h * 0.45f))
-                drawLine(
-                    color = strokeColor,
-                    start = Offset(x, y + h / 2f),
-                    end = Offset(x + w - head * 0.4f, y + h / 2f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round,
-                    pathEffect = pathEffect
+                val lineShape = if (shape.vertices.size >= 2) shape else shape.copy(
+                    vertices = listOf(StrokePoint(x, y + h / 2f), StrokePoint(x + w, y + h / 2f))
                 )
-                val path = Path().apply {
-                    moveTo(x + w, y + h / 2f)
-                    lineTo(x + w - head, y + h / 2f - head * 0.65f)
-                    lineTo(x + w - head, y + h / 2f + head * 0.65f)
-                    close()
+                AdvancedLineEffects.run {
+                    drawAdvancedLineShape(
+                        shape = lineShape.copy(capStyle = LineCapStyle.END_ARROW),
+                        panX = panX,
+                        panY = panY,
+                        scale = scale,
+                        animPhase = animPhase,
+                        isSelected = false,
+                        isDarkBoard = isDarkBoard
+                    )
                 }
-                drawPath(path = path, color = strokeColor)
             }
             ShapeType.DOUBLE_ARROW -> {
-                val head = kotlin.math.min(20f * scale, kotlin.math.min(w * 0.25f, h * 0.45f))
-                drawLine(
-                    color = strokeColor,
-                    start = Offset(x + head * 0.4f, y + h / 2f),
-                    end = Offset(x + w - head * 0.4f, y + h / 2f),
-                    strokeWidth = strokeW,
-                    cap = StrokeCap.Round,
-                    pathEffect = pathEffect
+                val lineShape = if (shape.vertices.size >= 2) shape else shape.copy(
+                    vertices = listOf(StrokePoint(x, y + h / 2f), StrokePoint(x + w, y + h / 2f))
                 )
-                val rightHead = Path().apply {
-                    moveTo(x + w, y + h / 2f)
-                    lineTo(x + w - head, y + h / 2f - head * 0.65f)
-                    lineTo(x + w - head, y + h / 2f + head * 0.65f)
-                    close()
+                AdvancedLineEffects.run {
+                    drawAdvancedLineShape(
+                        shape = lineShape.copy(capStyle = LineCapStyle.BOTH_ARROWS),
+                        panX = panX,
+                        panY = panY,
+                        scale = scale,
+                        animPhase = animPhase,
+                        isSelected = false,
+                        isDarkBoard = isDarkBoard
+                    )
                 }
-                val leftHead = Path().apply {
-                    moveTo(x, y + h / 2f)
-                    lineTo(x + head, y + h / 2f - head * 0.65f)
-                    lineTo(x + head, y + h / 2f + head * 0.65f)
-                    close()
-                }
-                drawPath(path = rightHead, color = strokeColor)
-                drawPath(path = leftHead, color = strokeColor)
             }
             ShapeType.HEXAGON -> {
                 val path = Path().apply {
@@ -300,11 +331,16 @@ fun DrawScope.drawShapeVector(
                     close()
                 }
                 if (shape.isFilled) drawPath(path = path, color = fillColor)
-                drawPath(
-                    path = path,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.STAR -> {
                 val cx = x + w / 2f
@@ -325,15 +361,23 @@ fun DrawScope.drawShapeVector(
                     close()
                 }
                 if (shape.isFilled) drawPath(path = path, color = fillColor)
-                drawPath(
-                    path = path,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = path,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.CLOUD_CALLOUT -> {
                 val bubbleH = h * 0.78f
                 val cr = CornerRadius(bubbleH * 0.35f, bubbleH * 0.35f)
+                val bubblePath = Path().apply {
+                    addRoundRect(RoundRect(Rect(x, y, x + w, y + bubbleH), cr))
+                }
                 val tailPath = Path().apply {
                     moveTo(x + w * 0.26f, y + bubbleH - 1f)
                     lineTo(x + w * 0.16f, y + h)
@@ -341,21 +385,27 @@ fun DrawScope.drawShapeVector(
                     close()
                 }
                 if (shape.isFilled) {
-                    drawRoundRect(color = fillColor, topLeft = Offset(x, y), size = Size(w, bubbleH), cornerRadius = cr)
+                    drawPath(path = bubblePath, color = fillColor)
                     drawPath(path = tailPath, color = fillColor)
                 }
-                drawRoundRect(
-                    color = strokeColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, bubbleH),
-                    cornerRadius = cr,
-                    style = Stroke(width = strokeW, pathEffect = pathEffect)
-                )
-                drawPath(
-                    path = tailPath,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = bubblePath,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                    drawStyledOutlinePath(
+                        path = tailPath,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
             }
             ShapeType.CYLINDER -> {
                 val capH = (h * 0.22f).coerceAtLeast(10f)
@@ -366,30 +416,70 @@ fun DrawScope.drawShapeVector(
                     lineTo(x + w, y + capH / 2f)
                     close()
                 }
+                val topOvalPath = Path().apply {
+                    addOval(Rect(x, y, x + w, y + capH))
+                }
                 if (shape.isFilled) {
                     drawPath(path = bodyPath, color = fillColor)
-                    drawOval(color = fillColor, topLeft = Offset(x, y), size = Size(w, capH))
+                    drawPath(path = topOvalPath, color = fillColor)
                 }
-                drawPath(
-                    path = bodyPath,
-                    color = strokeColor,
-                    style = Stroke(width = strokeW, join = StrokeJoin.Round, pathEffect = pathEffect)
-                )
-                drawOval(
-                    color = strokeColor,
-                    topLeft = Offset(x, y),
-                    size = Size(w, capH),
-                    style = Stroke(width = strokeW, pathEffect = pathEffect)
-                )
+                AdvancedLineEffects.run {
+                    drawStyledOutlinePath(
+                        path = bodyPath,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                    drawStyledOutlinePath(
+                        path = topOvalPath,
+                        style = shape.strokeStyle,
+                        color = strokeColor,
+                        strokeWidth = strokeW,
+                        animPhase = animPhase,
+                        isDarkBoard = isDarkBoard
+                    )
+                }
+            }
+        }
+
+        if (shape.label.isNotBlank() && !shape.shapeType.isLineLike) {
+            drawIntoCanvas { canvas ->
+                val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = if (shape.isFilled) {
+                        Color(0xFF0F172A).toArgb()
+                    } else if (isDarkBoard) {
+                        Color.White.toArgb()
+                    } else {
+                        strokeColor.toArgb()
+                    }
+                    textSize = (15.5f * scale).coerceIn(10f, 34f)
+                    typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                    textAlign = android.graphics.Paint.Align.CENTER
+                }
+                val fm = textPaint.fontMetrics
+                val textY = y + h / 2f - (fm.ascent + fm.descent) / 2f
+                canvas.nativeCanvas.drawText(shape.label, x + w / 2f, textY, textPaint)
             }
         }
 
         if (isSelected) {
-            if (shape.shapeType == ShapeType.LINE && shape.vertices.size >= 2) {
-                val p0 = Offset(shape.vertices[0].x * scale + panX, shape.vertices[0].y * scale + panY)
-                val p1 = Offset(shape.vertices[1].x * scale + panX, shape.vertices[1].y * scale + panY)
+            if (shape.shapeType.isLineLike && shape.vertices.size >= 2) {
+                val p0 = Offset(shape.vertices.first().x * scale + panX, shape.vertices.first().y * scale + panY)
+                val p1 = Offset(shape.vertices.last().x * scale + panX, shape.vertices.last().y * scale + panY)
+
+                val rot0 = p0 + Offset(0f, -32f)
+                val rot1 = p1 + Offset(0f, -32f)
+
+                drawLine(color = Color(0xFF2563EB), start = p0, end = rot0, strokeWidth = 2f)
+                drawLine(color = Color(0xFF2563EB), start = p1, end = rot1, strokeWidth = 2f)
+
                 drawHandleCircle(p0)
+                drawRotationHandleCircle(rot0)
+
                 drawHandleCircle(p1)
+                drawRotationHandleCircle(rot1)
             } else {
                 drawRect(
                     color = Color(0xFF2563EB),
@@ -410,6 +500,12 @@ private fun DrawScope.drawHandleCircle(center: Offset) {
     drawCircle(color = Color.White, radius = 11f, center = center)
     drawCircle(color = Color(0xFF2563EB), radius = 11f, center = center, style = Stroke(width = 3.5f))
     drawCircle(color = Color(0xFF2563EB), radius = 4f, center = center)
+}
+
+private fun DrawScope.drawRotationHandleCircle(center: Offset) {
+    drawCircle(color = Color.White, radius = 10f, center = center)
+    drawCircle(color = Color(0xFF2563EB), radius = 10f, center = center, style = Stroke(width = 3f))
+    drawCircle(color = Color(0xFF2563EB), radius = 3.5f, center = center)
 }
 
 fun DrawScope.drawStrokeSelectionHandles(

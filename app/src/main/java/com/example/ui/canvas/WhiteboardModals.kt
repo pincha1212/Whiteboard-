@@ -13,16 +13,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.GridOn
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,75 +34,34 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.CustomBoardTemplate
 import com.example.model.TemplateType
 
 @Composable
 fun TemplatePickerModal(
     onSelectTemplate: (TemplateType) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    showOnNewBoard: Boolean = false,
+    onToggleShowOnNewBoard: (Boolean) -> Unit = {},
+    onStartBlankCanvas: () -> Unit = onDismiss,
+    customTemplates: List<CustomBoardTemplate> = emptyList(),
+    currentBoardTitle: String = "",
+    onSaveCurrentAsTemplate: ((title: String, description: String) -> Unit)? = null,
+    onSelectCustomTemplate: (CustomBoardTemplate) -> Unit = {},
+    onDeleteCustomTemplate: (String) -> Unit = {}
 ) {
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-                .testTag("template_picker_modal")
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Dashboard, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Plantillas de Ideación",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(260.dp)) {
-                    items(TemplateType.values()) { tmpl ->
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                .clickable {
-                                    onSelectTemplate(tmpl)
-                                    onDismiss()
-                                }
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(tmpl.title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
-                                Text(tmpl.description, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    IdeationTemplatesDialog(
+        showOnNewBoard = showOnNewBoard,
+        onToggleShowOnNewBoard = onToggleShowOnNewBoard,
+        onStartBlankCanvas = onStartBlankCanvas,
+        onSelectTemplate = onSelectTemplate,
+        onDismiss = onDismiss,
+        customTemplates = customTemplates,
+        currentBoardTitle = currentBoardTitle,
+        onSaveCurrentAsTemplate = onSaveCurrentAsTemplate,
+        onSelectCustomTemplate = onSelectCustomTemplate,
+        onDeleteCustomTemplate = onDeleteCustomTemplate
+    )
 }
 
 @Composable
