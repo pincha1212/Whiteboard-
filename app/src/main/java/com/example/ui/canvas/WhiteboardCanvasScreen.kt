@@ -292,8 +292,8 @@ fun WhiteboardCanvasScreen(
                         } else if (curState.currentTool == ToolType.HAND) {
                             // Standalone Hand button: strictly pan-only, disable any accidental object selection/drag
                             gestureMode = CanvasGestureMode.PAN
-                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance) != -1) {
-                            activeHandleIndex = getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance)
+                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, curState.scale) != -1) {
+                            activeHandleIndex = getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, curState.scale)
                             gestureMode = CanvasGestureMode.RESIZE_SHAPE
                         } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance) != -1) {
                             activeHandleIndex = getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance)
@@ -398,7 +398,13 @@ fun WhiteboardCanvasScreen(
                                         }
                                         val nwX = (change.position.x - liveState.panX) / liveState.scale
                                         val nwY = (change.position.y - liveState.panY) / liveState.scale
-                                        viewModel.resizeSelectedShapeHandle(activeHandleIndex, nwX, nwY)
+                                        // Shape handles are drawn in the rotated canvas coordinate system.
+                                        // Convert the pointer back to the shape's local, unrotated space
+                                        // before applying the resize so the opposite corner stays anchored.
+                                        val resizePoint = activeShape?.let {
+                                            ShapeCanvasCoordinates.toLocalUnrotated(it, nwX, nwY)
+                                        } ?: (nwX to nwY)
+                                        viewModel.resizeSelectedShapeHandle(activeHandleIndex, resizePoint.first, resizePoint.second)
                                         change.consume()
                                     }
                                     CanvasGestureMode.MOVE_SHAPE -> {
@@ -1261,34 +1267,25 @@ fun WhiteboardCanvasScreen(
     }
 }
 
-private fun toLocalUnrotated(shape: ShapeItem, wX: Float, wY: Float): Pair<Float, Float> {
-    if (shape.rotation == 0f || shape.shapeType == ShapeType.LINE) return wX to wY
-    val cx = shape.x + shape.width / 2f
-    val cy = shape.y + shape.height / 2f
-    val rad = -shape.rotation * (PI.toFloat() / 180f)
-    val dx = wX - cx
-    val dy = wY - cy
-    val rx = cx + dx * cos(rad) - dy * sin(rad)
-    val ry = cy + dx * sin(rad) + dy * cos(rad)
-    return rx to ry
-}
+
 
 private fun getShapeHandleHitIndex(
     shape: ShapeItem,
     wX: Float,
     wY: Float,
-    tolerance: Float
+    tolerance: Float,
+    scale: Float
 ): Int {
     if (shape.shapeType.isLineLike && shape.vertices.size >= 2) {
         val p0 = shape.vertices[0]
         val p1 = shape.vertices[1]
         if (hypot(wX - p0.x, wY - p0.y) <= tolerance) return 0
         if (hypot(wX - p1.x, wY - p1.y) <= tolerance) return 1
-        if (hypot(wX - p0.x, wY - (p0.y - 32f)) <= tolerance) return 2
-        if (hypot(wX - p1.x, wY - (p1.y - 32f)) <= tolerance) return 3
+        if (hypot(wX - p0.x, wY - (p0.y - ShapeCanvasCoordinates.lineRotationHandleOffsetWorld(scale))) <= tolerance) return 2
+        if (hypot(wX - p1.x, wY - (p1.y - ShapeCanvasCoordinates.lineRotationHandleOffsetWorld(scale))) <= tolerance) return 3
         return -1
     }
-    val (lx, ly) = toLocalUnrotated(shape, wX, wY)
+    val (lx, ly) = ShapeCanvasCoordinates.toLocalUnrotated(shape, wX, wY)
     val corners = listOf(
         shape.x to shape.y,
         (shape.x + shape.width) to shape.y,
