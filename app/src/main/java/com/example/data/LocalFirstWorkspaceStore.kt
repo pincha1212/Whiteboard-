@@ -523,7 +523,7 @@ class LocalFirstWorkspaceStore(
             if (existing == null) {
                 return NoteItem(
                     id = sticky.id,
-                    title = "",
+                    title = sticky.title.orEmpty(),
                     content = sticky.text,
                     folder = folderName,
                     tags = sticky.tags.map { NoteTag(name = it, colorHex = "#0078D4") },
@@ -540,20 +540,39 @@ class LocalFirstWorkspaceStore(
                 )
             }
 
-            val (nextTitle, nextContent) = applyStickyTextEdit(existing.title, existing.content, sticky.text)
-            val nextTags = sticky.tags.map { NoteTag(name = it, colorHex = "#0078D4") }
+            // Legacy canvas payloads had no independent title field and stored
+            // "title + body" in StickyNote.text. New payloads always carry title
+            // separately, including an explicitly empty title.
+            val (nextTitle, nextContent) = if (sticky.title == null) {
+                applyLegacyStickyTextEdit(existing.title, existing.content, sticky.text)
+            } else {
+                sticky.title to sticky.text
+            }
+
+            // StickyNote currently exposes tag names only. Preserve each existing
+            // tag's color and metadata rather than replacing it with a generic color.
+            val nextTags = if (sticky.tags.isEmpty()) {
+                existing.tags
+            } else {
+                sticky.tags.map { tagName ->
+                    existing.tags.firstOrNull { it.name.equals(tagName, ignoreCase = true) }
+                        ?: NoteTag(name = tagName, colorHex = "#0078D4")
+                }
+            }
+
             val changed = nextTitle != existing.title ||
                 nextContent != existing.content ||
                 existing.colorHex != sticky.colorHex ||
                 existing.isPinned != sticky.isPinned ||
                 existing.isLocked != sticky.isLocked ||
-                existing.isVoiceNote != sticky.isVoiceNote ||
-                existing.voiceDurationSec != sticky.voiceDurationSec ||
                 existing.tags != nextTags ||
                 existing.folder != folderName ||
                 existing.canvasData != canvas ||
                 existing.isDeleted
 
+            // Do not copy voice, checklist, version-history, pin-hash or other
+            // note-only fields from the lightweight canvas projection. They remain
+            // owned by the existing NoteItem and survive canvas-only edits.
             return existing.copy(
                 title = nextTitle,
                 content = nextContent,
@@ -562,8 +581,6 @@ class LocalFirstWorkspaceStore(
                 colorHex = sticky.colorHex,
                 isPinned = sticky.isPinned,
                 isLocked = sticky.isLocked,
-                isVoiceNote = sticky.isVoiceNote,
-                voiceDurationSec = sticky.voiceDurationSec,
                 canvasData = canvas,
                 isDeleted = false,
                 deletedAt = null,
@@ -571,7 +588,7 @@ class LocalFirstWorkspaceStore(
             )
         }
 
-        private fun applyStickyTextEdit(
+        private fun applyLegacyStickyTextEdit(
             existingTitle: String,
             existingContent: String,
             newStickyText: String
@@ -592,6 +609,9 @@ class LocalFirstWorkspaceStore(
                 if (newStickyText == existingTitle) {
                     return existingTitle to ""
                 }
+                // Old cards treated the entire editable value as body text. Keep
+                // the original title rather than silently deleting it on an edit.
+                return existingTitle to newStickyText
             }
             return "" to newStickyText
         }
@@ -610,7 +630,7 @@ fun NoteItem.toStickyNote(): StickyNote? {
     val cd = canvasData ?: return null
     return StickyNote(
         id = id,
-        text = effectiveStickyText(),
+        text = content,
         x = cd.x,
         y = cd.y,
         width = cd.width,
@@ -625,6 +645,7 @@ fun NoteItem.toStickyNote(): StickyNote? {
         isAspectRatioLocked = cd.isAspectRatioLocked,
         groupId = cd.groupId,
         parentId = cd.parentId,
-        isHiddenByCollapse = cd.isHiddenByCollapse
+        isHiddenByCollapse = cd.isHiddenByCollapse,
+        title = title
     )
 }
