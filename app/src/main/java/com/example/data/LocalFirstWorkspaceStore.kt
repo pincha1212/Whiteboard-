@@ -541,11 +541,15 @@ class LocalFirstWorkspaceStore(
             }
 
             val (nextTitle, nextContent) = applyStickyTextEdit(existing.title, existing.content, sticky.text)
+            val nextTags = sticky.tags.map { NoteTag(name = it, colorHex = "#0078D4") }
             val changed = nextTitle != existing.title ||
                 nextContent != existing.content ||
                 existing.colorHex != sticky.colorHex ||
                 existing.isPinned != sticky.isPinned ||
                 existing.isLocked != sticky.isLocked ||
+                existing.isVoiceNote != sticky.isVoiceNote ||
+                existing.voiceDurationSec != sticky.voiceDurationSec ||
+                existing.tags != nextTags ||
                 existing.folder != folderName ||
                 existing.canvasData != canvas ||
                 existing.isDeleted
@@ -554,9 +558,12 @@ class LocalFirstWorkspaceStore(
                 title = nextTitle,
                 content = nextContent,
                 folder = folderName,
+                tags = nextTags,
                 colorHex = sticky.colorHex,
                 isPinned = sticky.isPinned,
                 isLocked = sticky.isLocked,
+                isVoiceNote = sticky.isVoiceNote,
+                voiceDurationSec = sticky.voiceDurationSec,
                 canvasData = canvas,
                 isDeleted = false,
                 deletedAt = null,
