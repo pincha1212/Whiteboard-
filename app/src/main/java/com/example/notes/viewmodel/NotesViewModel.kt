@@ -539,13 +539,18 @@ class NotesViewModel : ViewModel() {
             val activeId = state.activeNote?.id
             val nextActive = activeId?.let { id -> visibleNotes.find { it.id == id } }
                 ?: state.activeNote?.takeIf { activeId == null }
-            if (state.notes == visibleNotes && state.folders == folders && state.activeNote == nextActive) {
+            val activeWasRemoved = activeId != null && nextActive == null
+            if (state.notes == visibleNotes && state.folders == folders &&
+                state.activeNote == nextActive && !activeWasRemoved
+            ) {
                 state
             } else {
                 state.copy(
                     notes = visibleNotes,
                     folders = folders,
-                    activeNote = nextActive
+                    activeNote = nextActive,
+                    isEditingNote = if (activeWasRemoved) false else state.isEditingNote,
+                    unlockedNoteIds = if (activeWasRemoved) state.unlockedNoteIds - activeId!! else state.unlockedNoteIds
                 )
             }
         }
