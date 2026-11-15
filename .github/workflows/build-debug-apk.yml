@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/unified-notes-whiteboard
+      - feat/rich-notes-on-whiteboard
 
 permissions:
   contents: read
@@ -46,7 +47,7 @@ jobs:
             -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest --tests "com.example.data.WorkspaceNoteProjectionTest" --tests "com.example.ui.canvas.ShapeCanvasCoordinatesTest" :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
