@@ -60,6 +60,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -441,7 +442,7 @@ fun StickyNoteView(
 
                 // Auto-Fit Content Container (adapts dynamically and stays in view at all times)
                 val scrollState = rememberScrollState()
-                LaunchedEffect(note.text) {
+                LaunchedEffect(note.text, note.title) {
                     if (scrollState.maxValue > 0) {
                         scrollState.scrollTo(scrollState.maxValue)
                     }
@@ -453,41 +454,56 @@ fun StickyNoteView(
                         .padding(innerPadDp)
                         .verticalScroll(scrollState)
                 ) {
-                    val effectiveStyle = TextStyle(
-                        color = textColor,
-                        fontSize = autoFitFontSp,
-                        lineHeight = (autoFitFontSp.value * 1.18f).sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    BasicTextField(
-                        value = note.text,
-                        onValueChange = onUpdateText,
-                        enabled = !note.isLocked && !isPanOnlyMode,
-                        readOnly = note.isLocked || isPanOnlyMode,
-                        textStyle = effectiveStyle,
-                        cursorBrush = SolidColor(textColor),
-                        decorationBox = { inner ->
-                            if (note.text.isEmpty()) {
-                                Text(
-                                    text = "Escribe tu idea aquí...",
-                                    style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
-                                )
-                            }
-                            inner()
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = with(density) { innerHeightPx.toDp() })
-                            .onFocusChanged { focusState ->
-                                if (focusState.isFocused && !isPanOnlyMode) {
-                                    currentOnSelect()
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        note.title?.takeIf { it.isNotBlank() }?.let { title ->
+                            Text(
+                                text = title,
+                                color = textColor,
+                                fontSize = (autoFitFontSp.value * 1.18f).sp,
+                                lineHeight = (autoFitFontSp.value * 1.34f).sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp)
+                            )
+                        }
+
+                        val effectiveStyle = TextStyle(
+                            color = textColor,
+                            fontSize = autoFitFontSp,
+                            lineHeight = (autoFitFontSp.value * 1.18f).sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        BasicTextField(
+                            value = note.text,
+                            onValueChange = onUpdateText,
+                            enabled = !note.isLocked && !isPanOnlyMode,
+                            readOnly = note.isLocked || isPanOnlyMode,
+                            textStyle = effectiveStyle,
+                            cursorBrush = SolidColor(textColor),
+                            decorationBox = { inner ->
+                                if (note.text.isEmpty()) {
+                                    Text(
+                                        text = "Escribe tu idea aquí...",
+                                        style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
+                                    )
                                 }
-                            }
-                            .semantics {
-                                set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
-                            }
-                            .testTag("sticky_note_input_${note.id}")
-                    )
+                                inner()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = with(density) { innerHeightPx.toDp() })
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused && !isPanOnlyMode) {
+                                        currentOnSelect()
+                                    }
+                                }
+                                .semantics {
+                                    set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
+                                }
+                                .testTag("sticky_note_input_${note.id}")
+                        )
+                    }
                 }
             }
         }
@@ -587,11 +603,11 @@ fun StickyNoteView(
 
         // Protruding Rotation Handle connected via guide stem line from top-center edge of the card
         if (activeSelectionHandles) {
-            // 1. Anchor tick at the top-center edge of the card (matching square handle in reference)
+            // 1. Anchor tick sits on the actual top edge of the card. The inner selection box is vertically centered inside the larger rotation-gutter container.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 52.5.dp)
+                    .offset(y = 20.5.dp)
                     .size(7.dp)
                     .shadow(2.dp, RoundedCornerShape(2.dp))
                     .clip(RoundedCornerShape(2.dp))
@@ -599,21 +615,21 @@ fun StickyNoteView(
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
 
-            // 2. Connecting guide line (stem) extending 28.dp upwards to the rotation handle
+            // 2. Guide stem runs outward from the card top edge to the rotation handle.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 28.dp)
+                    .offset(y = (-4).dp)
                     .width(2.dp)
                     .height(28.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
 
-            // 3. Circular rotation handle (touch target >= 44x44px; size = 48.dp)
+            // 3. Rotation handle centered 28.dp above the card, outside its bounds.
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 4.dp)
+                    .offset(y = (-28).dp)
                     .size(handleTargetDp)
                     .onGloballyPositioned { handleCoords = it }
                     .pointerInput(note.id, note.isLocked) {

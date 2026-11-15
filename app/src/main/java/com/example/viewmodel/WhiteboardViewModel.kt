@@ -784,6 +784,12 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    /** Avoid scanning every note against every column when the board has no auto-expanding columns. */
+    private fun recalculateColumnsIfPresent(board: WhiteboardBoard): WhiteboardBoard {
+        if (board.shapes.none { it.templateRole == "COLUMN_CONTAINER" }) return board
+        return IdeationTemplateFactory.recalculateAutoExpandingColumns(board)
+    }
+
     fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
         val state = _uiState.value
         val updated = state.board.stickyNotes.map { note ->
@@ -799,7 +805,7 @@ class WhiteboardViewModel : ViewModel() {
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                recalculateColumnsIfPresent(b.copy(stickyNotes = updated))
             }
         }
     }
@@ -835,7 +841,7 @@ class WhiteboardViewModel : ViewModel() {
         if (!modified) return
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                recalculateColumnsIfPresent(b.copy(stickyNotes = updated))
             }
         }
     }
@@ -859,7 +865,7 @@ class WhiteboardViewModel : ViewModel() {
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                recalculateColumnsIfPresent(b.copy(stickyNotes = updated))
             }
         }
     }
@@ -885,7 +891,7 @@ class WhiteboardViewModel : ViewModel() {
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                recalculateColumnsIfPresent(b.copy(stickyNotes = updated))
             }
         }
     }
@@ -912,7 +918,7 @@ class WhiteboardViewModel : ViewModel() {
         _uiState.update { state ->
             val remainingNoteIds = state.selectedNoteIds - id
             state.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                recalculateColumnsIfPresent(
                     b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
                 )
             }.copy(
@@ -938,7 +944,7 @@ class WhiteboardViewModel : ViewModel() {
 
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                recalculateColumnsIfPresent(
                     b.copy(
                         strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
                         shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
@@ -1003,7 +1009,7 @@ class WhiteboardViewModel : ViewModel() {
             )
             _uiState.update {
                 it.withUpdatedBoard { b ->
-                    IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    recalculateColumnsIfPresent(
                         b.copy(stickyNotes = b.stickyNotes + newNote)
                     )
                 }.copy(
@@ -1360,7 +1366,7 @@ class WhiteboardViewModel : ViewModel() {
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                recalculateColumnsIfPresent(
                     b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
                 )
             }
@@ -1908,7 +1914,7 @@ class WhiteboardViewModel : ViewModel() {
 
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                recalculateColumnsIfPresent(
                     b.copy(
                         shapes = b.shapes + generated.shapes,
                         stickyNotes = b.stickyNotes + generated.stickyNotes,
