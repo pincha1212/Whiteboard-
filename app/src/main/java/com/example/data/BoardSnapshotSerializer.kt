@@ -94,6 +94,7 @@ object BoardSnapshotSerializer {
             val obj = JSONObject()
             obj.put("id", n.id)
             obj.put("text", n.text)
+            n.title?.let { obj.put("title", it) }
             obj.put("x", n.x.toDouble())
             obj.put("y", n.y.toDouble())
             obj.put("width", n.width.toDouble())
@@ -255,6 +256,7 @@ object BoardSnapshotSerializer {
                         StickyNote(
                             id = obj.getString("id"),
                             text = obj.optString("text", ""),
+                            title = if (obj.has("title")) obj.optString("title", "") else null,
                             x = obj.getDouble("x").toFloat(),
                             y = obj.getDouble("y").toFloat(),
                             width = obj.optDouble("width", 220.0).toFloat(),
