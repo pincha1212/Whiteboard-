@@ -235,7 +235,9 @@ data class StickyNote(
     val isAspectRatioLocked: Boolean = false,
     val groupId: String? = null,
     val parentId: String? = null,
-    val isHiddenByCollapse: Boolean = false
+    val isHiddenByCollapse: Boolean = false,
+    // null means a legacy canvas note whose title was embedded in text.
+    val title: String? = null
 )
 
 data class ImageCardItem(
