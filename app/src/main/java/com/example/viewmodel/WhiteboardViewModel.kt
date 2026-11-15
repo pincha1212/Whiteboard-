@@ -2362,4 +2362,25 @@ class WhiteboardViewModel : ViewModel() {
     fun toggleAutoShapeRecognition() {
         _uiState.update { it.copy(autoShapeRecognition = !it.autoShapeRecognition) }
     }
+
+    /**
+     * Applies boards received from the shared workspace store without resetting
+     * transient canvas state (tool, camera, selection, undo/redo).
+     */
+    fun syncWorkspaceBoards(boards: List<WhiteboardBoard>) {
+        if (boards.isEmpty()) return
+        _uiState.update { state ->
+            val currentBoard = boards.find { it.id == state.board.id }
+                ?: if (state.isViewingBoardsHome) boards.first() else state.board
+            if (state.allBoards == boards && state.board == currentBoard) {
+                state
+            } else {
+                state.copy(
+                    board = currentBoard,
+                    allBoards = boards
+                )
+            }
+        }
+    }
+
 }

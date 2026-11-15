@@ -50,6 +50,8 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
+      // Keep the preview build installable alongside the regular app.
+      applicationIdSuffix = ".preview"
       // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
       // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")

@@ -271,12 +271,33 @@ class LocalFirstWorkspaceStore(
 
     fun upsertNote(note: NoteItem, prependIfNew: Boolean = true): WorkspaceDbState {
         return commit { cur ->
-            val exists = cur.notes.any { it.id == note.id }
-            val normalizedNote = if (note.canvasData != null) {
-                note.copy(canvasData = note.canvasData.copy(color = note.colorHex, isLocked = note.isLocked))
-            } else {
-                note
+            val linkedFolder = cur.folders.find {
+                it.name.equals(note.folder, ignoreCase = true) && it.linkedBoardId != null
             }
+            val existingBoardId = note.canvasData?.boardId
+            val targetBoardId = linkedFolder?.linkedBoardId
+            val normalizedCanvas = when {
+                targetBoardId != null && note.canvasData == null -> {
+                    val boardNoteCount = cur.notes.count {
+                        !it.isDeleted && it.canvasData?.boardId == targetBoardId && it.id != note.id
+                    }
+                    CanvasNoteData(
+                        boardId = targetBoardId,
+                        x = 72f + (boardNoteCount % 5) * 28f,
+                        y = 72f + (boardNoteCount / 5) * 28f,
+                        color = note.colorHex,
+                        isLocked = note.isLocked
+                    )
+                }
+                targetBoardId != null && note.canvasData != null ->
+                    note.canvasData.copy(boardId = targetBoardId, color = note.colorHex, isLocked = note.isLocked)
+                existingBoardId != null && targetBoardId == null -> null
+                note.canvasData != null ->
+                    note.canvasData.copy(color = note.colorHex, isLocked = note.isLocked)
+                else -> null
+            }
+            val normalizedNote = note.copy(canvasData = normalizedCanvas)
+            val exists = cur.notes.any { it.id == note.id }
             val updatedNotes = if (exists) {
                 cur.notes.map { if (it.id == note.id) normalizedNote else it }
             } else if (prependIfNew) {
@@ -520,11 +541,15 @@ class LocalFirstWorkspaceStore(
             }
 
             val (nextTitle, nextContent) = applyStickyTextEdit(existing.title, existing.content, sticky.text)
+            val nextTags = sticky.tags.map { NoteTag(name = it, colorHex = "#0078D4") }
             val changed = nextTitle != existing.title ||
                 nextContent != existing.content ||
                 existing.colorHex != sticky.colorHex ||
                 existing.isPinned != sticky.isPinned ||
                 existing.isLocked != sticky.isLocked ||
+                existing.isVoiceNote != sticky.isVoiceNote ||
+                existing.voiceDurationSec != sticky.voiceDurationSec ||
+                existing.tags != nextTags ||
                 existing.folder != folderName ||
                 existing.canvasData != canvas ||
                 existing.isDeleted
@@ -533,9 +558,12 @@ class LocalFirstWorkspaceStore(
                 title = nextTitle,
                 content = nextContent,
                 folder = folderName,
+                tags = nextTags,
                 colorHex = sticky.colorHex,
                 isPinned = sticky.isPinned,
                 isLocked = sticky.isLocked,
+                isVoiceNote = sticky.isVoiceNote,
+                voiceDurationSec = sticky.voiceDurationSec,
                 canvasData = canvas,
                 isDeleted = false,
                 deletedAt = null,
