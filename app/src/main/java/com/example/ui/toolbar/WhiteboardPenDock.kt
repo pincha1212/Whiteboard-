@@ -234,18 +234,6 @@ fun WhiteboardPenDock(
                             }
 
                             UprightTrayToolSlot(
-                                isSelected = pendingShapeType == null && currentTool == ToolType.AIRBRUSH,
-                                description = "Aerógrafo",
-                                onClick = { onSelectTool(ToolType.AIRBRUSH) },
-                                testTag = "dock_menu_tool_airbrush"
-                            ) {
-                                PhysicalAirbrushIcon(
-                                    sprayColor = parsedPenColor,
-                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
-                                )
-                            }
-
-                            UprightTrayToolSlot(
                                 isSelected = pendingShapeType == null && currentTool == ToolType.LASER_POINTER,
                                 description = "Puntero láser",
                                 onClick = { onSelectTool(ToolType.LASER_POINTER) },
