@@ -1280,7 +1280,6 @@ fun WhiteboardCanvasScreen(
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
                     onOpenShapePicker = { showShapePicker = true },
-                    onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
                     onAddText = { viewModel.addTextItem(screenWidthPx, screenHeightPx) },
                     onOpenTemplates = { showTemplatePicker = true },
                     onClearBoard = { viewModel.clearBoard() },
