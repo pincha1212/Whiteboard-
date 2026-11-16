@@ -59,7 +59,7 @@ class PathHumanizer(
     ): List<List<BrushNode>> = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs)
 
     companion object {
-        const val DEFAULT_STEP_PX = 2f
+        const val DEFAULT_STEP_PX = 4f
         const val DEFAULT_HAND_DRAWN_FACTOR = 0.25f
 
         /**

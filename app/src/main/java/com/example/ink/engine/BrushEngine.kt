@@ -400,7 +400,7 @@ class BristleBrush(
     }
 
     companion object {
-        const val DEFAULT_BRISTLE_COUNT = 20
+        const val DEFAULT_BRISTLE_COUNT = 10
     }
 }
 
@@ -592,7 +592,7 @@ class Airbrush(
     }
 
     companion object {
-        const val DEFAULT_PARTICLES_PER_NODE = 16
+        const val DEFAULT_PARTICLES_PER_NODE = 8
     }
 }
 
