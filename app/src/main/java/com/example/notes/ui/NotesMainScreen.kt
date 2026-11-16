@@ -106,7 +106,9 @@ fun NotesMainScreen(
 
     if (state.isEditingNote && state.activeNote != null && !isEmbeddedInSplit) {
         val active = state.activeNote!!
-        val originBoardId = state.boardFilterId ?: active.linkedBoardIds.firstOrNull() ?: active.canvasData?.boardId
+        val originBoardId = state.boardFilterId?.takeIf { it in active.linkedBoardIds || active.canvasData?.boardId == it }
+            ?: active.linkedBoardIds.firstOrNull()
+            ?: active.canvasData?.boardId
         val originBoardName = originBoardId?.let { state.boardTitlesById[it] ?: active.folder }
         NoteEditorScreen(
             note = active,
