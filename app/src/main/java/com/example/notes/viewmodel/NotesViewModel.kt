@@ -603,9 +603,10 @@ class NotesViewModel(
     }
 
     fun flushPendingPersistence() {
+        val hadPendingPersistence = pendingPersistenceJob != null
         pendingPersistenceJob?.cancel()
         pendingPersistenceJob = null
-        store.flushToDisk()
+        if (hadPendingPersistence) store.flushToDisk()
     }
 
     /**
