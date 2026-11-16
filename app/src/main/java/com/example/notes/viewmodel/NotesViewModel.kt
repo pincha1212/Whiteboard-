@@ -143,7 +143,16 @@ class NotesViewModel(
 
     fun setBoardFilter(boardId: String?) {
         _uiState.update {
-            it.copy(boardFilterId = boardId, selectedFolder = null, selectedTag = null, isViewingTrash = false)
+            it.copy(
+                boardFilterId = boardId,
+                selectedFolder = null,
+                selectedTag = null,
+                isViewingTrash = false,
+                activeNote = null,
+                isEditingNote = false,
+                isMarkdownPreview = false,
+                isChecklistFocusRequested = false
+            )
         }
     }
 
