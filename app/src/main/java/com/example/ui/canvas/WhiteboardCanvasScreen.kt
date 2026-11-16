@@ -73,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -874,7 +875,12 @@ fun WhiteboardCanvasScreen(
                         textStyle = TextStyle(
                             color = tColor,
                             fontSize = fontSizeSp,
-                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = when (tItem.textAlign.uppercase()) {
+                                "CENTER" -> TextAlign.Center
+                                "END", "RIGHT" -> TextAlign.End
+                                else -> TextAlign.Start
+                            }
                         ),
                         cursorBrush = SolidColor(tColor),
                         modifier = Modifier
@@ -947,6 +953,15 @@ fun WhiteboardCanvasScreen(
                                             showTextMenu = false
                                         }
                                     )
+                                    listOf("START" to "Alinear izquierda", "CENTER" to "Centrar", "END" to "Alinear derecha").forEach { (align, label) ->
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                viewModel.updateTextItemStyle(tItem.id, textAlign = align)
+                                                showTextMenu = false
+                                            }
+                                        )
+                                    }
                                     listOf("#1E1E1E" to "Negro", "#2563EB" to "Azul", "#DC2626" to "Rojo").forEach { (hex, label) ->
                                         androidx.compose.material3.DropdownMenuItem(
                                             text = { Text(label) },
