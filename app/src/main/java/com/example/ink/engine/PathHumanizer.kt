@@ -126,8 +126,14 @@ class PathHumanizer(
                     hypot(startPos[0] - endPos[0], startPos[1] - endPos[1]) < 0.75f
                 val isClosed = pm.isClosed || hasLoopEndpoints
 
-                // Strictly sample every ~stepPx (default 2px), bounded to avoid runaway allocations on extreme paths.
-                val rawSampleCount = ceil((len / safeStep).toDouble()).toInt().coerceIn(2, 6000)
+                // Adaptive sampling step based on handDrawnFactor and length to avoid high-density oversampling on low-end hardware
+                val adaptiveStep = when {
+                    clampedFactor <= 0.05f -> (safeStep * 2.2f).coerceIn(8f, 18f)
+                    len > 800f -> (safeStep * 1.75f).coerceIn(6f, 14f)
+                    len > 300f -> (safeStep * 1.4f).coerceIn(5f, 10f)
+                    else -> safeStep.coerceIn(4f, 8f)
+                }
+                val rawSampleCount = ceil((len / adaptiveStep).toDouble()).toInt().coerceIn(2, 600)
                 val endIndex = rawSampleCount
 
                 // Keep wobble proportional on tiny detail fragments (dots/arrow wings) while expressive on real shapes.

@@ -421,12 +421,13 @@ class WhiteboardViewModel(
         val state = _uiState.value
         val brushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else brushTypeForTool(state.currentTool)
         val stabilizedPoints = StrokeStabilizer.stabilizePoints(points, brushType.stabilization)
+        val simplifiedPoints = com.example.ink.engine.ShapeGenerator.simplifyStrokePoints(stabilizedPoints, tolerance = 1.35f)
         val effectiveWidth = effectiveStrokeWidthForBrush(brushType, state.penWidth)
         val effectiveColor = effectiveColorForBrush(brushType, state.penColorHex)
         val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER || brushType == StrokeBrushType.SOFT_BRUSH
 
         val newStroke = WhiteboardStroke(
-            points = stabilizedPoints,
+            points = simplifiedPoints,
             colorHex = effectiveColor,
             width = effectiveWidth,
             isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
