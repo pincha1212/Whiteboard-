@@ -517,7 +517,8 @@ fun NotesMainScreen(
                             }
 
                             items(otherNotes, key = { it.id }) { note ->
-                                val boardName = note.canvasData?.let { state.boardTitlesById[it.boardId] ?: note.folder }
+                                val noteBoardId = note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
+                                val boardName = noteBoardId?.let { state.boardTitlesById[it] ?: note.folder }
                                 NoteCardView(
                                     note = note,
                                     isUnlocked = notesViewModel.isNoteUnlocked(note.id),
@@ -527,7 +528,7 @@ fun NotesMainScreen(
                                     onClick = { notesViewModel.openNote(note) },
                                     onTogglePin = { notesViewModel.toggleNotePin(note.id) },
                                     onDelete = { notesViewModel.deleteNote(note.id) },
-                                    onOpenInBoard = note.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, note.id) } },
+                                    onOpenInBoard = noteBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, note.id) } },
                                     onRestore = { notesViewModel.restoreNoteFromTrash(note.id) },
                                     onDeletePermanently = { notePendingDelete = note }
                                 )
