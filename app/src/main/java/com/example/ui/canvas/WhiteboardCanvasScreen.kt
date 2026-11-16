@@ -822,6 +822,38 @@ fun WhiteboardCanvasScreen(
                         lineHeight = (fontSizeSp.value * 1.25f).sp
                     )
                 }
+            } else if (tItem.isEditableCard) {
+                val cardBg = tItem.backgroundColorHex?.let { parseColor(it, Color.White) } ?: Color.White
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = cardBg,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .offset { IntOffset(sx, sy) }
+                        .width(widthDp)
+                        .border(1.5.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
+                        .testTag("editable_text_item_${tItem.id}")
+                ) {
+                    BasicTextField(
+                        value = tItem.text,
+                        onValueChange = { viewModel.updateTextItem(tItem.id, it) },
+                        enabled = !isPanOnlyMode,
+                        readOnly = isPanOnlyMode,
+                        textStyle = TextStyle(
+                            color = tColor,
+                            fontSize = fontSizeSp,
+                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        cursorBrush = SolidColor(tColor),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .onFocusChanged {
+                                if (!it.isFocused) viewModel.commitTextItemChanges()
+                            }
+                            .testTag("editable_text_input_${tItem.id}")
+                    )
+                }
             } else {
                 Box(
                     modifier = Modifier
