@@ -173,6 +173,7 @@ class WhiteboardViewModel(
     }
 
     fun commitWorkspaceSync() {
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         store.flushToDisk()
     }
 
@@ -2307,7 +2308,6 @@ class WhiteboardViewModel(
                 b.copy(textItems = b.textItems.map { t -> if (t.id == id && !t.isLocked) t.copy(text = newText) else t })
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
     }
 
     fun beginTextItemTransform() {
