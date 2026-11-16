@@ -849,6 +849,7 @@ fun WhiteboardCanvasScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 4.dp, vertical = 4.dp)
                             .onFocusChanged {
+                                if (it.isFocused && !textFocused) viewModel.beginTextItemTransform()
                                 textFocused = it.isFocused
                                 if (!it.isFocused) viewModel.commitTextItemChanges()
                             }
