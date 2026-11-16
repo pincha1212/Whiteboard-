@@ -520,7 +520,7 @@ fun NotesMainScreen(
                             }
 
                             items(otherNotes, key = { it.id }) { note ->
-                                val noteBoardId = note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
+                                val noteBoardId = state.boardFilterId ?: note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
                                 val boardName = noteBoardId?.let { state.boardTitlesById[it] ?: note.folder }
                                 NoteCardView(
                                     note = note,
