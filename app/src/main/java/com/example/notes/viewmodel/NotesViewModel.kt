@@ -27,6 +27,7 @@ data class NotesUiState(
     val isViewingTrash: Boolean = false,
     val folders: List<NoteFolder> = emptyList(),
     val boardTitlesById: Map<String, String> = emptyMap(),
+    val boardFilterId: String? = null,
     val selectedFolder: String? = null, // null means "Todas"
     val selectedTag: String? = null,
     val searchQuery: String = "",
@@ -52,6 +53,10 @@ data class NotesUiState(
     val filteredNotes: List<NoteItem>
         get() {
             var list = if (isViewingTrash) trashNotes else notes
+            // Optional board scope: linked Notes remain independent documents.
+            if (!isViewingTrash && boardFilterId != null) {
+                list = list.filter { boardFilterId in it.linkedBoardIds || it.canvasData?.boardId == boardFilterId }
+            }
             // Folder filter (only when not viewing trash)
             if (!isViewingTrash && !selectedFolder.isNullOrBlank() && selectedFolder != "Todas") {
                 list = list.filter { it.folder.equals(selectedFolder, ignoreCase = true) }
@@ -134,6 +139,42 @@ class NotesViewModel(
 
     fun switchWorkspace(workspace: AppActiveWorkspace) {
         _uiState.update { it.copy(activeWorkspace = workspace) }
+    }
+
+    fun setBoardFilter(boardId: String?) {
+        _uiState.update {
+            it.copy(boardFilterId = boardId, selectedFolder = null, selectedTag = null, isViewingTrash = false)
+        }
+    }
+
+    fun createNewNoteForBoard(boardId: String) {
+        val note = NoteItem(
+            title = "",
+            content = "",
+            folder = "Bandeja de Entrada",
+            linkedBoardIds = setOf(boardId)
+        )
+        val db = store.upsertNote(note, prependIfNew = true)
+        val canonical = db.notes.find { it.id == note.id } ?: note
+        _uiState.update {
+            it.copy(
+                isViewingTrash = false,
+                activeNote = canonical,
+                isEditingNote = true,
+                isMarkdownPreview = false,
+                isChecklistFocusRequested = false
+            )
+        }
+    }
+
+    fun linkNoteToBoard(noteId: String, boardId: String) {
+        store.linkNoteToBoard(noteId, boardId)
+        _uiState.update { it.copy(statusNotification = "Nota vinculada a la pizarra") }
+    }
+
+    fun unlinkNoteFromBoard(noteId: String, boardId: String) {
+        store.unlinkNoteFromBoard(noteId, boardId)
+        _uiState.update { it.copy(statusNotification = "Se quitó el vínculo; la nota sigue en Notas") }
     }
 
     fun toggleNotesLayout() {
