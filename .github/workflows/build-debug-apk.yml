@@ -9,7 +9,7 @@ on:
       - main
 
 concurrency:
-  group: whiteboard-android-${{ github.head_ref || github.ref }}
+  group: whiteboard-android-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
