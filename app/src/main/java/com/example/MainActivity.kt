@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
                                 onRenameBoard = { id, title -> whiteboardViewModel.renameBoardById(id, title) },
                                 onDuplicateBoard = { whiteboardViewModel.duplicateCurrentBoard(it) },
                                 onDeleteBoard = { whiteboardViewModel.deleteBoard(it) },
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                onSwitchToNotes = { notesViewModel.setBoardFilter(whiteboardState.board.id); currentWorkspace = AppActiveWorkspace.NOTES },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
                     AppActiveWorkspace.NOTES -> {
                         NotesMasterDetailScreen(
                             notesViewModel = notesViewModel,
-                            onOpenWhiteboard = { currentWorkspace = AppActiveWorkspace.WHITEBOARD },
+                            onOpenWhiteboard = { notesViewModel.setBoardFilter(null); currentWorkspace = AppActiveWorkspace.WHITEBOARD },
                             onOpenNoteInBoard = { boardId, noteId ->
                                 notesViewModel.closeActiveNote()
                                 whiteboardViewModel.openBoardAndFocusNote(boardId, noteId)
