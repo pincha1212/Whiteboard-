@@ -1070,7 +1070,8 @@ private fun NotesOverflowDropdownMenu(
             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = {
                 onDismissRequest()
-                notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
+                state.boardFilterId?.let { notesViewModel.createNewNoteForBoard(it) }
+                    ?: notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
             }
         )
 
