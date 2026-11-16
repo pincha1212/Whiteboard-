@@ -296,7 +296,8 @@ data class TextItem(
     val width: Float = 190f,
     val groupId: String? = null,
     val parentId: String? = null,
-    val isHiddenByCollapse: Boolean = false
+    val isHiddenByCollapse: Boolean = false,
+    val textAlign: String = "START"
 )
 
 data class StickerItem(
