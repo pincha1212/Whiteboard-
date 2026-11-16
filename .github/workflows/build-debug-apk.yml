@@ -8,6 +8,9 @@ on:
       - feat/unified-notes-whiteboard
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
