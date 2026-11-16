@@ -126,7 +126,6 @@ class LocalFirstWorkspaceStore(
             val (updatedFolders, _) = ensureLinkedFolderInternal(cur.folders, boardId, clean)
             val updatedNotes = cur.notes.map { n ->
                 val belongsToBoard = n.canvasData?.boardId == boardId ||
-                    boardId in n.linkedBoardIds ||
                     (oldFolderName != null && n.folder.equals(oldFolderName, ignoreCase = true))
                 if (belongsToBoard) {
                     n.copy(folder = clean, updatedAt = System.currentTimeMillis())
