@@ -262,27 +262,69 @@ object StickyNoteGeometry {
         return innerW to innerH
     }
 
+    fun toLocalUnrotated(
+        x: Float,
+        y: Float,
+        width: Float,
+        height: Float,
+        rotationDegrees: Float,
+        worldX: Float,
+        worldY: Float
+    ): Pair<Float, Float> {
+        if (rotationDegrees == 0f) return worldX to worldY
+        val centerX = x + width * 0.5f
+        val centerY = y + height * 0.5f
+        val radians = -rotationDegrees * (kotlin.math.PI.toFloat() / 180f)
+        val dx = worldX - centerX
+        val dy = worldY - centerY
+        return (centerX + dx * kotlin.math.cos(radians) - dy * kotlin.math.sin(radians)) to
+            (centerY + dx * kotlin.math.sin(radians) + dy * kotlin.math.cos(radians))
+    }
+
     /**
-     * Calculates the required height for a sticky note so that its text is never cut off.
+     * Calculates the required height for a sticky note so that neither its title nor its body text is cut off.
      * Expands gracefully as more lines/paragraphs are typed.
      */
     fun calculateAdaptiveHeightWorld(
         text: String,
         noteWidthWorld: Float,
         currentHeightWorld: Float,
-        isAspectRatioLocked: Boolean
+        isAspectRatioLocked: Boolean,
+        title: String? = null
     ): Float {
-        if (text.isBlank()) return currentHeightWorld.coerceAtLeast(MIN_SIZE_WORLD)
+        val cleanTitle = title?.trim().orEmpty()
+        if (cleanTitle.isEmpty() && text.isBlank()) {
+            return currentHeightWorld.coerceAtLeast(MIN_SIZE_WORLD)
+        }
         val (innerW, _) = innerTextBoxWorld(noteWidthWorld, currentHeightWorld)
         val pad = innerPaddingWorld(noteWidthWorld, currentHeightWorld)
         val headerH = headerHeightWorld(currentHeightWorld)
+
+        var requiredTextH = 16f
+        if (cleanTitle.isNotEmpty()) {
+            val titleFont = 15.5f
+            val titleLineH = titleFont * 1.25f
+            val titleMaxCols = (innerW / (titleFont * 0.58f)).toInt().coerceAtLeast(1)
+            val titleLines = countWrappedLines(cleanTitle, titleMaxCols)
+            requiredTextH += titleLines * titleLineH + 10f // divider + gap
+        } else if (title != null) {
+            // Explicit empty title row placeholder + divider space when separate title input is shown
+            requiredTextH += 24f
+        }
 
         val worldFont = 13.5f
         val lineH = worldFont * 1.25f
         val avgCharW = worldFont * 0.55f
         val maxCols = (innerW / avgCharW).toInt().coerceAtLeast(1)
+        val bodyLines = if (text.isEmpty()) 1 else countWrappedLines(text, maxCols)
+        requiredTextH += bodyLines * lineH
 
-        val paragraphs = text.split('\n')
+        val requiredTotalH = headerH + pad * 2f + requiredTextH
+        return max(currentHeightWorld, requiredTotalH).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+    }
+
+    private fun countWrappedLines(content: String, maxCols: Int): Int {
+        val paragraphs = content.split('\n')
         var totalLines = 0
         for (para in paragraphs) {
             if (para.isEmpty()) {
@@ -308,10 +350,7 @@ object StickyNoteGeometry {
             }
             totalLines += paraLines
         }
-
-        val requiredTextH = totalLines * lineH + 16f
-        val requiredTotalH = headerH + pad * 2f + requiredTextH
-        return max(currentHeightWorld, requiredTotalH).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+        return totalLines.coerceAtLeast(1)
     }
 
     /**
@@ -322,23 +361,31 @@ object StickyNoteGeometry {
     fun estimateAutoFitFontSizeWorld(
         text: String,
         innerWidthWorld: Float,
-        innerHeightWorld: Float
+        innerHeightWorld: Float,
+        title: String? = null
     ): Float {
         val safeW = innerWidthWorld.coerceAtLeast(24f)
         val safeH = innerHeightWorld.coerceAtLeast(24f)
-        val cleanText = text.ifEmpty { "Escribe tu idea aquí..." }
+        val combinedText = buildString {
+            val t = title?.trim().orEmpty()
+            if (t.isNotEmpty()) {
+                append(t)
+                append('\n')
+            }
+            append(text.ifEmpty { "Escribe el contenido..." })
+        }
 
         val minFont = 6f
         val maxFont = max(minFont + 1f, min(safeW, safeH) * 0.42f)
 
-        val words = cleanText.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val words = combinedText.split(Regex("\\s+")).filter { it.isNotEmpty() }
         val maxWordLen = words.maxOfOrNull { it.length }?.coerceAtLeast(1) ?: 1
 
         var lo = minFont
         var hi = maxFont
         repeat(16) {
             val mid = (lo + hi) * 0.5f
-            if (doesTextFitWorldBox(cleanText, words, maxWordLen, mid, safeW, safeH)) {
+            if (doesTextFitWorldBox(combinedText, words, maxWordLen, mid, safeW, safeH)) {
                 lo = mid
             } else {
                 hi = mid

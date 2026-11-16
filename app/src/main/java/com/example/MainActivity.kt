@@ -14,6 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import com.example.data.LocalFirstWorkspaceStore
 import com.example.notes.ui.NotesMasterDetailScreen
 import com.example.notes.viewmodel.AppActiveWorkspace
@@ -22,12 +24,27 @@ import com.example.ui.canvas.BoardsHomeScreen
 import com.example.ui.canvas.WhiteboardCanvasScreen
 import com.example.ui.theme.WhiteboardTheme
 import com.example.viewmodel.WhiteboardViewModel
-import kotlinx.coroutines.flow.collect
 
 class MainActivity : ComponentActivity() {
 
-    private val whiteboardViewModel: WhiteboardViewModel by viewModels()
-    private val notesViewModel: NotesViewModel by viewModels()
+    private val workspaceFactory by lazy {
+        val store = LocalFirstWorkspaceStore.getInstance(applicationContext)
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return when {
+                    modelClass.isAssignableFrom(WhiteboardViewModel::class.java) ->
+                        WhiteboardViewModel(store) as T
+                    modelClass.isAssignableFrom(NotesViewModel::class.java) ->
+                        NotesViewModel(store) as T
+                    else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
+                }
+            }
+        }
+    }
+
+    private val whiteboardViewModel: WhiteboardViewModel by viewModels { workspaceFactory }
+    private val notesViewModel: NotesViewModel by viewModels { workspaceFactory }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,59 +53,7 @@ class MainActivity : ComponentActivity() {
             WhiteboardTheme {
                 val whiteboardState by whiteboardViewModel.uiState.collectAsState()
                 val notesState by notesViewModel.uiState.collectAsState()
-                val workspaceStore = remember {
-                    LocalFirstWorkspaceStore.getInstance(applicationContext)
-                }
-                var workspaceReady by remember { mutableStateOf(false) }
-                var knownBoardIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-                var knownNoteIds by remember { mutableStateOf<Set<String>>(emptySet()) }
                 var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
-
-                // Hydrate both modules from the same local-first source of truth.
-                LaunchedEffect(workspaceStore) {
-                    if (workspaceStore.currentState.boards.isEmpty()) {
-                        workspaceStore.createBoard(whiteboardViewModel.uiState.value.board)
-                    }
-                    val initial = workspaceStore.currentState
-                    notesViewModel.syncWorkspaceData(initial.notes, initial.folders)
-                    whiteboardViewModel.syncWorkspaceBoards(initial.boards)
-                    knownBoardIds = initial.boards.map { it.id }.toSet()
-                    knownNoteIds = initial.notes.filter { !it.isDeleted }.map { it.id }.toSet()
-                    workspaceReady = true
-
-                    workspaceStore.dbState.collect { db ->
-                        notesViewModel.syncWorkspaceData(db.notes, db.folders)
-                        whiteboardViewModel.syncWorkspaceBoards(db.boards)
-                    }
-                }
-
-                // Board edits (including sticky-note creation, movement and deletion)
-                // are projected into Notes through LocalFirstWorkspaceStore.
-                LaunchedEffect(workspaceReady, whiteboardState.allBoards) {
-                    if (!workspaceReady) return@LaunchedEffect
-                    val currentIds = whiteboardState.allBoards.map { it.id }.toSet()
-                    (knownBoardIds - currentIds).forEach { removedId ->
-                        workspaceStore.deleteBoard(removedId, whiteboardState.allBoards.firstOrNull())
-                    }
-                    whiteboardState.allBoards.forEach { board ->
-                        workspaceStore.syncBoardFromWhiteboard(board)
-                    }
-                    knownBoardIds = currentIds
-                }
-
-                // Notes are persisted centrally. Choosing a board-linked folder attaches
-                // the note to that board; moving it to another folder detaches it.
-                LaunchedEffect(workspaceReady, notesState.notes, notesState.folders) {
-                    if (!workspaceReady) return@LaunchedEffect
-                    val currentNotes = notesState.notes
-                    val currentIds = currentNotes.map { it.id }.toSet()
-                    (knownNoteIds - currentIds).forEach { removedId ->
-                        workspaceStore.softDeleteNotes(setOf(removedId))
-                    }
-                    currentNotes.forEach { workspaceStore.upsertNote(it) }
-                    notesState.folders.forEach { workspaceStore.addFolder(it) }
-                    knownNoteIds = currentIds
-                }
 
                 BackHandler(
                     enabled = notesState.isEditingNote ||
@@ -137,6 +102,11 @@ class MainActivity : ComponentActivity() {
                         NotesMasterDetailScreen(
                             notesViewModel = notesViewModel,
                             onOpenWhiteboard = { currentWorkspace = AppActiveWorkspace.WHITEBOARD },
+                            onOpenNoteInBoard = { boardId, noteId ->
+                                notesViewModel.closeActiveNote()
+                                whiteboardViewModel.openBoardAndFocusNote(boardId, noteId)
+                                currentWorkspace = AppActiveWorkspace.WHITEBOARD
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
                     }

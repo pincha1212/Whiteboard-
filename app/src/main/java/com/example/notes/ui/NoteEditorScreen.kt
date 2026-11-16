@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.History
@@ -120,6 +121,8 @@ fun NoteEditorScreen(
     isVoicePlaying: Boolean,
     initialShowChecklist: Boolean = false,
     enableBackHandler: Boolean = false,
+    originBoardName: String? = null,
+    onOpenInBoard: (() -> Unit)? = null,
     onBack: () -> Unit,
     onUpdateTitle: (String) -> Unit,
     onUpdateContent: (String) -> Unit,
@@ -377,6 +380,12 @@ fun NoteEditorScreen(
                                     onDismissRequest = { showTopOverflowMenu = false },
                                     note = note,
                                     isPreviewMode = isPreviewMode,
+                                    onOpenInBoard = onOpenInBoard?.let { openFn ->
+                                        {
+                                            showTopOverflowMenu = false
+                                            openFn()
+                                        }
+                                    },
                                     onTogglePreview = {
                                         onTogglePreview()
                                         showTopOverflowMenu = false
@@ -472,7 +481,7 @@ fun NoteEditorScreen(
                     onValueChange = onUpdateTitle,
                     textStyle = TextStyle(
                         fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
@@ -481,13 +490,51 @@ fun NoteEditorScreen(
                             Text(
                                 text = "Título",
                                 fontSize = 22.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
                             )
                         }
                         innerTextField()
                     },
                     modifier = Modifier.fillMaxWidth().testTag("editor_title_input")
+                )
+
+                if (!originBoardName.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                RoundedCornerShape(8.dp)
+                            )
+                            .let { mod -> if (onOpenInBoard != null) mod.clickable(onClick = onOpenInBoard) else mod }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .testTag("btn_editor_open_in_board")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Draw,
+                            contentDescription = "Pizarra de origen",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (onOpenInBoard != null) "Pizarra: $originBoardName · Abrir en pizarra" else "Pizarra: $originBoardName",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    thickness = 1.dp,
+                    modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
                 )
 
                 // Voice Note Player Banner (if voice note)
@@ -1305,6 +1352,12 @@ fun NoteEditorScreen(
                             onDismissRequest = { showDockOverflowMenu = false },
                             note = note,
                             isPreviewMode = isPreviewMode,
+                            onOpenInBoard = onOpenInBoard?.let { openFn ->
+                                {
+                                    showDockOverflowMenu = false
+                                    openFn()
+                                }
+                            },
                             onTogglePreview = {
                                 onTogglePreview()
                                 showDockOverflowMenu = false
@@ -1443,6 +1496,7 @@ private fun EditorOptionsDropdownMenu(
     onDismissRequest: () -> Unit,
     note: NoteItem,
     isPreviewMode: Boolean,
+    onOpenInBoard: (() -> Unit)? = null,
     onTogglePreview: () -> Unit,
     onOpenFolderPicker: () -> Unit,
     onStartAddTag: () -> Unit,
@@ -1468,6 +1522,22 @@ private fun EditorOptionsDropdownMenu(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
         )
+
+        if (onOpenInBoard != null) {
+            DropdownMenuItem(
+                text = { Text("Abrir en pizarra") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Draw,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
+                onClick = onOpenInBoard,
+                modifier = Modifier.testTag("menu_editor_open_in_board")
+            )
+        }
 
         DropdownMenuItem(
             text = { Text(if (isPreviewMode) "Volver a editar" else "Modo lectura") },
@@ -1533,7 +1603,7 @@ private fun EditorOptionsDropdownMenu(
         DropdownMenuItem(
             text = {
                 Text(
-                    text = "Eliminar nota",
+                    text = "Mover a papelera",
                     color = MaterialTheme.colorScheme.error,
                     fontWeight = FontWeight.Medium
                 )

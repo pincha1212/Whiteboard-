@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Folder
@@ -83,6 +84,7 @@ import com.example.notes.viewmodel.NotesViewModel
 fun NotesMainScreen(
     notesViewModel: NotesViewModel,
     onOpenWhiteboard: (() -> Unit)? = null,
+    onOpenNoteInBoard: (boardId: String, noteId: String) -> Unit = { _, _ -> },
     isEmbeddedInSplit: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -102,13 +104,17 @@ fun NotesMainScreen(
     }
 
     if (state.isEditingNote && state.activeNote != null && !isEmbeddedInSplit) {
+        val active = state.activeNote!!
+        val originBoardName = active.canvasData?.let { state.boardTitlesById[it.boardId] ?: active.folder }
         NoteEditorScreen(
-            note = state.activeNote!!,
+            note = active,
             folders = state.folders,
             isPreviewMode = state.isMarkdownPreview,
             isVoicePlaying = state.isVoicePlaying,
             initialShowChecklist = state.isChecklistFocusRequested,
             enableBackHandler = true,
+            originBoardName = originBoardName,
+            onOpenInBoard = active.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, active.id) } },
             onBack = { notesViewModel.closeActiveNote() },
             onUpdateTitle = { notesViewModel.updateActiveNoteTitle(it) },
             onUpdateContent = { notesViewModel.updateActiveNoteContent(it) },
@@ -125,7 +131,7 @@ fun NotesMainScreen(
             onOpenVersionHistory = { notesViewModel.setShowVersionHistoryModal(true) },
             onOpenExport = { notesViewModel.setShowExportImportModal(true) },
             onToggleVoicePlayback = { notesViewModel.toggleVoicePlayback() },
-            onDeleteNote = { notePendingDelete = state.activeNote }
+            onDeleteNote = { notesViewModel.deleteNote(active.id) }
         )
     } else {
         Scaffold(
@@ -319,35 +325,93 @@ fun NotesMainScreen(
                         }
                     }
 
-                    // 2. ACTIVE FILTER PILL ROW (only shown when folder or tag filter is active)
-                    val hasFolderFilter = !state.selectedFolder.isNullOrBlank() && state.selectedFolder != "Todas"
-                    val hasTagFilter = !state.selectedTag.isNullOrBlank()
-                    if (hasFolderFilter || hasTagFilter) {
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                    // 2. ACTIVE FILTER PILL ROW / PAPELERA BANNER
+                    if (state.isViewingTrash) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+                                .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("notes_trash_banner")
                         ) {
-                            if (hasFolderFilter) {
-                                item {
-                                    ActiveFilterChip(
-                                        icon = Icons.Default.Folder,
-                                        label = state.selectedFolder!!,
-                                        onClear = { notesViewModel.selectFolder(null) }
-                                    )
-                                }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Papelera (${state.trashNotes.size})",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
                             }
-                            if (hasTagFilter) {
-                                item {
-                                    ActiveFilterChip(
-                                        icon = Icons.AutoMirrored.Filled.Label,
-                                        label = "#${state.selectedTag}",
-                                        onClear = { notesViewModel.selectTag(null) }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (state.trashNotes.isNotEmpty()) {
+                                    Text(
+                                        text = "Vaciar",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .clickable { notesViewModel.emptyTrash() }
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                                            .testTag("btn_empty_trash")
                                     )
                                 }
+                                Text(
+                                    text = "Volver",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { notesViewModel.setViewingTrash(false) }
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                                        .testTag("btn_exit_trash")
+                                )
                             }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
+                    } else {
+                        val hasFolderFilter = !state.selectedFolder.isNullOrBlank() && state.selectedFolder != "Todas"
+                        val hasTagFilter = !state.selectedTag.isNullOrBlank()
+                        if (hasFolderFilter || hasTagFilter) {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                if (hasFolderFilter) {
+                                    item {
+                                        ActiveFilterChip(
+                                            icon = Icons.Default.Folder,
+                                            label = state.selectedFolder!!,
+                                            onClear = { notesViewModel.selectFolder(null) }
+                                        )
+                                    }
+                                }
+                                if (hasTagFilter) {
+                                    item {
+                                        ActiveFilterChip(
+                                            icon = Icons.AutoMirrored.Filled.Label,
+                                            label = "#${state.selectedTag}",
+                                            onClear = { notesViewModel.selectTag(null) }
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
                     }
 
                     // 3. GOOGLE KEEP STAGGERED MASONRY GRID / LIST
@@ -371,14 +435,15 @@ fun NotesMainScreen(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.Lightbulb,
+                                        imageVector = if (state.isViewingTrash) Icons.Default.DeleteOutline else Icons.Outlined.Lightbulb,
                                         contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
+                                        tint = if (state.isViewingTrash) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(32.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(14.dp))
                                 val emptyHeadline = when {
+                                    state.isViewingTrash -> "La papelera está vacía"
                                     state.searchQuery.isNotEmpty() -> "Sin resultados para '${state.searchQuery}'"
                                     state.notes.isEmpty() -> "Tus notas aparecerán aquí"
                                     else -> "No hay notas en este filtro"
@@ -391,15 +456,16 @@ fun NotesMainScreen(
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Crea una nota, lista de tareas o grabación desde el dock.",
+                                    text = if (state.isViewingTrash) "Las notas que muevas a la papelera se pueden restaurar desde aquí."
+                                    else "Crea una nota, lista de tareas o grabación desde el dock.",
                                     fontSize = 12.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
                     } else {
-                        val pinnedNotes = filtered.filter { it.isPinned }
-                        val otherNotes = filtered.filter { !it.isPinned }
+                        val pinnedNotes = if (state.isViewingTrash) emptyList() else filtered.filter { it.isPinned }
+                        val otherNotes = if (state.isViewingTrash) filtered else filtered.filter { !it.isPinned }
                         val showSectionLabels = pinnedNotes.isNotEmpty() && otherNotes.isNotEmpty()
                         val columnCount = if (state.isGridLayout && !isEmbeddedInSplit) 2 else 1
 
@@ -422,13 +488,19 @@ fun NotesMainScreen(
                             }
 
                             items(pinnedNotes, key = { it.id }) { note ->
+                                val boardName = note.canvasData?.let { state.boardTitlesById[it.boardId] ?: note.folder }
                                 NoteCardView(
                                     note = note,
                                     isUnlocked = notesViewModel.isNoteUnlocked(note.id),
                                     isSelected = note.id == state.activeNote?.id,
+                                    originBoardName = boardName,
+                                    isTrashMode = state.isViewingTrash,
                                     onClick = { notesViewModel.openNote(note) },
                                     onTogglePin = { notesViewModel.toggleNotePin(note.id) },
-                                    onDelete = { notePendingDelete = note }
+                                    onDelete = { notesViewModel.deleteNote(note.id) },
+                                    onOpenInBoard = note.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, note.id) } },
+                                    onRestore = { notesViewModel.restoreNoteFromTrash(note.id) },
+                                    onDeletePermanently = { notePendingDelete = note }
                                 )
                             }
 
@@ -442,13 +514,19 @@ fun NotesMainScreen(
                             }
 
                             items(otherNotes, key = { it.id }) { note ->
+                                val boardName = note.canvasData?.let { state.boardTitlesById[it.boardId] ?: note.folder }
                                 NoteCardView(
                                     note = note,
                                     isUnlocked = notesViewModel.isNoteUnlocked(note.id),
                                     isSelected = note.id == state.activeNote?.id,
+                                    originBoardName = boardName,
+                                    isTrashMode = state.isViewingTrash,
                                     onClick = { notesViewModel.openNote(note) },
                                     onTogglePin = { notesViewModel.toggleNotePin(note.id) },
-                                    onDelete = { notePendingDelete = note }
+                                    onDelete = { notesViewModel.deleteNote(note.id) },
+                                    onOpenInBoard = note.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, note.id) } },
+                                    onRestore = { notesViewModel.restoreNoteFromTrash(note.id) },
+                                    onDeletePermanently = { notePendingDelete = note }
                                 )
                             }
                         }
@@ -648,14 +726,14 @@ fun NotesMainScreen(
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(
-                    text = "Eliminar nota",
+                    text = "Eliminar definitivamente",
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
                 Text(
-                    text = "¿Seguro que deseas eliminar \"$label\"? Esta acción no se puede deshacer.",
+                    text = "¿Seguro que deseas eliminar \"$label\" definitivamente? Esta acción no se puede deshacer.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -663,7 +741,7 @@ fun NotesMainScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        notesViewModel.deleteNote(target.id)
+                        notesViewModel.permanentlyDeleteNote(target.id)
                         notePendingDelete = null
                     },
                     colors = ButtonDefaults.buttonColors(
@@ -791,7 +869,7 @@ private fun NotesFoldersDropdownMenu(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
         )
 
-        val isAllSelected = state.selectedFolder == null || state.selectedFolder == "Todas"
+        val isAllSelected = !state.isViewingTrash && (state.selectedFolder == null || state.selectedFolder == "Todas")
         DropdownMenuItem(
             text = {
                 Text(
@@ -810,8 +888,9 @@ private fun NotesFoldersDropdownMenu(
         )
 
         state.folders.forEach { folder ->
-            val selected = state.selectedFolder == folder.name
+            val selected = !state.isViewingTrash && state.selectedFolder == folder.name
             val count = state.notes.count { it.folder.equals(folder.name, ignoreCase = true) }
+            val folderIcon = if (folder.linkedBoardId != null) Icons.Default.Draw else Icons.Default.Folder
             DropdownMenuItem(
                 text = {
                     Text(
@@ -821,7 +900,7 @@ private fun NotesFoldersDropdownMenu(
                     )
                 },
                 leadingIcon = {
-                    Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(17.dp))
+                    Icon(folderIcon, contentDescription = null, modifier = Modifier.size(17.dp))
                 },
                 trailingIcon = if (selected) {
                     { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp)) }
@@ -832,6 +911,32 @@ private fun NotesFoldersDropdownMenu(
                 }
             )
         }
+
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "Papelera (${state.trashNotes.size})",
+                    fontWeight = if (state.isViewingTrash) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (state.isViewingTrash) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.DeleteOutline,
+                    contentDescription = null,
+                    tint = if (state.isViewingTrash) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(17.dp)
+                )
+            },
+            trailingIcon = if (state.isViewingTrash) {
+                { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp)) }
+            } else null,
+            onClick = {
+                notesViewModel.setViewingTrash(true)
+                onDismissRequest()
+            },
+            modifier = Modifier.testTag("menu_open_trash")
+        )
 
         DropdownMenuItem(
             text = { Text("Nueva carpeta...") },
@@ -951,7 +1056,7 @@ private fun NotesOverflowDropdownMenu(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
             )
-            val isAllSelected = state.selectedFolder == null || state.selectedFolder == "Todas"
+            val isAllSelected = !state.isViewingTrash && (state.selectedFolder == null || state.selectedFolder == "Todas")
             DropdownMenuItem(
                 text = {
                     Text(
@@ -969,7 +1074,8 @@ private fun NotesOverflowDropdownMenu(
                 }
             )
             state.folders.forEach { folder ->
-                val selected = state.selectedFolder == folder.name
+                val selected = !state.isViewingTrash && state.selectedFolder == folder.name
+                val folderIcon = if (folder.linkedBoardId != null) Icons.Default.Draw else Icons.Default.Folder
                 DropdownMenuItem(
                     text = {
                         Text(
@@ -978,7 +1084,7 @@ private fun NotesOverflowDropdownMenu(
                             color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     },
-                    leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, modifier = Modifier.size(17.dp)) },
+                    leadingIcon = { Icon(folderIcon, contentDescription = null, modifier = Modifier.size(17.dp)) },
                     trailingIcon = if (selected) {
                         { Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp)) }
                     } else null,
@@ -988,6 +1094,27 @@ private fun NotesOverflowDropdownMenu(
                     }
                 )
             }
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = "Papelera (${state.trashNotes.size})",
+                        fontWeight = if (state.isViewingTrash) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (state.isViewingTrash) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = null,
+                        tint = if (state.isViewingTrash) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(17.dp)
+                    )
+                },
+                onClick = {
+                    notesViewModel.setViewingTrash(true)
+                    onDismissRequest()
+                }
+            )
         }
 
         val allUniqueTags = state.notes.flatMap { it.tags }.distinctBy { it.name }

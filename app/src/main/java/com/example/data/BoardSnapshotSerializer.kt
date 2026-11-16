@@ -70,6 +70,7 @@ object BoardSnapshotSerializer {
             obj.put("rotation", sh.rotation.toDouble())
             obj.put("opacity", sh.opacity.toDouble())
             obj.put("isRainbow", sh.isRainbow)
+            obj.put("brushType", sh.brushType.name)
             obj.put("label", sh.label)
             obj.put("isLocked", sh.isLocked)
             sh.templateRole?.let { obj.put("templateRole", it) }
@@ -209,6 +210,8 @@ object BoardSnapshotSerializer {
                     val style = StrokeStyle.values().firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
                     val capName = obj.optString("capStyle", LineCapStyle.NONE.name)
                     val capStyle = LineCapStyle.values().firstOrNull { it.name == capName } ?: LineCapStyle.NONE
+                    val brushName = obj.optString("brushType", StrokeBrushType.FOUNTAIN_PEN.name)
+                    val brushType = StrokeBrushType.values().firstOrNull { it.name == brushName } ?: StrokeBrushType.FOUNTAIN_PEN
                     val verts = mutableListOf<StrokePoint>()
                     val vertsArr = obj.optJSONArray("vertices")
                     if (vertsArr != null) {
@@ -235,6 +238,7 @@ object BoardSnapshotSerializer {
                             vertices = verts,
                             opacity = obj.optDouble("opacity", 1.0).toFloat().coerceIn(0.15f, 1.0f),
                             isRainbow = obj.optBoolean("isRainbow", false),
+                            brushType = brushType,
                             label = obj.optString("label", ""),
                             isLocked = obj.optBoolean("isLocked", false),
                             templateRole = obj.optString("templateRole", "").takeIf { it.isNotEmpty() },

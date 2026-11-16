@@ -19,22 +19,34 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.RestoreFromTrash
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -83,11 +95,17 @@ fun NoteCardView(
     note: NoteItem,
     isUnlocked: Boolean,
     isSelected: Boolean = false,
+    originBoardName: String? = null,
+    isTrashMode: Boolean = false,
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
+    onOpenInBoard: (() -> Unit)? = null,
+    onRestore: (() -> Unit)? = null,
+    onDeletePermanently: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var showCardMenu by remember { mutableStateOf(false) }
     val isDark = isSystemInDarkTheme()
     val cardBg = resolveKeepSurfaceColor(
         colorHex = note.colorHex,
@@ -139,8 +157,8 @@ fun NoteCardView(
                     Text(
                         text = displayTitle,
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.5.sp,
                         lineHeight = 20.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -153,7 +171,7 @@ fun NoteCardView(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     if (note.isLocked) {
                         Icon(
@@ -164,36 +182,149 @@ fun NoteCardView(
                         )
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .clickable(onClick = onTogglePin),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
-                            contentDescription = "Fijar nota",
-                            tint = if (note.isPinned) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
-                            modifier = Modifier.size(15.dp)
-                        )
+                    if (!isTrashMode) {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .clickable(onClick = onTogglePin),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
+                                contentDescription = "Fijar nota",
+                                tint = if (note.isPinned) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
                     }
 
                     Box(
                         modifier = Modifier
                             .size(26.dp)
                             .clip(RoundedCornerShape(7.dp))
-                            .clickable(onClick = onDelete)
+                            .clickable(onClick = {
+                                if (isTrashMode) {
+                                    onDeletePermanently?.invoke() ?: onDelete()
+                                } else {
+                                    onDelete()
+                                }
+                            })
                             .testTag("btn_delete_note_${note.id}"),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Eliminar nota",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                            imageVector = if (isTrashMode) Icons.Default.DeleteForever else Icons.Default.Delete,
+                            contentDescription = if (isTrashMode) "Eliminar definitivamente" else "Mover a papelera",
+                            tint = if (isTrashMode) MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                             modifier = Modifier.size(15.dp)
                         )
+                    }
+
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(7.dp))
+                                .clickable { showCardMenu = true }
+                                .testTag("btn_note_menu_${note.id}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.MoreVert,
+                                contentDescription = "Opciones de nota",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showCardMenu,
+                            onDismissRequest = { showCardMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ) {
+                            if (isTrashMode) {
+                                DropdownMenuItem(
+                                    text = { Text("Restaurar nota") },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.RestoreFromTrash, contentDescription = null, modifier = Modifier.size(17.dp))
+                                    },
+                                    onClick = {
+                                        showCardMenu = false
+                                        onRestore?.invoke()
+                                    },
+                                    modifier = Modifier.testTag("menu_restore_note_${note.id}")
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text("Eliminar definitivamente", color = MaterialTheme.colorScheme.error)
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.DeleteForever,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showCardMenu = false
+                                        onDeletePermanently?.invoke() ?: onDelete()
+                                    },
+                                    modifier = Modifier.testTag("menu_purge_note_${note.id}")
+                                )
+                            } else {
+                                if (onOpenInBoard != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("Abrir en pizarra") },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Default.Draw,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                        },
+                                        onClick = {
+                                            showCardMenu = false
+                                            onOpenInBoard()
+                                        },
+                                        modifier = Modifier.testTag("menu_open_in_board_${note.id}")
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(if (note.isPinned) "Desfijar" else "Fijar") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (note.isPinned) Icons.Default.PushPin else Icons.Outlined.PushPin,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showCardMenu = false
+                                        onTogglePin()
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Mover a papelera", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showCardMenu = false
+                                        onDelete()
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -209,8 +340,14 @@ fun NoteCardView(
                     maxLines = 2
                 )
             } else {
+                if (note.title.isNotBlank() && (note.content.isNotBlank() || note.checklists.isNotEmpty())) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = 5.dp)
+                    )
+                }
                 if (note.content.isNotBlank()) {
-                    if (note.title.isNotBlank()) Spacer(modifier = Modifier.height(5.dp))
                     val codeBg = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
                     val codeRed = if (isDark) Color(0xFFF87171) else Color(0xFFDC2626)
                     val richPreview = RichNoteFormatter.buildDisplayAnnotatedString(
@@ -304,9 +441,10 @@ fun NoteCardView(
                 }
             }
 
-            // Minimal Keep Footer: only custom folder / tags + date
-            val showCustomFolder = note.folder.isNotBlank() && note.folder != "Bandeja de Entrada"
-            if (showCustomFolder || note.tags.isNotEmpty()) {
+            // Footer: origin board badge + custom folder / tags + date
+            val showOriginBoard = !originBoardName.isNullOrBlank()
+            val showCustomFolder = !showOriginBoard && note.folder.isNotBlank() && note.folder != "Bandeja de Entrada"
+            if (showOriginBoard || showCustomFolder || note.tags.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -315,9 +453,41 @@ fun NoteCardView(
                 ) {
                     Row(
                         modifier = Modifier.weight(1f, fill = false),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (showCustomFolder) {
+                        if (showOriginBoard) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+                                    .border(
+                                        0.75.dp,
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                                        RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                    .semantics(mergeDescendants = true) {}
+                                    .testTag("note_board_badge_${note.id}")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Draw,
+                                    contentDescription = "Pizarra de origen",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = originBoardName!!,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        } else if (showCustomFolder) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))

@@ -113,7 +113,8 @@ object ShapeRecognizer {
                     capStyle = stroke.capStyle,
                     vertices = listOf(finalStart, finalEnd),
                     opacity = stroke.opacity,
-                    isRainbow = stroke.isRainbow
+                    isRainbow = stroke.isRainbow,
+                    brushType = stroke.brushType
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.LINE,
@@ -217,7 +218,8 @@ object ShapeRecognizer {
                     strokeStyle = stroke.strokeStyle,
                     vertices = corners,
                     opacity = stroke.opacity,
-                    isRainbow = stroke.isRainbow
+                    isRainbow = stroke.isRainbow,
+                    brushType = stroke.brushType
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.TRIANGLE,
@@ -255,7 +257,8 @@ object ShapeRecognizer {
                 strokeWidth = stroke.width,
                 strokeStyle = stroke.strokeStyle,
                 opacity = stroke.opacity,
-                isRainbow = stroke.isRainbow
+                isRainbow = stroke.isRainbow,
+                brushType = stroke.brushType
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.CIRCLE,
@@ -284,7 +287,8 @@ object ShapeRecognizer {
                 strokeStyle = stroke.strokeStyle,
                 vertices = diamondVerts,
                 opacity = stroke.opacity,
-                isRainbow = stroke.isRainbow
+                isRainbow = stroke.isRainbow,
+                brushType = stroke.brushType
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.DIAMOND,
@@ -318,7 +322,8 @@ object ShapeRecognizer {
                 strokeWidth = stroke.width,
                 strokeStyle = stroke.strokeStyle,
                 opacity = stroke.opacity,
-                isRainbow = stroke.isRainbow
+                isRainbow = stroke.isRainbow,
+                brushType = stroke.brushType
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.RECTANGLE,

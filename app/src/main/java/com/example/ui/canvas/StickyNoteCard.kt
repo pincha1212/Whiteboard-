@@ -23,9 +23,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -91,26 +93,30 @@ fun computeAutoFitStickyFontSizeSp(
     innerWidthPx: Float,
     innerHeightPx: Float,
     textMeasurer: TextMeasurer,
-    density: Density
+    density: Density,
+    title: String? = null
 ): TextUnit {
     val availW = innerWidthPx.roundToInt().coerceAtLeast(16)
     val availH = innerHeightPx.roundToInt().coerceAtLeast(16)
-    val displayText = text.ifEmpty { "Escribe tu idea aquí..." }
+    val cleanTitle = title?.trim().orEmpty()
+    val displayText = text.ifEmpty { "Escribe el contenido..." }
 
     val minPx = (6f * density.density.coerceAtLeast(1f) * 0.65f).coerceAtLeast(4f)
-    val proportionalMaxPx = (min(innerWidthPx, innerHeightPx) * 0.44f).coerceAtLeast(minPx + 1f)
+    val proportionalMaxPx = (min(innerWidthPx, innerHeightPx) * 0.40f).coerceAtLeast(minPx + 1f)
     val deterministicFitPx = with(density) {
         val wWorld = innerWidthPx / density.density
         val hWorld = innerHeightPx / density.density
         StickyNoteGeometry.estimateAutoFitFontSizeWorld(
             text = displayText,
             innerWidthWorld = wWorld,
-            innerHeightWorld = hWorld
+            innerHeightWorld = hWorld,
+            title = title
         ).sp.toPx()
     }
     val maxPx = min(proportionalMaxPx, (deterministicFitPx * 1.15f).coerceAtLeast(minPx + 0.5f))
 
-    val longestToken = displayText
+    val dividerReservePx = with(density) { 8.dp.toPx() }
+    val longestToken = (if (cleanTitle.isNotEmpty()) "$cleanTitle $displayText" else displayText)
         .split(Regex("\\s+"))
         .filter { it.isNotEmpty() }
         .maxByOrNull { it.length }
@@ -118,7 +124,7 @@ fun computeAutoFitStickyFontSizeSp(
 
     fun fitsAtPx(fontPx: Float): Boolean {
         val spVal = with(density) { fontPx.toSp() }
-        val style = TextStyle(
+        val bodyStyle = TextStyle(
             fontSize = spVal,
             lineHeight = (spVal.value * 1.18f).sp,
             fontWeight = FontWeight.Medium
@@ -126,20 +132,37 @@ fun computeAutoFitStickyFontSizeSp(
         if (longestToken.isNotEmpty()) {
             val wordMeasure = textMeasurer.measure(
                 text = longestToken,
-                style = style,
+                style = bodyStyle,
                 constraints = Constraints(maxWidth = availW),
                 maxLines = 1,
                 softWrap = false
             )
             if (wordMeasure.hasVisualOverflow && fontPx > minPx * 1.35f) return false
         }
-        val measured = textMeasurer.measure(
+        var totalHeight = 0f
+        if (cleanTitle.isNotEmpty() || title != null) {
+            val titleString = cleanTitle.ifEmpty { "Título..." }
+            val titleStyle = TextStyle(
+                fontSize = (spVal.value * 1.15f).sp,
+                lineHeight = (spVal.value * 1.32f).sp,
+                fontWeight = FontWeight.Bold
+            )
+            val measuredTitle = textMeasurer.measure(
+                text = titleString,
+                style = titleStyle,
+                constraints = Constraints(maxWidth = availW),
+                softWrap = true
+            )
+            totalHeight += measuredTitle.size.height + dividerReservePx
+        }
+        val measuredBody = textMeasurer.measure(
             text = displayText,
-            style = style,
+            style = bodyStyle,
             constraints = Constraints(maxWidth = availW),
             softWrap = true
         )
-        return measured.size.height <= availH
+        totalHeight += measuredBody.size.height
+        return totalHeight <= availH
     }
 
     var lo = minPx
@@ -162,11 +185,13 @@ fun StickyNoteView(
     panX: Float,
     panY: Float,
     onUpdateText: (String) -> Unit,
+    onUpdateTitle: (String) -> Unit = {},
     onUpdateColor: (String) -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
     onSelect: () -> Unit = {},
     onBeginTransform: () -> Unit = {},
+    onEndTransform: () -> Unit = {},
     onDragDelta: (Float, Float) -> Unit,
     onResizeHandle: (StickyNoteResizeHandle, Float, Float) -> Unit = { _, _, _ -> },
     onRotate: (Float) -> Unit = {},
@@ -179,6 +204,8 @@ fun StickyNoteView(
 
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentOnBeginTransform by rememberUpdatedState(onBeginTransform)
+    val currentOnEndTransform by rememberUpdatedState(onEndTransform)
+    val currentOnUpdateTitle by rememberUpdatedState(onUpdateTitle)
     val currentOnDragDelta by rememberUpdatedState(onDragDelta)
     val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
     val currentOnRotate by rememberUpdatedState(onRotate)
@@ -229,27 +256,29 @@ fun StickyNoteView(
     val innerWidthPx = camera.worldLengthToScreenPx(innerWidthWorld).coerceAtLeast(16f)
     val innerHeightPx = camera.worldLengthToScreenPx(innerHeightWorld).coerceAtLeast(16f)
 
-    val autoFitFontSp = remember(note.text, innerWidthPx, innerHeightPx, density.density, density.fontScale) {
+    val autoFitFontSp = remember(note.title, note.text, innerWidthPx, innerHeightPx, density.density, density.fontScale) {
         computeAutoFitStickyFontSizeSp(
             text = note.text,
             innerWidthPx = innerWidthPx,
             innerHeightPx = innerHeightPx,
             textMeasurer = textMeasurer,
-            density = density
+            density = density,
+            title = note.title
         )
     }
 
-    // Symmetrical gutters: 24.dp horizontal, 56.dp vertical (for 28.dp stem + 48.dp rotation handle)
+    // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
     // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
     val handleTargetDp = 48.dp
     val sideGutterDp = 24.dp
     val sideGutterPx = with(density) { sideGutterDp.toPx() }
-    val verticalGutterDp = 56.dp
+    val verticalGutterDp = 64.dp
     val verticalGutterPx = with(density) { verticalGutterDp.toPx() }
     val activeSelectionHandles = isSelected && !note.isLocked && !isPanOnlyMode
 
     var cardCenterRoot by remember { mutableStateOf(Offset.Zero) }
     var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var isRotating by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -311,6 +340,9 @@ fun StickyNoteView(
 
                     if (!isDragging) {
                         currentOnSelect()
+                    }
+                    if (beganSnapshot) {
+                        currentOnEndTransform()
                     }
                 }
             }
@@ -455,18 +487,43 @@ fun StickyNoteView(
                         .verticalScroll(scrollState)
                 ) {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        note.title?.takeIf { it.isNotBlank() }?.let { title ->
-                            Text(
-                                text = title,
-                                color = textColor,
-                                fontSize = (autoFitFontSp.value * 1.18f).sp,
-                                lineHeight = (autoFitFontSp.value * 1.34f).sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 5.dp)
-                            )
-                        }
+                        val titleStyle = TextStyle(
+                            color = textColor,
+                            fontSize = (autoFitFontSp.value * 1.15f).sp,
+                            lineHeight = (autoFitFontSp.value * 1.32f).sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        BasicTextField(
+                            value = note.title.orEmpty(),
+                            onValueChange = { currentOnUpdateTitle(it) },
+                            enabled = !note.isLocked && !isPanOnlyMode,
+                            readOnly = note.isLocked || isPanOnlyMode,
+                            textStyle = titleStyle,
+                            cursorBrush = SolidColor(textColor),
+                            decorationBox = { inner ->
+                                if (note.title.isNullOrEmpty()) {
+                                    Text(
+                                        text = "Título...",
+                                        style = titleStyle.copy(color = textColor.copy(alpha = 0.45f))
+                                    )
+                                }
+                                inner()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused && !isPanOnlyMode) {
+                                        currentOnSelect()
+                                    }
+                                }
+                                .testTag("sticky_note_title_input_${note.id}")
+                        )
+
+                        HorizontalDivider(
+                            color = textColor.copy(alpha = 0.16f),
+                            thickness = 1.dp,
+                            modifier = Modifier.padding(vertical = 3.dp)
+                        )
 
                         val effectiveStyle = TextStyle(
                             color = textColor,
@@ -484,7 +541,7 @@ fun StickyNoteView(
                             decorationBox = { inner ->
                                 if (note.text.isEmpty()) {
                                     Text(
-                                        text = "Escribe tu idea aquí...",
+                                        text = "Escribe el contenido...",
                                         style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
                                     )
                                 }
@@ -492,7 +549,7 @@ fun StickyNoteView(
                             },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = with(density) { innerHeightPx.toDp() })
+                                .heightIn(min = with(density) { (innerHeightPx * 0.55f).toDp() })
                                 .onFocusChanged { focusState ->
                                     if (focusState.isFocused && !isPanOnlyMode) {
                                         currentOnSelect()
@@ -555,6 +612,9 @@ fun StickyNoteView(
                                         change.consume()
                                     }
                                 } while (event.changes.any { it.pressed })
+                                if (beganResize) {
+                                    currentOnEndTransform()
+                                }
                             }
                         }
                         .testTag("sticky_note_handle_${handle.name}_${note.id}"),
@@ -600,14 +660,15 @@ fun StickyNoteView(
                 }
             }
         }
+        } // End centered sub-container for note card & 8 resize handles
 
-        // Protruding Rotation Handle connected via guide stem line from top-center edge of the card
+        // Protruding Rotation Handle placed directly inside the Outer Box (unclipped 0..64.dp top gutter)
         if (activeSelectionHandles) {
-            // 1. Anchor tick sits on the actual top edge of the card. The inner selection box is vertically centered inside the larger rotation-gutter container.
+            // 1. Anchor tick centered on the actual top edge of the card (y = 64.dp).
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 20.5.dp)
+                    .offset(y = 60.5.dp)
                     .size(7.dp)
                     .shadow(2.dp, RoundedCornerShape(2.dp))
                     .clip(RoundedCornerShape(2.dp))
@@ -615,21 +676,22 @@ fun StickyNoteView(
                     .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
             )
 
-            // 2. Guide stem runs outward from the card top edge to the rotation handle.
+            // 2. Guide stem running from handle center (y = 24.dp) to card top edge (y = 64.dp).
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = (-4).dp)
+                    .offset(y = 24.dp)
                     .width(2.dp)
-                    .height(28.dp)
+                    .height(40.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
 
-            // 3. Rotation handle centered 28.dp above the card, outside its bounds.
+            // 3. Rotation handle (48x48.dp touch target) positioned cleanly inside Outer Box top gutter (y = 0..48.dp).
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = (-28).dp)
+                    .offset(y = 0.dp)
+                    .zIndex(2f)
                     .size(handleTargetDp)
                     .onGloballyPositioned { handleCoords = it }
                     .pointerInput(note.id, note.isLocked) {
@@ -653,6 +715,7 @@ fun StickyNoteView(
                                 if (moveDelta.x != 0f || moveDelta.y != 0f) {
                                     if (!beganRotation) {
                                         beganRotation = true
+                                        isRotating = true
                                         currentOnBeginTransform()
                                     }
                                     val pointerRoot = handleCoords?.localToRoot(change.position)
@@ -673,6 +736,10 @@ fun StickyNoteView(
                                     change.consume()
                                 }
                             } while (event.changes.any { it.pressed })
+                            isRotating = false
+                            if (beganRotation) {
+                                currentOnEndTransform()
+                            }
                         }
                     }
                     .semantics {
@@ -683,14 +750,39 @@ fun StickyNoteView(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(14.dp)
-                        .shadow(3.dp, CircleShape)
+                        .size(22.dp)
+                        .shadow(4.dp, CircleShape)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary)
-                        .border(2.dp, Color.White, CircleShape)
-                )
+                        .background(Color.White)
+                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+
+            if (isRotating) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .offset(x = 38.dp, y = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.inverseSurface)
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = "${note.rotation.roundToInt()}°",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.inverseOnSurface
+                    )
+                }
             }
         }
     }
-}
 }

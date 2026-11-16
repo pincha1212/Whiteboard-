@@ -2,6 +2,8 @@ package com.example.viewmodel
 
 import androidx.lifecycle.ViewModel
 import com.example.data.BoardSnapshotSerializer
+import com.example.data.LocalFirstWorkspaceStore
+import com.example.data.WorkspaceDbState
 import com.example.ink.IdeationTemplateFactory
 import com.example.ink.PixelEraserGeometry
 import com.example.ink.ShapeRecognizer
@@ -78,6 +80,8 @@ data class WhiteboardUiState(
     val pendingFillColor: String = "#DBEAFE",
     val pendingStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
     val pendingCapStyle: LineCapStyle = LineCapStyle.NONE,
+    val pendingBrushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
+    val handDrawnFactor: Float = 0.24f,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
     val showTemplatesOnNewBoard: Boolean = false,
@@ -92,13 +96,75 @@ private data class BoardSnapshot(
     val texts: List<TextItem>
 )
 
-class WhiteboardViewModel : ViewModel() {
+class WhiteboardViewModel(
+    private val store: LocalFirstWorkspaceStore = LocalFirstWorkspaceStore()
+) : ViewModel() {
 
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
+    private var isCommittingToStore = false
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
+
+    private val storeListener: (WorkspaceDbState) -> Unit = { db ->
+        if (!isCommittingToStore && db.boards.isNotEmpty()) {
+            syncWorkspaceBoards(db.boards)
+        }
+    }
+
+    init {
+        val currentBoards = store.currentState.boards
+        if (currentBoards.isEmpty()) {
+            store.ensureBoardRegistered(_uiState.value.board)
+        } else {
+            _uiState.update { state ->
+                val cur = currentBoards.find { it.id == state.board.id } ?: currentBoards.first()
+                state.copy(board = cur, allBoards = currentBoards)
+            }
+        }
+        store.addListener(storeListener)
+    }
+
+    override fun onCleared() {
+        store.removeListener(storeListener)
+        super.onCleared()
+    }
+
+    private fun commitBoardMutationToStore(
+        board: WhiteboardBoard,
+        softDeleteMissingNotes: Boolean = false,
+        persist: Boolean = true
+    ) {
+        isCommittingToStore = true
+        try {
+            val db = store.syncBoardFromWhiteboard(
+                board = board,
+                softDeleteMissingNotes = softDeleteMissingNotes,
+                persist = persist
+            )
+            applyCanonicalBoardsFromDb(db.boards)
+        } finally {
+            isCommittingToStore = false
+        }
+    }
+
+    private fun applyCanonicalBoardsFromDb(boards: List<WhiteboardBoard>) {
+        if (boards.isEmpty()) return
+        _uiState.update { state ->
+            val currentBoard = boards.find { it.id == state.board.id }
+                ?: if (state.isViewingBoardsHome) boards.first() else state.board
+            if (state.allBoards == boards && state.board == currentBoard) {
+                state
+            } else {
+                state.copy(board = currentBoard, allBoards = boards)
+            }
+        }
+    }
+
+    fun commitWorkspaceSync() {
+        store.flushToDisk()
+    }
 
     private fun createInitialState(): WhiteboardUiState {
         val blankBoardId = UUID.randomUUID().toString()
@@ -148,7 +214,10 @@ class WhiteboardViewModel : ViewModel() {
                     pendingShapeType = null
                 )
             } else {
-                state.copy(currentTool = tool)
+                state.copy(
+                    currentTool = tool,
+                    pendingBrushType = brushTypeForTool(tool)
+                )
             }
         }
     }
@@ -315,13 +384,18 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    fun setHandDrawnFactor(factor: Float) {
+        _uiState.update { it.copy(handDrawnFactor = factor.coerceIn(0f, 1f)) }
+    }
+
     fun brushTypeForTool(tool: ToolType): StrokeBrushType {
         return when (tool) {
             ToolType.PEN -> StrokeBrushType.FOUNTAIN_PEN
-            ToolType.PENCIL -> StrokeBrushType.GRAPHITE_PENCIL
             ToolType.FINE_MARKER -> StrokeBrushType.FINE_MARKER
             ToolType.HIGHLIGHTER -> StrokeBrushType.HIGHLIGHTER
             ToolType.BRUSH -> StrokeBrushType.SOFT_BRUSH
+            ToolType.CALLIGRAPHY -> StrokeBrushType.CALLIGRAPHY
+            ToolType.AIRBRUSH -> StrokeBrushType.AIRBRUSH
             else -> StrokeBrushType.FOUNTAIN_PEN
         }
     }
@@ -330,18 +404,14 @@ class WhiteboardViewModel : ViewModel() {
         return when (brushType) {
             StrokeBrushType.HIGHLIGHTER -> (basePenWidth * 2.2f).coerceAtLeast(16f)
             StrokeBrushType.SOFT_BRUSH -> (basePenWidth * 1.9f).coerceAtLeast(12f)
+            StrokeBrushType.CALLIGRAPHY -> (basePenWidth * 1.45f).coerceAtLeast(6f)
+            StrokeBrushType.AIRBRUSH -> (basePenWidth * 2.1f).coerceAtLeast(12f)
             StrokeBrushType.FINE_MARKER -> (basePenWidth * 0.65f).coerceIn(2f, 8f)
-            StrokeBrushType.GRAPHITE_PENCIL -> (basePenWidth * 0.80f).coerceIn(2f, 10f)
             StrokeBrushType.FOUNTAIN_PEN -> basePenWidth
         }
     }
 
     fun effectiveColorForBrush(brushType: StrokeBrushType, penColorHex: String): String {
-        if (brushType == StrokeBrushType.HIGHLIGHTER &&
-            (penColorHex.equals("#0F172A", true) || penColorHex.equals("#1E1E1E", true))
-        ) {
-            return "#FFF500"
-        }
         return penColorHex
     }
 
@@ -731,6 +801,7 @@ class WhiteboardViewModel : ViewModel() {
         val worldY = worldCenterY - 100f
 
         val newNote = StickyNote(
+            title = "",
             text = "",
             x = worldX,
             y = worldY,
@@ -740,6 +811,33 @@ class WhiteboardViewModel : ViewModel() {
         _uiState.update {
             it.withUpdatedBoard { b -> b.copy(stickyNotes = b.stickyNotes + newNote) }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun updateStickyNoteTitle(id: String, newTitle: String) {
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                b.copy(stickyNotes = b.stickyNotes.map { n ->
+                    if (n.id == id) {
+                        val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
+                            text = n.text,
+                            noteWidthWorld = n.width,
+                            currentHeightWorld = n.height,
+                            isAspectRatioLocked = n.isAspectRatioLocked,
+                            title = newTitle
+                        )
+                        if (n.isAspectRatioLocked && adaptedH > n.height) {
+                            n.copy(title = newTitle, width = adaptedH, height = adaptedH)
+                        } else if (adaptedH > n.height) {
+                            n.copy(title = newTitle, height = adaptedH)
+                        } else {
+                            n.copy(title = newTitle)
+                        }
+                    } else n
+                })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun updateStickyNoteText(id: String, newText: String) {
@@ -751,7 +849,8 @@ class WhiteboardViewModel : ViewModel() {
                             text = newText,
                             noteWidthWorld = n.width,
                             currentHeightWorld = n.height,
-                            isAspectRatioLocked = n.isAspectRatioLocked
+                            isAspectRatioLocked = n.isAspectRatioLocked,
+                            title = n.title
                         )
                         if (n.isAspectRatioLocked && adaptedH > n.height) {
                             n.copy(text = newText, width = adaptedH, height = adaptedH)
@@ -764,6 +863,7 @@ class WhiteboardViewModel : ViewModel() {
                 })
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun updateStickyNoteColor(id: String, colorHex: String) {
@@ -773,6 +873,7 @@ class WhiteboardViewModel : ViewModel() {
                 b.copy(stickyNotes = b.stickyNotes.map { n -> if (n.id == id) n.copy(colorHex = colorHex) else n })
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun toggleStickyNotePin(id: String) {
@@ -782,6 +883,7 @@ class WhiteboardViewModel : ViewModel() {
                 b.copy(stickyNotes = b.stickyNotes.map { n -> if (n.id == id) n.copy(isPinned = !n.isPinned) else n })
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
@@ -802,6 +904,7 @@ class WhiteboardViewModel : ViewModel() {
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
     }
 
     fun resizeStickyNoteHandle(
@@ -838,6 +941,7 @@ class WhiteboardViewModel : ViewModel() {
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
     }
 
     fun resizeStickyNoteBounds(
@@ -862,6 +966,7 @@ class WhiteboardViewModel : ViewModel() {
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = saveSnapshot)
     }
 
     fun toggleStickyNoteAspectRatioLock(id: String) {
@@ -888,6 +993,7 @@ class WhiteboardViewModel : ViewModel() {
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun rotateStickyNote(
@@ -905,6 +1011,7 @@ class WhiteboardViewModel : ViewModel() {
             }
             state.withUpdatedBoard { b -> b.copy(stickyNotes = updated) }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = saveSnapshot)
     }
 
     fun deleteStickyNote(id: String) {
@@ -919,6 +1026,29 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
                 selectedNoteIds = remainingNoteIds
             )
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
+    }
+
+    fun detachStickyNoteFromBoard(id: String) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            val remainingNoteIds = state.selectedNoteIds - id
+            state.withUpdatedBoard { b ->
+                IdeationTemplateFactory.recalculateAutoExpandingColumns(
+                    b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
+                )
+            }.copy(
+                selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
+                selectedNoteIds = remainingNoteIds
+            )
+        }
+        isCommittingToStore = true
+        try {
+            val db = store.detachNoteFromCanvas(id)
+            applyCanonicalBoardsFromDb(db.boards)
+        } finally {
+            isCommittingToStore = false
         }
     }
 
@@ -954,6 +1084,7 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
     }
 
     fun requestAddStickyNote(colorHex: String = "#FFF275") {
@@ -966,7 +1097,8 @@ class WhiteboardViewModel : ViewModel() {
         strokeColor: String,
         fillColor: String,
         style: StrokeStyle,
-        capStyle: LineCapStyle = LineCapStyle.NONE
+        capStyle: LineCapStyle = LineCapStyle.NONE,
+        brushType: StrokeBrushType = brushTypeForTool(_uiState.value.currentTool)
     ) {
         _uiState.update {
             it.copy(
@@ -977,6 +1109,7 @@ class WhiteboardViewModel : ViewModel() {
                 pendingFillColor = fillColor,
                 pendingStrokeStyle = style,
                 pendingCapStyle = capStyle,
+                pendingBrushType = brushType,
                 selectedShapeId = null,
                 selectedStrokeId = null,
                 selectedNoteId = null,
@@ -985,6 +1118,10 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+    }
+
+    fun setPendingBrushType(brushType: StrokeBrushType) {
+        _uiState.update { it.copy(pendingBrushType = brushType) }
     }
 
     fun cancelPendingPlacement() {
@@ -996,6 +1133,7 @@ class WhiteboardViewModel : ViewModel() {
         if (state.pendingStickyNoteColor != null) {
             saveUndoSnapshot()
             val newNote = StickyNote(
+                title = "",
                 text = "",
                 x = worldX - 110f,
                 y = worldY - 100f,
@@ -1011,6 +1149,7 @@ class WhiteboardViewModel : ViewModel() {
                     selectedNoteId = newNote.id
                 )
             }
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         } else if (state.pendingShapeType != null) {
             placePendingShapeInBounds(StrokePoint(worldX, worldY), StrokePoint(worldX, worldY))
         }
@@ -1036,6 +1175,7 @@ class WhiteboardViewModel : ViewModel() {
             val maxX = kotlin.math.max(v0.x, v1.x)
             val minY = kotlin.math.min(v0.y, v1.y)
             val maxY = kotlin.math.max(v0.y, v1.y)
+            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = minX,
@@ -1052,7 +1192,8 @@ class WhiteboardViewModel : ViewModel() {
                     ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
                     else -> state.pendingCapStyle
                 },
-                vertices = listOf(v0, v1)
+                vertices = listOf(v0, v1),
+                brushType = activeBrush
             )
         } else if (dragDist < 14f) {
             val isSquareLike = shapeType == ShapeType.CIRCLE ||
@@ -1062,6 +1203,7 @@ class WhiteboardViewModel : ViewModel() {
                 shapeType == ShapeType.TRIANGLE
             val defW = if (isSquareLike) 160f else 190f
             val defH = if (isSquareLike) 160f else 130f
+            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = start.x - defW / 2f,
@@ -1072,13 +1214,15 @@ class WhiteboardViewModel : ViewModel() {
                 fillColorHex = state.pendingFillColor,
                 strokeWidth = state.penWidth.coerceIn(2f, 16f),
                 isFilled = state.pendingIsFilled,
-                strokeStyle = state.pendingStrokeStyle
+                strokeStyle = state.pendingStrokeStyle,
+                brushType = activeBrush
             )
         } else {
             val minX = kotlin.math.min(start.x, end.x)
             val minY = kotlin.math.min(start.y, end.y)
             val w = kotlin.math.abs(end.x - start.x).coerceAtLeast(28f)
             val h = kotlin.math.abs(end.y - start.y).coerceAtLeast(28f)
+            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = minX,
@@ -1089,7 +1233,8 @@ class WhiteboardViewModel : ViewModel() {
                 fillColorHex = state.pendingFillColor,
                 strokeWidth = state.penWidth.coerceIn(2f, 16f),
                 isFilled = state.pendingIsFilled,
-                strokeStyle = state.pendingStrokeStyle
+                strokeStyle = state.pendingStrokeStyle,
+                brushType = activeBrush
             )
         }
 
@@ -1216,6 +1361,36 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    fun updateSelectedShapeBrushType(brushType: StrokeBrushType) {
+        val state = _uiState.value
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: return
+        if (shapeIds.isEmpty()) return
+        saveUndoSnapshot()
+        val updated = state.board.shapes.map {
+            if (shapeIds.contains(it.id)) it.copy(brushType = brushType) else it
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun updateSelectedStrokeBrushType(brushType: StrokeBrushType) {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: return
+        if (strokeIds.isEmpty()) return
+        saveUndoSnapshot()
+        val updated = state.board.strokes.map { s ->
+            if (strokeIds.contains(s.id)) {
+                s.copy(
+                    brushType = brushType,
+                    isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
+                    opacity = brushType.defaultOpacity
+                )
+            } else s
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updated) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
     fun updateSelectedStrokeCapStyle(capStyle: LineCapStyle) {
         val strokeIds = if (_uiState.value.selectedStrokeIds.isNotEmpty()) {
             _uiState.value.selectedStrokeIds
@@ -1310,7 +1485,8 @@ class WhiteboardViewModel : ViewModel() {
         isFilled: Boolean? = null,
         width: Float? = null,
         style: StrokeStyle? = null,
-        capStyle: LineCapStyle? = null
+        capStyle: LineCapStyle? = null,
+        brushType: StrokeBrushType? = null
     ) {
         val state = _uiState.value
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: return
@@ -1324,11 +1500,13 @@ class WhiteboardViewModel : ViewModel() {
                     isFilled = isFilled ?: it.isFilled,
                     strokeWidth = width ?: it.strokeWidth,
                     strokeStyle = style ?: it.strokeStyle,
-                    capStyle = capStyle ?: it.capStyle
+                    capStyle = capStyle ?: it.capStyle,
+                    brushType = brushType ?: it.brushType
                 )
             } else it
         }
         _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun moveSelectedObjects(dxWorld: Float, dyWorld: Float) {
@@ -1364,6 +1542,9 @@ class WhiteboardViewModel : ViewModel() {
                     b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
                 )
             }
+        }
+        if (noteIds.isNotEmpty()) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
         }
     }
 
@@ -1558,6 +1739,125 @@ class WhiteboardViewModel : ViewModel() {
             if (shapeIds.contains(s.id)) s.copy(rotation = 0f) else s
         }
         _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun setSelectedShapeRotation(degrees: Float) {
+        val state = _uiState.value
+        val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: return
+        if (shapeIds.isEmpty()) return
+        val normalized = ((degrees % 360f) + 360f) % 360f
+        val updated = state.board.shapes.map { s ->
+            if (shapeIds.contains(s.id)) s.copy(rotation = normalized) else s
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
+    }
+
+    fun persistCurrentBoard() {
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun rotateSelectedShapeToPoint(worldX: Float, worldY: Float) {
+        val state = _uiState.value
+        val shapeId = state.selectedShapeId ?: state.selectedShapeIds.firstOrNull() ?: return
+        val target = state.board.shapes.find { it.id == shapeId } ?: return
+        if (target.shapeType.isLineLike && target.vertices.size >= 2) {
+            val p0 = target.vertices[0]
+            val p1 = target.vertices[1]
+            val cx = (p0.x + p1.x) / 2f
+            val cy = (p0.y + p1.y) / 2f
+            val halfLen = kotlin.math.hypot(p1.x - p0.x, p1.y - p0.y) / 2f
+            val rawDeg = Math.toDegrees(kotlin.math.atan2((worldY - cy).toDouble(), (worldX - cx).toDouble())).toFloat()
+            val snappedDeg = com.example.ink.StickyNoteGeometry.snapAngle(rawDeg, 3.5f)
+            val angle = Math.toRadians(snappedDeg.toDouble()).toFloat()
+            val nv0 = StrokePoint(cx - halfLen * cos(angle), cy - halfLen * sin(angle))
+            val nv1 = StrokePoint(cx + halfLen * cos(angle), cy + halfLen * sin(angle))
+            val minX = kotlin.math.min(nv0.x, nv1.x)
+            val maxX = kotlin.math.max(nv0.x, nv1.x)
+            val minY = kotlin.math.min(nv0.y, nv1.y)
+            val maxY = kotlin.math.max(nv0.y, nv1.y)
+            val updated = state.board.shapes.map { s ->
+                if (s.id == shapeId) {
+                    s.copy(
+                        x = minX,
+                        y = minY,
+                        width = (maxX - minX).coerceAtLeast(1f),
+                        height = (maxY - minY).coerceAtLeast(1f),
+                        vertices = listOf(nv0, nv1)
+                    )
+                } else s
+            }
+            _uiState.update { it.withUpdatedBoard { b -> b.copy(shapes = updated) } }
+        } else {
+            val cx = target.x + target.width / 2f
+            val cy = target.y + target.height / 2f
+            val deg = com.example.ink.StickyNoteGeometry.calculateRotationDegrees(
+                centerX = cx,
+                centerY = cy,
+                pointerX = worldX,
+                pointerY = worldY,
+                snapThresholdDegrees = 3.5f
+            )
+            setSelectedShapeRotation(deg)
+        }
+    }
+
+    private var strokeRotationSnapshots: Map<String, List<StrokePoint>> = emptyMap()
+    private var strokeRotationPivot: Pair<Float, Float>? = null
+    private var strokeRotationStartAngleDeg: Float? = null
+
+    fun resetStrokeDragAngle() {
+        strokeRotationSnapshots = emptyMap()
+        strokeRotationPivot = null
+        strokeRotationStartAngleDeg = null
+    }
+
+    fun rotateSelectedStrokeToPoint(worldX: Float, worldY: Float): Float {
+        val state = _uiState.value
+        val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) {
+            state.selectedStrokeIds
+        } else {
+            state.selectedStrokeId?.let { setOf(it) } ?: return 0f
+        }
+        val selectedStrokes = state.board.strokes.filter { strokeIds.contains(it.id) && it.points.isNotEmpty() }
+        if (selectedStrokes.isEmpty()) return 0f
+
+        if (strokeRotationSnapshots.isEmpty() || strokeRotationPivot == null) {
+            strokeRotationSnapshots = selectedStrokes.associate { it.id to it.points }
+            val allPts = selectedStrokes.flatMap { it.points }
+            val cx = (allPts.minOf { it.x } + allPts.maxOf { it.x }) / 2f
+            val cy = (allPts.minOf { it.y } + allPts.maxOf { it.y }) / 2f
+            strokeRotationPivot = cx to cy
+            strokeRotationStartAngleDeg = (Math.toDegrees(kotlin.math.atan2((worldY - cy).toDouble(), (worldX - cx).toDouble())) + 90.0).toFloat()
+            return 0f
+        }
+
+        val (cx, cy) = strokeRotationPivot!!
+        val startAngle = strokeRotationStartAngleDeg ?: 0f
+        val curAngle = (Math.toDegrees(kotlin.math.atan2((worldY - cy).toDouble(), (worldX - cx).toDouble())) + 90.0).toFloat()
+        val rawDelta = ((curAngle - startAngle) % 360f + 360f) % 360f
+        val snappedDelta = com.example.ink.StickyNoteGeometry.snapAngle(rawDelta, 3.5f)
+        val rad = snappedDelta * (PI.toFloat() / 180f)
+        val cosA = cos(rad)
+        val sinA = sin(rad)
+
+        val updated = state.board.strokes.map { s ->
+            val basePoints = strokeRotationSnapshots[s.id]
+            if (basePoints == null) {
+                s
+            } else {
+                s.copy(points = basePoints.map { p ->
+                    val dx = p.x - cx
+                    val dy = p.y - cy
+                    StrokePoint(
+                        x = cx + dx * cosA - dy * sinA,
+                        y = cy + dx * sinA + dy * cosA
+                    )
+                })
+            }
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updated) } }
+        return snappedDelta
     }
 
     fun bringSelectedShapeToFront() {
@@ -1849,9 +2149,11 @@ class WhiteboardViewModel : ViewModel() {
         val state = _uiState.value
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
+        val noteIds = if (state.selectedNoteIds.isNotEmpty()) state.selectedNoteIds else state.selectedNoteId?.let { setOf(it) } ?: emptySet()
         val strokesToDup = state.board.strokes.filter { strokeIds.contains(it.id) }
         val shapesToDup = state.board.shapes.filter { shapeIds.contains(it.id) }
-        if (strokesToDup.isEmpty() && shapesToDup.isEmpty()) return
+        val notesToDup = state.board.stickyNotes.filter { noteIds.contains(it.id) }
+        if (strokesToDup.isEmpty() && shapesToDup.isEmpty() && notesToDup.isEmpty()) return
         saveUndoSnapshot()
         val newStrokes = strokesToDup.map { s ->
             s.copy(id = UUID.randomUUID().toString(), points = s.points.map { StrokePoint(it.x + 30f, it.y + 30f) })
@@ -1864,17 +2166,36 @@ class WhiteboardViewModel : ViewModel() {
                 vertices = shape.vertices.map { StrokePoint(it.x + 30f, it.y + 30f) }
             )
         }
+        val newNotes = notesToDup.map { note ->
+            note.copy(
+                id = UUID.randomUUID().toString(),
+                x = note.x + 30f,
+                y = note.y + 30f,
+                groupId = null,
+                parentId = null
+            )
+        }
         val newStrokeIds = newStrokes.map { it.id }.toSet()
         val newShapeIds = newShapes.map { it.id }.toSet()
+        val newNoteIds = newNotes.map { it.id }.toSet()
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(strokes = b.strokes + newStrokes, shapes = b.shapes + newShapes)
+                b.copy(
+                    strokes = b.strokes + newStrokes,
+                    shapes = b.shapes + newShapes,
+                    stickyNotes = b.stickyNotes + newNotes
+                )
             }.copy(
                 selectedStrokeId = newStrokeIds.firstOrNull(),
                 selectedStrokeIds = newStrokeIds,
                 selectedShapeId = newShapeIds.firstOrNull(),
-                selectedShapeIds = newShapeIds
+                selectedShapeIds = newShapeIds,
+                selectedNoteId = newNoteIds.firstOrNull(),
+                selectedNoteIds = newNoteIds
             )
+        }
+        if (newNotes.isNotEmpty()) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         }
     }
 
@@ -1924,6 +2245,7 @@ class WhiteboardViewModel : ViewModel() {
                 shouldAutoOpenTemplatePicker = false
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun addClusterBranch(clusterShapeId: String) {
@@ -1931,6 +2253,7 @@ class WhiteboardViewModel : ViewModel() {
         _uiState.update {
             it.withUpdatedBoard { b -> IdeationTemplateFactory.addClusterBranch(b, clusterShapeId) }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun toggleConceptBranchCollapse(nodeId: String) {
@@ -1938,6 +2261,7 @@ class WhiteboardViewModel : ViewModel() {
         _uiState.update {
             it.withUpdatedBoard { b -> IdeationTemplateFactory.toggleConceptBranchCollapse(b, nodeId) }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun addNoteToColumn(columnShapeId: String) {
@@ -1945,6 +2269,7 @@ class WhiteboardViewModel : ViewModel() {
         _uiState.update {
             it.withUpdatedBoard { b -> IdeationTemplateFactory.addNoteToColumn(b, columnShapeId) }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun updateTextItem(id: String, newText: String) {
@@ -2059,6 +2384,7 @@ class WhiteboardViewModel : ViewModel() {
                 shouldAutoOpenTemplatePicker = false
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         return true
     }
 
@@ -2069,7 +2395,9 @@ class WhiteboardViewModel : ViewModel() {
     }
 
     fun openBoard(boardId: String) {
-        val target = _uiState.value.allBoards.find { it.id == boardId } ?: return
+        val target = _uiState.value.allBoards.find { it.id == boardId }
+            ?: store.currentState.boards.find { it.id == boardId }
+            ?: return
         undoStack.clear()
         redoStack.clear()
         _uiState.update {
@@ -2093,6 +2421,48 @@ class WhiteboardViewModel : ViewModel() {
         }
     }
 
+    fun openBoardAndFocusNote(boardId: String, noteId: String) {
+        val targetBoard = _uiState.value.allBoards.find { it.id == boardId }
+            ?: store.currentState.boards.find { it.id == boardId }
+            ?: return
+        val targetNote = targetBoard.stickyNotes.find { it.id == noteId }
+        undoStack.clear()
+        redoStack.clear()
+        _uiState.update { state ->
+            val focusScale = 1.0f
+            val nextPanX: Float
+            val nextPanY: Float
+            if (targetNote != null) {
+                val centerX = targetNote.x + targetNote.width * 0.5f
+                val centerY = targetNote.y + targetNote.height * 0.5f
+                nextPanX = state.viewportWidthPx * 0.5f - centerX * focusScale
+                nextPanY = state.viewportHeightPx * 0.5f - centerY * focusScale
+            } else {
+                nextPanX = 0f
+                nextPanY = 0f
+            }
+            state.copy(
+                board = targetBoard,
+                isViewingBoardsHome = false,
+                isZenMode = false,
+                currentTool = ToolType.SELECT_LASSO,
+                selectedStrokeId = null,
+                selectedShapeId = null,
+                selectedNoteId = targetNote?.id,
+                selectedStrokeIds = emptySet(),
+                selectedShapeIds = emptySet(),
+                selectedNoteIds = if (targetNote != null) setOf(targetNote.id) else emptySet(),
+                pendingShapeType = null,
+                pendingStickyNoteColor = null,
+                canUndo = false,
+                canRedo = false,
+                panX = nextPanX,
+                panY = nextPanY,
+                scale = focusScale
+            )
+        }
+    }
+
     fun closeBoardToHome() {
         _uiState.update {
             it.withUpdatedBoard { b -> b }.copy(
@@ -2108,6 +2478,7 @@ class WhiteboardViewModel : ViewModel() {
                 pendingStickyNoteColor = null
             )
         }
+        store.flushToDisk()
     }
 
     fun createNewBoard(
@@ -2126,10 +2497,17 @@ class WhiteboardViewModel : ViewModel() {
             undoStack.clear()
             redoStack.clear()
         }
+        isCommittingToStore = true
+        val db = try {
+            store.createBoard(newBoard, prepend = true)
+        } finally {
+            isCommittingToStore = false
+        }
+        val canonicalBoard = db.boards.find { it.id == newBoard.id } ?: newBoard
         _uiState.update {
             it.copy(
-                board = if (openImmediately) newBoard else it.board,
-                allBoards = listOf(newBoard) + it.allBoards,
+                board = if (openImmediately) canonicalBoard else it.board,
+                allBoards = db.boards,
                 isViewingBoardsHome = !openImmediately,
                 selectedStrokeId = if (openImmediately) null else it.selectedStrokeId,
                 selectedShapeId = if (openImmediately) null else it.selectedShapeId,
@@ -2156,44 +2534,89 @@ class WhiteboardViewModel : ViewModel() {
     fun duplicateCurrentBoard(boardId: String) {
         val original = _uiState.value.allBoards.find { it.id == boardId } ?: return
         val dupId = UUID.randomUUID().toString()
+        val idMap = mutableMapOf<String, String>()
+        fun remap(oldId: String?): String? {
+            if (oldId == null) return null
+            return idMap.getOrPut(oldId) { UUID.randomUUID().toString() }
+        }
+        val remappedShapes = original.shapes.map { sh ->
+            sh.copy(
+                id = remap(sh.id)!!,
+                groupId = remap(sh.groupId),
+                parentId = remap(sh.parentId)
+            )
+        }
+        val remappedNotes = original.stickyNotes.map { n ->
+            n.copy(
+                id = remap(n.id)!!,
+                groupId = remap(n.groupId),
+                parentId = remap(n.parentId)
+            )
+        }
+        val remappedTexts = original.textItems.map { t ->
+            t.copy(
+                id = remap(t.id)!!,
+                groupId = remap(t.groupId),
+                parentId = remap(t.parentId)
+            )
+        }
+        val remappedStrokes = original.strokes.map { it.copy(id = UUID.randomUUID().toString()) }
+        val remappedImages = original.imageCards.map { it.copy(id = UUID.randomUUID().toString()) }
+        val remappedStickers = original.stickers.map { it.copy(id = UUID.randomUUID().toString()) }
+
         val dup = original.copy(
             id = dupId,
             title = "${original.title} (Copia)",
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis(),
+            strokes = remappedStrokes,
+            shapes = remappedShapes,
+            stickyNotes = remappedNotes,
+            textItems = remappedTexts,
+            imageCards = remappedImages,
+            stickers = remappedStickers,
             snapshots = original.snapshots.map { it.copy(boardId = dupId) }
         )
-        _uiState.update { it.copy(allBoards = listOf(dup) + it.allBoards) }
+        isCommittingToStore = true
+        val db = try {
+            store.createBoard(dup, prepend = true)
+        } finally {
+            isCommittingToStore = false
+        }
+        applyCanonicalBoardsFromDb(db.boards)
     }
 
     fun renameBoardById(boardId: String, newTitle: String) {
         val clean = newTitle.trim()
         if (clean.isEmpty()) return
-        _uiState.update { state ->
-            val updatedAll = state.allBoards.map { b ->
-                if (b.id == boardId) b.copy(title = clean, updatedAt = System.currentTimeMillis()) else b
-            }
-            val updatedCurrent = if (state.board.id == boardId) {
-                state.board.copy(title = clean, updatedAt = System.currentTimeMillis())
-            } else {
-                state.board
-            }
-            state.copy(board = updatedCurrent, allBoards = updatedAll)
+        isCommittingToStore = true
+        val db = try {
+            store.renameBoard(boardId, clean)
+        } finally {
+            isCommittingToStore = false
         }
+        applyCanonicalBoardsFromDb(db.boards)
     }
 
     fun deleteBoard(boardId: String) {
         val state = _uiState.value
         val remaining = state.allBoards.filter { it.id != boardId }
+        val fallback = if (remaining.isEmpty()) WhiteboardBoard(title = "Nueva Pizarra") else null
+        isCommittingToStore = true
+        val db = try {
+            store.deleteBoard(boardId, fallback)
+        } finally {
+            isCommittingToStore = false
+        }
+        val nextBoards = db.boards
         val nextCurrent = when {
-            remaining.isEmpty() -> WhiteboardBoard(title = "Nueva Pizarra")
-            state.board.id == boardId -> remaining.first()
-            else -> state.board
+            state.board.id == boardId -> nextBoards.first()
+            else -> nextBoards.find { it.id == state.board.id } ?: nextBoards.first()
         }
         _uiState.update {
             it.copy(
                 board = nextCurrent,
-                allBoards = remaining,
+                allBoards = nextBoards,
                 isViewingBoardsHome = if (remaining.isEmpty()) true else it.isViewingBoardsHome
             )
         }
@@ -2205,10 +2628,12 @@ class WhiteboardViewModel : ViewModel() {
 
     fun setGridType(grid: CanvasGridType) {
         _uiState.update { it.withUpdatedBoard { b -> b.copy(gridType = grid) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun setColorTheme(theme: CanvasColorTheme) {
         _uiState.update { it.withUpdatedBoard { b -> b.copy(colorTheme = theme) } }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun renameBoard(newTitle: String) {
@@ -2234,6 +2659,7 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
     }
 
     fun createSnapshot(versionName: String, description: String) {
@@ -2254,6 +2680,7 @@ class WhiteboardViewModel : ViewModel() {
                 b.copy(snapshots = b.snapshots + snapshot)
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun restoreSnapshot(snapshot: BoardVersionSnapshot): Boolean {
@@ -2271,6 +2698,7 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
         return true
     }
 
@@ -2280,6 +2708,7 @@ class WhiteboardViewModel : ViewModel() {
                 b.copy(snapshots = b.snapshots.filter { s -> s.versionId != versionId })
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     private fun saveUndoSnapshot() {
@@ -2314,6 +2743,7 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
     }
 
     fun redo() {
@@ -2341,6 +2771,7 @@ class WhiteboardViewModel : ViewModel() {
                 selectedNoteIds = emptySet()
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
     }
 
     fun setPenColor(hex: String, isRainbow: Boolean = false) {
@@ -2368,19 +2799,7 @@ class WhiteboardViewModel : ViewModel() {
      * transient canvas state (tool, camera, selection, undo/redo).
      */
     fun syncWorkspaceBoards(boards: List<WhiteboardBoard>) {
-        if (boards.isEmpty()) return
-        _uiState.update { state ->
-            val currentBoard = boards.find { it.id == state.board.id }
-                ?: if (state.isViewingBoardsHome) boards.first() else state.board
-            if (state.allBoards == boards && state.board == currentBoard) {
-                state
-            } else {
-                state.copy(
-                    board = currentBoard,
-                    allBoards = boards
-                )
-            }
-        }
+        applyCanonicalBoardsFromDb(boards)
     }
 
 }

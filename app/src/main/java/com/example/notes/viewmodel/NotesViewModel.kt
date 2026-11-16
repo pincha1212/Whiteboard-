@@ -1,7 +1,8 @@
 package com.example.notes.viewmodel
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import com.example.data.LocalFirstWorkspaceStore
+import com.example.data.WorkspaceDbState
 import com.example.notes.data.NoteExportImportService
 import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteFolder
@@ -13,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import java.util.UUID
 
 enum class AppActiveWorkspace {
@@ -23,7 +23,10 @@ enum class AppActiveWorkspace {
 
 data class NotesUiState(
     val notes: List<NoteItem> = emptyList(),
+    val trashNotes: List<NoteItem> = emptyList(),
+    val isViewingTrash: Boolean = false,
     val folders: List<NoteFolder> = emptyList(),
+    val boardTitlesById: Map<String, String> = emptyMap(),
     val selectedFolder: String? = null, // null means "Todas"
     val selectedTag: String? = null,
     val searchQuery: String = "",
@@ -48,9 +51,9 @@ data class NotesUiState(
 ) {
     val filteredNotes: List<NoteItem>
         get() {
-            var list = notes
-            // Folder filter
-            if (!selectedFolder.isNullOrBlank() && selectedFolder != "Todas") {
+            var list = if (isViewingTrash) trashNotes else notes
+            // Folder filter (only when not viewing trash)
+            if (!isViewingTrash && !selectedFolder.isNullOrBlank() && selectedFolder != "Todas") {
                 list = list.filter { it.folder.equals(selectedFolder, ignoreCase = true) }
             }
             // Tag filter
@@ -62,32 +65,69 @@ data class NotesUiState(
                 val q = searchQuery.trim().lowercase()
                 list = list.filter { note ->
                     note.title.lowercase().contains(q) ||
-                    note.content.lowercase().contains(q) ||
-                    note.tags.any { it.name.lowercase().contains(q) } ||
-                    note.checklists.any { it.text.lowercase().contains(q) } ||
-                    note.folder.lowercase().contains(q)
+                        note.content.lowercase().contains(q) ||
+                        note.tags.any { it.name.lowercase().contains(q) } ||
+                        note.checklists.any { it.text.lowercase().contains(q) } ||
+                        note.folder.lowercase().contains(q)
                 }
             }
             // Sort: pinned first, then newest updated
             return list.sortedWith(
-                compareByDescending<NoteItem> { it.isPinned }
-                    .thenByDescending { it.updatedAt }
+                compareByDescending<NoteItem> { if (isViewingTrash) 0L else if (it.isPinned) 1L else 0L }
+                    .thenByDescending { if (isViewingTrash) (it.deletedAt ?: it.updatedAt) else it.updatedAt }
             )
         }
 }
 
-class NotesViewModel : ViewModel() {
+class NotesViewModel(
+    private val store: LocalFirstWorkspaceStore = LocalFirstWorkspaceStore()
+) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(createInitialState())
+    private val _uiState = MutableStateFlow(NotesUiState())
     val uiState: StateFlow<NotesUiState> = _uiState.asStateFlow()
 
-    private fun createInitialState(): NotesUiState {
-        return NotesUiState(
-            notes = emptyList(),
-            folders = emptyList(),
-            activeNote = null,
-            isEditingNote = false
-        )
+    private val storeListener: (WorkspaceDbState) -> Unit = { db ->
+        applyDbState(db)
+    }
+
+    init {
+        store.addListener(storeListener)
+        applyDbState(store.currentState)
+    }
+
+    override fun onCleared() {
+        store.removeListener(storeListener)
+        super.onCleared()
+    }
+
+    private fun applyDbState(db: WorkspaceDbState) {
+        val visibleNotes = db.notes.filter { !it.isDeleted }
+        val deletedNotes = db.notes.filter { it.isDeleted }
+        val boardMap = db.boards.associate { it.id to it.title }
+        _uiState.update { state ->
+            val activeId = state.activeNote?.id
+            val nextActive = activeId?.let { id -> visibleNotes.find { it.id == id } }
+            val activeWasRemoved = activeId != null && nextActive == null
+            if (state.notes == visibleNotes &&
+                state.trashNotes == deletedNotes &&
+                state.folders == db.folders &&
+                state.boardTitlesById == boardMap &&
+                state.activeNote == nextActive &&
+                !activeWasRemoved
+            ) {
+                state
+            } else {
+                state.copy(
+                    notes = visibleNotes,
+                    trashNotes = deletedNotes,
+                    folders = db.folders,
+                    boardTitlesById = boardMap,
+                    activeNote = nextActive,
+                    isEditingNote = if (activeWasRemoved) false else state.isEditingNote,
+                    unlockedNoteIds = if (activeWasRemoved) state.unlockedNoteIds - activeId!! else state.unlockedNoteIds
+                )
+            }
+        }
     }
 
     // --- NAVIGATION & WORKSPACE ---
@@ -113,10 +153,12 @@ class NotesViewModel : ViewModel() {
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis()
         )
+        val db = store.upsertNote(newNote, prependIfNew = true)
+        val canonical = db.notes.find { it.id == newNote.id } ?: newNote
         _uiState.update {
             it.copy(
-                notes = listOf(newNote) + it.notes,
-                activeNote = newNote,
+                isViewingTrash = false,
+                activeNote = canonical,
                 isEditingNote = true,
                 isMarkdownPreview = false,
                 isChecklistFocusRequested = false
@@ -135,10 +177,12 @@ class NotesViewModel : ViewModel() {
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis()
         )
+        val db = store.upsertNote(newNote, prependIfNew = true)
+        val canonical = db.notes.find { it.id == newNote.id } ?: newNote
         _uiState.update {
             it.copy(
-                notes = listOf(newNote) + it.notes,
-                activeNote = newNote,
+                isViewingTrash = false,
+                activeNote = canonical,
                 isEditingNote = true,
                 isMarkdownPreview = false,
                 isChecklistFocusRequested = true
@@ -151,6 +195,7 @@ class NotesViewModel : ViewModel() {
     }
 
     fun openNote(note: NoteItem) {
+        if (note.isDeleted) return
         if (note.isLocked && !isNoteUnlocked(note.id)) {
             _uiState.update {
                 it.copy(
@@ -216,17 +261,9 @@ class NotesViewModel : ViewModel() {
     }
 
     fun updateNoteColor(noteId: String, colorHex: String) {
-        _uiState.update { state ->
-            val updatedNotes = state.notes.map { n ->
-                if (n.id == noteId) n.copy(colorHex = colorHex, updatedAt = System.currentTimeMillis()) else n
-            }
-            val updatedActive = if (state.activeNote?.id == noteId) {
-                state.activeNote.copy(colorHex = colorHex, updatedAt = System.currentTimeMillis())
-            } else {
-                state.activeNote
-            }
-            state.copy(notes = updatedNotes, activeNote = updatedActive)
-        }
+        val target = store.currentState.notes.find { it.id == noteId } ?: return
+        val updated = target.copy(colorHex = colorHex, updatedAt = System.currentTimeMillis())
+        updateNoteInState(updated)
     }
 
     fun toggleActiveNotePin() {
@@ -236,31 +273,47 @@ class NotesViewModel : ViewModel() {
     }
 
     fun toggleNotePin(noteId: String) {
-        _uiState.update { state ->
-            val updatedNotes = state.notes.map { n ->
-                if (n.id == noteId) n.copy(isPinned = !n.isPinned, updatedAt = System.currentTimeMillis()) else n
-            }
-            state.copy(notes = updatedNotes)
-        }
+        val target = store.currentState.notes.find { it.id == noteId } ?: return
+        val updated = target.copy(isPinned = !target.isPinned, updatedAt = System.currentTimeMillis())
+        updateNoteInState(updated)
     }
 
     fun deleteNote(noteId: String) {
-        val target = _uiState.value.notes.find { it.id == noteId }
-        target?.voiceAudioUri?.let { path ->
-            try {
-                java.io.File(path).takeIf { it.exists() }?.delete()
-            } catch (_: Exception) {}
-        }
+        store.softDeleteNotes(setOf(noteId))
         _uiState.update { state ->
-            val updated = state.notes.filter { it.id != noteId }
             state.copy(
-                notes = updated,
                 activeNote = if (state.activeNote?.id == noteId) null else state.activeNote,
                 isEditingNote = if (state.activeNote?.id == noteId) false else state.isEditingNote,
                 unlockedNoteIds = state.unlockedNoteIds - noteId,
-                statusNotification = "Nota eliminada"
+                statusNotification = "Nota movida a la papelera"
             )
         }
+    }
+
+    fun setViewingTrash(viewing: Boolean) {
+        _uiState.update {
+            it.copy(
+                isViewingTrash = viewing,
+                selectedFolder = if (viewing) null else it.selectedFolder,
+                selectedTag = if (viewing) null else it.selectedTag
+            )
+        }
+    }
+
+    fun restoreNoteFromTrash(noteId: String) {
+        store.restoreNoteFromTrash(noteId)
+        _uiState.update { it.copy(statusNotification = "Nota restaurada") }
+    }
+
+    fun permanentlyDeleteNote(noteId: String) {
+        store.permanentlyDeleteNote(noteId)
+        _uiState.update { it.copy(statusNotification = "Nota eliminada definitivamente") }
+    }
+
+    fun emptyTrash() {
+        if (_uiState.value.trashNotes.isEmpty()) return
+        store.emptyTrash()
+        _uiState.update { it.copy(statusNotification = "Papelera vaciada") }
     }
 
     // --- CHECKLISTS ---
@@ -316,9 +369,10 @@ class NotesViewModel : ViewModel() {
     fun createNewFolder(name: String, colorHex: String = "#0078D4") {
         if (name.isBlank()) return
         val newFolder = NoteFolder(name = name.trim(), colorHex = colorHex)
+        store.addFolder(newFolder)
         _uiState.update {
             it.copy(
-                folders = it.folders + newFolder,
+                isViewingTrash = false,
                 selectedFolder = newFolder.name,
                 showNewFolderDialog = false
             )
@@ -326,7 +380,7 @@ class NotesViewModel : ViewModel() {
     }
 
     fun selectFolder(folderName: String?) {
-        _uiState.update { it.copy(selectedFolder = folderName) }
+        _uiState.update { it.copy(isViewingTrash = false, selectedFolder = folderName) }
     }
 
     fun selectTag(tagName: String?) {
@@ -371,10 +425,12 @@ class NotesViewModel : ViewModel() {
             voiceAudioUri = audioFilePath
         )
 
+        val db = store.upsertNote(voiceNote, prependIfNew = true)
+        val canonical = db.notes.find { it.id == voiceNote.id } ?: voiceNote
         _uiState.update {
             it.copy(
-                notes = listOf(voiceNote) + it.notes,
-                activeNote = voiceNote,
+                isViewingTrash = false,
+                activeNote = canonical,
                 isEditingNote = true,
                 statusNotification = "Nota de voz guardada"
             )
@@ -480,10 +536,9 @@ class NotesViewModel : ViewModel() {
     fun importNotesFromJson(jsonString: String): Boolean {
         return try {
             val (importedNotes, importedFolders) = NoteExportImportService.importFromJson(jsonString)
+            store.importNotesAndFolders(importedNotes, importedFolders)
             _uiState.update {
                 it.copy(
-                    notes = importedNotes + it.notes,
-                    folders = (it.folders + importedFolders).distinctBy { f -> f.name },
                     statusNotification = "${importedNotes.size} notas importadas con éxito"
                 )
             }
@@ -520,33 +575,37 @@ class NotesViewModel : ViewModel() {
     }
 
     private fun updateNoteInState(updated: NoteItem) {
+        val db = store.upsertNote(updated, prependIfNew = false)
+        val canonical = db.notes.find { it.id == updated.id } ?: updated
         _uiState.update { state ->
-            val updatedList = state.notes.map { if (it.id == updated.id) updated else it }
             state.copy(
-                notes = updatedList,
-                activeNote = if (state.activeNote?.id == updated.id) updated else state.activeNote
+                activeNote = if (state.activeNote?.id == updated.id) canonical else state.activeNote
             )
         }
     }
 
     /**
-     * Receives the canonical workspace data. Keeps the active editor pointed at the
-     * latest version of its note while avoiding unnecessary StateFlow emissions.
+     * Receives canonical workspace data when driven externally (legacy test helper).
      */
     fun syncWorkspaceData(notes: List<NoteItem>, folders: List<NoteFolder>) {
         val visibleNotes = notes.filter { !it.isDeleted }
+        val deletedNotes = notes.filter { it.isDeleted }
         _uiState.update { state ->
             val activeId = state.activeNote?.id
             val nextActive = activeId?.let { id -> visibleNotes.find { it.id == id } }
                 ?: state.activeNote?.takeIf { activeId == null }
             val activeWasRemoved = activeId != null && nextActive == null
-            if (state.notes == visibleNotes && state.folders == folders &&
-                state.activeNote == nextActive && !activeWasRemoved
+            if (state.notes == visibleNotes &&
+                state.trashNotes == deletedNotes &&
+                state.folders == folders &&
+                state.activeNote == nextActive &&
+                !activeWasRemoved
             ) {
                 state
             } else {
                 state.copy(
                     notes = visibleNotes,
+                    trashNotes = deletedNotes,
                     folders = folders,
                     activeNote = nextActive,
                     isEditingNote = if (activeWasRemoved) false else state.isEditingNote,

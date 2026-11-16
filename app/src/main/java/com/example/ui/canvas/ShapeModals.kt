@@ -14,12 +14,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
@@ -51,6 +52,7 @@ import com.example.model.LineCapStyle
 import com.example.model.isLineLike
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
+import com.example.model.StrokeBrushType
 import com.example.model.StrokeStyle
 
 @Composable
@@ -58,6 +60,8 @@ fun ShapePickerBottomSheet(
     initialColorHex: String = "#2563EB",
     initialStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
     initialCapStyle: LineCapStyle = LineCapStyle.NONE,
+    initialBrushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
+    onSelectBrushType: (StrokeBrushType) -> Unit = {},
     onSelectShapeType: (ShapeType, isFilled: Boolean, strokeColor: String, fillColor: String, style: StrokeStyle, capStyle: LineCapStyle) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -75,6 +79,7 @@ fun ShapePickerBottomSheet(
         )
     }
     var isFilled by remember { mutableStateOf(false) }
+    var selectedBrushType by remember(initialBrushType) { mutableStateOf(initialBrushType) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -109,7 +114,7 @@ fun ShapePickerBottomSheet(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Elige una forma y arrastra en el lienzo para darle tamaño",
+                                text = "Elige el trazo y arrastra en el lienzo para darle tamaño",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -172,69 +177,151 @@ fun ShapePickerBottomSheet(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // Brush Type Selector Row
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Brush,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Tipo de trazo",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        StrokeBrushType.values().forEach { brush ->
+                            val isSelected = selectedBrushType == brush
+                            val shortLabel = when (brush) {
+                                StrokeBrushType.FOUNTAIN_PEN -> "Pluma"
+                                StrokeBrushType.FINE_MARKER -> "Marcador"
+                                StrokeBrushType.HIGHLIGHTER -> "Resaltador"
+                                StrokeBrushType.SOFT_BRUSH -> "Cerdas"
+                                StrokeBrushType.CALLIGRAPHY -> "Caligrafía"
+                                StrokeBrushType.AIRBRUSH -> "Aerógrafo"
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.5.dp else 1.dp,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable {
+                                        selectedBrushType = brush
+                                        onSelectBrushType(brush)
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 7.dp)
+                                    .testTag("shape_picker_brush_${brush.name}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = shortLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(12.dp))
 
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(3),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.height(310.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(300.dp)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    items(ShapeType.values()) { shapeType ->
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            modifier = Modifier
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                .clickable {
-                                    onSelectShapeType(
-                                        shapeType,
-                                        isFilled && !shapeType.isLineLike,
-                                        selectedColorPair.first,
-                                        selectedColorPair.second,
-                                        initialStrokeStyle,
-                                        if (shapeType.isLineLike) {
-                                            when (shapeType) {
-                                                ShapeType.ARROW -> LineCapStyle.END_ARROW
-                                                ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
-                                                else -> initialCapStyle
-                                            }
-                                        } else LineCapStyle.NONE
-                                    )
-                                    onDismiss()
-                                }
-                                .testTag("preset_shape_${shapeType.name}")
+                    ShapeType.values().toList().chunked(3).forEach { rowShapes ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                PresetShapeGlyph(
-                                    shapeType = shapeType,
-                                    strokeHex = selectedColorPair.first,
-                                    fillHex = selectedColorPair.second,
-                                    isFilled = isFilled && shapeType != ShapeType.LINE,
-                                    strokeStyle = initialStrokeStyle,
-                                    capStyle = if (shapeType == ShapeType.LINE) initialCapStyle else LineCapStyle.NONE,
-                                    modifier = Modifier.size(34.dp)
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = shapeType.displayName,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            rowShapes.forEach { shapeType ->
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                        contentColor = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                        .clickable {
+                                            onSelectBrushType(selectedBrushType)
+                                            onSelectShapeType(
+                                                shapeType,
+                                                isFilled && !shapeType.isLineLike,
+                                                selectedColorPair.first,
+                                                selectedColorPair.second,
+                                                initialStrokeStyle,
+                                                if (shapeType.isLineLike) {
+                                                    when (shapeType) {
+                                                        ShapeType.ARROW -> LineCapStyle.END_ARROW
+                                                        ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
+                                                        else -> initialCapStyle
+                                                    }
+                                                } else LineCapStyle.NONE
+                                            )
+                                            onDismiss()
+                                        }
+                                        .testTag("preset_shape_${shapeType.name}")
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 10.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center
+                                    ) {
+                                        PresetShapeGlyph(
+                                            shapeType = shapeType,
+                                            strokeHex = selectedColorPair.first,
+                                            fillHex = selectedColorPair.second,
+                                            isFilled = isFilled && !shapeType.isLineLike,
+                                            strokeStyle = initialStrokeStyle,
+                                            capStyle = if (shapeType == ShapeType.LINE) initialCapStyle else LineCapStyle.NONE,
+                                            brushType = selectedBrushType,
+                                            modifier = Modifier.size(34.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = shapeType.displayName,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                            repeat(3 - rowShapes.size) {
+                                Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
@@ -252,6 +339,7 @@ private fun PresetShapeGlyph(
     isFilled: Boolean,
     strokeStyle: StrokeStyle = StrokeStyle.SOLID,
     capStyle: LineCapStyle = LineCapStyle.NONE,
+    brushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
@@ -269,8 +357,17 @@ private fun PresetShapeGlyph(
             strokeWidth = 2.6f,
             isFilled = isFilled,
             strokeStyle = strokeStyle,
-            capStyle = capStyle
+            capStyle = capStyle,
+            brushType = brushType
         )
-        drawShapeVector(shape = item, panX = 0f, panY = 0f, scale = 1f, isSelected = false)
+        drawShapeVector(
+            shape = item,
+            panX = 0f,
+            panY = 0f,
+            scale = 1f,
+            isSelected = false,
+            isOpaqueCanvasBackground = false,
+            handDrawnFactor = 0.14f
+        )
     }
 }

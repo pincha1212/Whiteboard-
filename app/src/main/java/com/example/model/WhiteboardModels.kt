@@ -5,10 +5,11 @@ import java.util.UUID
 enum class ToolType {
     HAND,
     PEN,
-    PENCIL,
     FINE_MARKER,
     HIGHLIGHTER,
     BRUSH,
+    CALLIGRAPHY,
+    AIRBRUSH,
     LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
@@ -25,10 +26,11 @@ enum class StrokeBrushType(
     val defaultOpacity: Float
 ) {
     FOUNTAIN_PEN("Pluma / Estilógrafo", 0.35f, 1.0f),
-    GRAPHITE_PENCIL("Lápiz (grafito)", 0.18f, 0.80f),
     FINE_MARKER("Marcador fino", 0.68f, 1.0f),
-    HIGHLIGHTER("Resaltador", 0.40f, 0.38f),
-    SOFT_BRUSH("Pincel", 0.32f, 0.44f)
+    HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
+    SOFT_BRUSH("Pincel (cerdas)", 0.32f, 0.44f),
+    CALLIGRAPHY("Pluma caligráfica 45°", 0.42f, 0.96f),
+    AIRBRUSH("Aerógrafo", 0.25f, 0.85f)
 }
 
 enum class StrokeCategory(val displayName: String) {
@@ -270,6 +272,7 @@ data class ShapeItem(
     val vertices: List<StrokePoint> = emptyList(),
     val opacity: Float = 1.0f,
     val isRainbow: Boolean = false,
+    val brushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
     val label: String = "",
     val isLocked: Boolean = false,
     val templateRole: String? = null,

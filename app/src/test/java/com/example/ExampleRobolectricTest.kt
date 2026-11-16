@@ -34,6 +34,7 @@ import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StickyNote
+import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
 import com.example.model.TemplateCategory
@@ -550,9 +551,6 @@ class ExampleRobolectricTest {
     assertTrue("Hand pan button must sit separated next to dock", handBounds.left > dockBounds.right)
 
     // Clicking physical tool icons directly switches tools without any dropdown
-    composeTestRule.onNodeWithTag("dock_menu_tool_pencil").performScrollTo().performClick()
-    assertEquals(ToolType.PENCIL, viewModel.uiState.value.currentTool)
-
     composeTestRule.onNodeWithTag("dock_menu_tool_fine_marker").performScrollTo().performClick()
     assertEquals(ToolType.FINE_MARKER, viewModel.uiState.value.currentTool)
 
@@ -596,7 +594,6 @@ class ExampleRobolectricTest {
       ToolType.BRUSH to StrokeStyle.ZIGZAG,
       ToolType.HIGHLIGHTER to StrokeStyle.NEON_GLOW,
       ToolType.FINE_MARKER to StrokeStyle.DOUBLE,
-      ToolType.PENCIL to StrokeStyle.RAILWAY,
       ToolType.PEN to StrokeStyle.WAVY
     )
 
@@ -1261,4 +1258,367 @@ class ExampleRobolectricTest {
     assertEquals("Note world X must stay untouched while panning", initialNoteX, vm.uiState.value.board.stickyNotes.first().x, 0.01f)
     assertTrue("Viewport panX must advance when dragging in Hand mode", vm.uiState.value.panX > initialPanX + 50f)
   }
+
+  @Test
+  @Config(sdk = [36], qualifiers = "w480dp-h800dp")
+  fun `test sticky note editable title rotation handle drag and zoomed line coordinates`() {
+    val noteState = androidx.compose.runtime.mutableStateOf(
+      StickyNote(
+        id = "note-rot",
+        title = "",
+        text = "Cuerpo inicial",
+        x = 80f,
+        y = 140f,
+        width = 220f,
+        height = 180f,
+        rotation = 0f
+      )
+    )
+    var rotatedCallbackAngle: Float? = null
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        androidx.compose.foundation.layout.Box(
+          modifier = androidx.compose.ui.Modifier.fillMaxSize()
+        ) {
+          StickyNoteView(
+            note = noteState.value,
+            scale = 1.0f,
+            panX = 0f,
+            panY = 0f,
+            isSelected = true,
+            onUpdateTitle = { noteState.value = noteState.value.copy(title = it) },
+            onUpdateText = { noteState.value = noteState.value.copy(text = it) },
+            onUpdateColor = {},
+            onTogglePin = {},
+            onDelete = {},
+            onDragDelta = { _, _ -> },
+            onRotate = { deg ->
+              rotatedCallbackAngle = deg
+              noteState.value = noteState.value.copy(rotation = deg)
+            }
+          )
+        }
+      }
+    }
+
+    composeTestRule.waitForIdle()
+
+    // 1. Title input edits title cleanly without changing body text
+    val titleInput = composeTestRule.onNodeWithTag("sticky_note_title_input_note-rot")
+    titleInput.assertIsDisplayed()
+    titleInput.performTextReplacement("Título separado")
+    assertEquals("Título separado", noteState.value.title)
+    assertEquals("Cuerpo inicial", noteState.value.text)
+
+    // 2. Protruding rotation handle is visible, >= 48dp, unclipped, and dragging it rotates the note
+    val rotHandle = composeTestRule.onNodeWithTag("sticky_note_rotation_handle_note-rot")
+    rotHandle.assertIsDisplayed()
+    rotHandle.assertWidthIsAtLeast(48.dp)
+    rotHandle.assertHeightIsAtLeast(48.dp)
+    rotHandle.performTouchInput {
+      swipeRight(startX = centerX, endX = centerX + 120f)
+    }
+    composeTestRule.waitForIdle()
+    assertNotNull("Dragging unclipped rotation handle must invoke onRotate", rotatedCallbackAngle)
+    assertTrue("Rotation angle should change when dragging right", noteState.value.rotation > 1f)
+
+    // 3. Adaptive height grows when title + long content require more vertical space
+    val adaptedHeight = StickyNoteGeometry.calculateAdaptiveHeightWorld(
+      text = "Línea 1\nLínea 2\nLínea 3\nLínea 4\nLínea 5\nLínea 6\nLínea 7\nLínea 8",
+      noteWidthWorld = 200f,
+      currentHeightWorld = 140f,
+      isAspectRatioLocked = false,
+      title = "Título largo de tarjeta"
+    )
+    assertTrue("Adaptive height should expand above 140f", adaptedHeight > 140f)
+
+    // 4. ShapeCanvasCoordinates skips rotation for ARROW with 2 vertices and scales line handle offset with zoom
+    val arrowShape = ShapeItem(
+      shapeType = ShapeType.ARROW,
+      x = 100f,
+      y = 200f,
+      width = 160f,
+      height = 40f,
+      rotation = 45f,
+      vertices = listOf(StrokePoint(100f, 220f), StrokePoint(260f, 220f))
+    )
+    val (localX, localY) = com.example.ui.canvas.ShapeCanvasCoordinates.toLocalUnrotated(arrowShape, 260f, 220f)
+    assertEquals(260f, localX, 0.001f)
+    assertEquals(220f, localY, 0.001f)
+    assertEquals(16f, com.example.ui.canvas.ShapeCanvasCoordinates.lineRotationHandleOffsetWorld(2.0f), 0.001f)
+  }
+
+  @Test
+  fun `test note card displays origin board badge and open in board context menu`() {
+    var openedBoardId: String? = null
+    val sampleNote = com.example.notes.model.NoteItem(
+      id = "card-board-1",
+      title = "Título claro",
+      content = "Contenido bien diferenciado",
+      folder = "Pizarra Arquitectura",
+      canvasData = com.example.notes.model.CanvasNoteData(boardId = "board-arch", x = 10f, y = 20f)
+    )
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.notes.ui.NoteCardView(
+          note = sampleNote,
+          isUnlocked = true,
+          originBoardName = "Pizarra Arquitectura",
+          onClick = {},
+          onTogglePin = {},
+          onDelete = {},
+          onOpenInBoard = { openedBoardId = "board-arch" }
+        )
+      }
+    }
+
+    composeTestRule.waitForIdle()
+    composeTestRule.onNodeWithTag("note_board_badge_card-board-1").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("btn_note_menu_card-board-1").performClick()
+    composeTestRule.onNodeWithTag("menu_open_in_board_card-board-1").performClick()
+    assertEquals("board-arch", openedBoardId)
+  }
+
+  @Test
+  fun `test shapes combine brush type with line style and serialize cleanly`() {
+    val viewModel = WhiteboardViewModel()
+    viewModel.openBoard(viewModel.uiState.value.allBoards.first().id)
+
+    // 1. ToolType.HIGHLIGHTER + StrokeStyle.DASHED creates shape with both properties
+    viewModel.setTool(ToolType.HIGHLIGHTER)
+    viewModel.setPenStyle(StrokeStyle.DASHED)
+    viewModel.requestAddCustomShape(
+      type = ShapeType.RECTANGLE,
+      isFilled = true,
+      strokeColor = "#EAB308",
+      fillColor = "#FEF08A",
+      style = StrokeStyle.DASHED,
+      capStyle = LineCapStyle.NONE
+    )
+    viewModel.placePendingShapeInBounds(
+      start = StrokePoint(50f, 50f),
+      end = StrokePoint(250f, 200f)
+    )
+
+    val createdShape = viewModel.uiState.value.board.shapes.last()
+    assertEquals(ShapeType.RECTANGLE, createdShape.shapeType)
+    assertEquals(StrokeBrushType.HIGHLIGHTER, createdShape.brushType)
+    assertEquals(StrokeStyle.DASHED, createdShape.strokeStyle)
+    assertTrue(createdShape.isFilled)
+
+    // 2. Select shape and update brushType and strokeStyle independently or together
+    viewModel.selectShape(createdShape.id)
+    viewModel.updateSelectedShapeBrushType(StrokeBrushType.FINE_MARKER)
+    var updated = viewModel.uiState.value.board.shapes.last()
+    assertEquals(StrokeBrushType.FINE_MARKER, updated.brushType)
+    assertEquals(StrokeStyle.DASHED, updated.strokeStyle)
+
+    viewModel.updateSelectedShape(
+      brushType = StrokeBrushType.SOFT_BRUSH,
+      style = StrokeStyle.NEON_GLOW
+    )
+    updated = viewModel.uiState.value.board.shapes.last()
+    assertEquals(StrokeBrushType.SOFT_BRUSH, updated.brushType)
+    assertEquals(StrokeStyle.NEON_GLOW, updated.strokeStyle)
+
+    // 3. ShapeRecognizer also inherits stroke.brushType
+    val linePts = (0..16).map { i -> StrokePoint(100f + i * 15f, 300f) }
+    val recognized = ShapeRecognizer.recognizeStroke(
+      WhiteboardStroke(
+        points = linePts,
+        colorHex = "#3B82F6",
+        width = 8f,
+        strokeStyle = StrokeStyle.WAVY,
+        brushType = StrokeBrushType.FINE_MARKER
+      )
+    )
+    assertNotNull(recognized)
+    assertEquals(ShapeType.LINE, recognized!!.shapeType)
+    assertEquals(StrokeBrushType.FINE_MARKER, recognized.shapeItem.brushType)
+    assertEquals(StrokeStyle.WAVY, recognized.shapeItem.strokeStyle)
+
+    // 4. Board snapshot serializer round-trip preserves brushType
+    val json = BoardSnapshotSerializer.serializeBoard(viewModel.uiState.value.board)
+    val restored = BoardSnapshotSerializer.deserializeIntoBoard(json, viewModel.uiState.value.board)
+    assertNotNull(restored)
+    val restoredShape = restored!!.shapes.last()
+    assertEquals(StrokeBrushType.SOFT_BRUSH, restoredShape.brushType)
+    assertEquals(StrokeStyle.NEON_GLOW, restoredShape.strokeStyle)
+
+    // 5. Bitmap export renders without error
+    val bitmap = BoardExportService.renderBoardToBitmap(restored, includeBackground = true, includeGrid = true, maxDimensionPx = 600)
+    assertTrue(bitmap.width > 0 && bitmap.height > 0)
+  }
+
+  @Test
+  fun `test brush type selectable in shape picker`() {
+    var pickedBrush: StrokeBrushType? = null
+    var pickedShape: ShapeType? = null
+
+    composeTestRule.setContent {
+      MaterialTheme {
+        com.example.ui.canvas.ShapePickerBottomSheet(
+          initialColorHex = "#2563EB",
+          initialBrushType = StrokeBrushType.FOUNTAIN_PEN,
+          onSelectBrushType = { pickedBrush = it },
+          onSelectShapeType = { type, _, _, _, _, _ -> pickedShape = type },
+          onDismiss = {}
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("shape_picker_brush_${StrokeBrushType.FINE_MARKER.name}")
+      .performScrollTo()
+      .performClick()
+    composeTestRule.onNodeWithTag("preset_shape_${ShapeType.HEXAGON.name}")
+      .performScrollTo()
+      .performClick()
+
+    assertEquals(StrokeBrushType.FINE_MARKER, pickedBrush)
+    assertEquals(ShapeType.HEXAGON, pickedShape)
+  }
+
+  @Test
+  fun `test brush type selectable in selection edit dock for shape and stroke`() {
+    val viewModel = WhiteboardViewModel()
+    viewModel.openBoard(viewModel.uiState.value.allBoards.first().id)
+    viewModel.requestAddCustomShape(
+      type = ShapeType.RECTANGLE,
+      isFilled = false,
+      strokeColor = "#2563EB",
+      fillColor = "#DBEAFE",
+      style = StrokeStyle.SOLID,
+      capStyle = LineCapStyle.NONE,
+      brushType = StrokeBrushType.FOUNTAIN_PEN
+    )
+    viewModel.placePendingShapeInBounds(StrokePoint(80f, 80f), StrokePoint(240f, 180f))
+    val shapeId = viewModel.uiState.value.board.shapes.last().id
+    viewModel.selectShape(shapeId)
+
+    var updatedShapeBrush: StrokeBrushType? = null
+    composeTestRule.setContent {
+      MaterialTheme {
+        val st by viewModel.uiState.collectAsState()
+        val selShape = st.board.shapes.find { it.id == st.selectedShapeId }
+        val selStroke = st.board.strokes.find { it.id == st.selectedStrokeId }
+        com.example.ui.canvas.SelectionEditDock(
+          selectedShape = selShape,
+          selectedStroke = selStroke,
+          selectedNote = null,
+          onUpdateShapeColor = {},
+          onUpdateShapeFillColor = {},
+          onToggleShapeFilled = {},
+          onUpdateShapeWidth = {},
+          onUpdateShapeStyle = {},
+          onUpdateShapeBrushType = {
+            updatedShapeBrush = it
+            viewModel.updateSelectedShapeBrushType(it)
+          },
+          onScaleShape = {},
+          onRotateShape = {},
+          onResetShapeRotation = {},
+          onBringShapeToFront = {},
+          onSendShapeToBack = {},
+          onDuplicateShape = {},
+          onDeleteShape = {},
+          onUpdateStrokeColor = {},
+          onUpdateStrokeWidth = {},
+          onUpdateStrokeStyle = {},
+          onUpdateStrokeBrushType = { viewModel.updateSelectedStrokeBrushType(it) },
+          onScaleStroke = {},
+          onConvertStrokeToShape = {},
+          onDuplicateStroke = {},
+          onDeleteStroke = {},
+          onUpdateNoteColor = {},
+          onToggleNotePin = {},
+          onDeleteNote = {},
+          onDone = {}
+        )
+      }
+    }
+
+    composeTestRule.onNodeWithTag("edit_dock_shape_brush_btn").performClick()
+    composeTestRule.onNodeWithTag("quick_shape_brush_${StrokeBrushType.SOFT_BRUSH.name}").performClick()
+    assertEquals(StrokeBrushType.SOFT_BRUSH, updatedShapeBrush)
+    assertEquals(StrokeBrushType.SOFT_BRUSH, viewModel.uiState.value.board.shapes.last().brushType)
+
+    // Switch selection to a freehand stroke within the same Composition and change its brush type
+    viewModel.clearSelection()
+    viewModel.setTool(ToolType.PEN)
+    viewModel.commitCompletedStroke(
+      listOf(StrokePoint(50f, 50f), StrokePoint(120f, 80f), StrokePoint(180f, 60f)),
+      isHighlighter = false
+    )
+    val strokeId = viewModel.uiState.value.board.strokes.last().id
+    viewModel.selectStroke(strokeId)
+    composeTestRule.waitForIdle()
+
+    composeTestRule.onNodeWithTag("edit_dock_stroke_brush_btn").performClick()
+    composeTestRule.onNodeWithTag("quick_stroke_brush_${StrokeBrushType.HIGHLIGHTER.name}").performClick()
+    assertEquals(StrokeBrushType.HIGHLIGHTER, viewModel.uiState.value.board.strokes.last().brushType)
+  }
+
+  @Test
+  fun `test direct canvas rotation of shapes and strokes with snapping and single undo`() {
+    val viewModel = WhiteboardViewModel()
+    viewModel.openBoard(viewModel.uiState.value.allBoards.first().id)
+
+    // 1. Shape rotation to point with 90-degree snap and arbitrary angle
+    viewModel.requestAddCustomShape(
+      type = ShapeType.RECTANGLE,
+      isFilled = false,
+      strokeColor = "#2563EB",
+      fillColor = "#DBEAFE",
+      style = StrokeStyle.SOLID,
+      capStyle = LineCapStyle.NONE
+    )
+    viewModel.placePendingShapeInBounds(StrokePoint(100f, 100f), StrokePoint(300f, 200f))
+    val shape = viewModel.uiState.value.board.shapes.last()
+    viewModel.selectShape(shape.id)
+
+    viewModel.beginTransformSnapshot()
+    // Center is (200, 150). Point to the right (320, 152) is ~91 deg -> snaps cleanly to 90f
+    viewModel.rotateSelectedShapeToPoint(320f, 152f)
+    assertEquals(90f, viewModel.uiState.value.board.shapes.last().rotation, 0.01f)
+
+    // Diagonal point (200 + 100, 150 - 100) is 45 deg
+    viewModel.rotateSelectedShapeToPoint(300f, 50f)
+    assertEquals(45f, viewModel.uiState.value.board.shapes.last().rotation, 0.5f)
+
+    viewModel.undo()
+    assertEquals(0f, viewModel.uiState.value.board.shapes.last().rotation, 0.01f)
+
+    // 2. Stroke rotation around fixed pivot over multiple move steps preserves center and undoes in 1 step
+    viewModel.clearSelection()
+    viewModel.commitCompletedStroke(
+      listOf(StrokePoint(100f, 100f), StrokePoint(200f, 100f), StrokePoint(200f, 140f)),
+      isHighlighter = false
+    )
+    val stroke = viewModel.uiState.value.board.strokes.last()
+    val origPts = stroke.points
+    val origSegLen = kotlin.math.hypot(origPts[1].x - origPts[0].x, origPts[1].y - origPts[0].y)
+    viewModel.selectStroke(stroke.id)
+
+    viewModel.resetStrokeDragAngle()
+    viewModel.beginTransformSnapshot()
+    // Center is (150, 120). Drag from top (150, 40) -> right (230, 120) in two steps
+    viewModel.rotateSelectedStrokeToPoint(150f, 40f)
+    viewModel.rotateSelectedStrokeToPoint(230f, 120f)
+    val rotatedPts = viewModel.uiState.value.board.strokes.last().points
+    assertTrue(rotatedPts != origPts)
+    // Length of first segment is preserved under rigid rotation (no drift/distortion)
+    val segLen = kotlin.math.hypot(rotatedPts[1].x - rotatedPts[0].x, rotatedPts[1].y - rotatedPts[0].y)
+    assertEquals(origSegLen, segLen, 0.5f)
+
+    // Undo restores exact original points in one call
+    viewModel.undo()
+    val undonePts = viewModel.uiState.value.board.strokes.last().points
+    assertEquals(origPts.size, undonePts.size)
+    assertEquals(origPts[0].x, undonePts[0].x, 0.01f)
+    assertEquals(origPts[0].y, undonePts[0].y, 0.01f)
+  }
 }
+
+

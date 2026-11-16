@@ -30,10 +30,10 @@ import com.example.notes.viewmodel.NotesViewModel
 fun NotesMasterDetailScreen(
     notesViewModel: NotesViewModel,
     onOpenWhiteboard: (() -> Unit)? = null,
+    onOpenNoteInBoard: (boardId: String, noteId: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val state by notesViewModel.uiState.collectAsState()
-    var notePendingDelete by remember { mutableStateOf<NoteItem?>(null) }
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val isTablet = maxWidth >= 720.dp
@@ -46,6 +46,7 @@ fun NotesMasterDetailScreen(
                     NotesMainScreen(
                         notesViewModel = notesViewModel,
                         onOpenWhiteboard = onOpenWhiteboard,
+                        onOpenNoteInBoard = onOpenNoteInBoard,
                         isEmbeddedInSplit = true,
                         modifier = Modifier.fillMaxSize()
                     )
@@ -62,13 +63,17 @@ fun NotesMasterDetailScreen(
                 // Right Pane: Note Content / Editor (Selected Chat)
                 Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     if (state.activeNote != null && state.isEditingNote) {
+                        val active = state.activeNote!!
+                        val originBoardName = active.canvasData?.let { state.boardTitlesById[it.boardId] ?: active.folder }
                         NoteEditorScreen(
-                            note = state.activeNote!!,
+                            note = active,
                             folders = state.folders,
                             isPreviewMode = state.isMarkdownPreview,
                             isVoicePlaying = state.isVoicePlaying,
                             initialShowChecklist = state.isChecklistFocusRequested,
                             enableBackHandler = false,
+                            originBoardName = originBoardName,
+                            onOpenInBoard = active.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, active.id) } },
                             onBack = { notesViewModel.closeActiveNote() },
                             onUpdateTitle = { notesViewModel.updateActiveNoteTitle(it) },
                             onUpdateContent = { notesViewModel.updateActiveNoteContent(it) },
@@ -85,7 +90,7 @@ fun NotesMasterDetailScreen(
                             onOpenVersionHistory = { notesViewModel.setShowVersionHistoryModal(true) },
                             onOpenExport = { notesViewModel.setShowExportImportModal(true) },
                             onToggleVoicePlayback = { notesViewModel.toggleVoicePlayback() },
-                            onDeleteNote = { notePendingDelete = state.activeNote },
+                            onDeleteNote = { notesViewModel.deleteNote(active.id) },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
@@ -109,51 +114,10 @@ fun NotesMasterDetailScreen(
             NotesMainScreen(
                 notesViewModel = notesViewModel,
                 onOpenWhiteboard = onOpenWhiteboard,
+                onOpenNoteInBoard = onOpenNoteInBoard,
                 isEmbeddedInSplit = false,
                 modifier = Modifier.fillMaxSize()
             )
         }
-    }
-
-    if (notePendingDelete != null) {
-        val target = notePendingDelete!!
-        val label = target.title.ifBlank { "Nota sin título" }
-        AlertDialog(
-            onDismissRequest = { notePendingDelete = null },
-            containerColor = MaterialTheme.colorScheme.surface,
-            title = {
-                Text(
-                    text = "Eliminar nota",
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            },
-            text = {
-                Text(
-                    text = "¿Seguro que deseas eliminar \"$label\"? Esta acción no se puede deshacer.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        notesViewModel.deleteNote(target.id)
-                        notePendingDelete = null
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError
-                    )
-                ) {
-                    Text("Eliminar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { notePendingDelete = null }) {
-                    Text("Cancelar")
-                }
-            }
-        )
     }
 }

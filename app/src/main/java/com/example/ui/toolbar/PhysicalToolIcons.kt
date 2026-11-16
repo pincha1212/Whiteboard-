@@ -608,3 +608,123 @@ fun PhysicalPenSquiggleIcon(
         drawPath(wave, color = tint, style = Stroke(width = u * 0.075f, cap = StrokeCap.Round))
     }
 }
+
+@Composable
+fun PhysicalCalligraphyPenIcon(
+    inkColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // 45-degree chiseled broad calligraphy nib
+        val nib = Path().apply {
+            moveTo(cx - w * 0.14f, h * 0.19f)
+            lineTo(cx + w * 0.14f, h * 0.11f)
+            lineTo(cx + w * 0.20f, h * 0.42f)
+            lineTo(cx - w * 0.20f, h * 0.42f)
+            close()
+        }
+        drawPath(nib, color = Color(0xFFFDE68A))
+        drawPath(nib, color = Color(0xFF92400E), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
+
+        // Ink breather hole + slit
+        drawCircle(
+            color = inkColor,
+            radius = w * 0.055f,
+            center = Offset(cx, h * 0.30f)
+        )
+        drawLine(
+            color = Color(0xFF92400E),
+            start = Offset(cx, h * 0.15f),
+            end = Offset(cx, h * 0.28f),
+            strokeWidth = w * 0.032f
+        )
+
+        // Gold ring collar
+        drawRect(
+            color = inkColor,
+            topLeft = Offset(cx - w * 0.24f, h * 0.42f),
+            size = Size(w * 0.48f, h * 0.11f)
+        )
+
+        // Sleek tapered dark barrel anchored at bottom
+        drawRoundRect(
+            color = Color(0xFF312E81),
+            topLeft = Offset(cx - w * 0.24f, h * 0.53f),
+            size = Size(w * 0.48f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.07f)
+        )
+        drawRoundRect(
+            color = Color(0xFF1E1B4B),
+            topLeft = Offset(cx - w * 0.24f, h * 0.53f),
+            size = Size(w * 0.48f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.07f),
+            style = Stroke(width = w * 0.04f)
+        )
+    }
+}
+
+@Composable
+fun PhysicalAirbrushIcon(
+    sprayColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // Fine mist spray particles above nozzle
+        val mistDots = listOf(
+            Offset(cx, h * 0.08f) to w * 0.045f,
+            Offset(cx - w * 0.14f, h * 0.13f) to w * 0.038f,
+            Offset(cx + w * 0.14f, h * 0.12f) to w * 0.038f,
+            Offset(cx - w * 0.07f, h * 0.19f) to w * 0.035f,
+            Offset(cx + w * 0.08f, h * 0.19f) to w * 0.035f
+        )
+        mistDots.forEach { (pt, r) ->
+            drawCircle(color = sprayColor.copy(alpha = 0.72f), radius = r, center = pt)
+        }
+
+        // Nozzle cone
+        val nozzle = Path().apply {
+            moveTo(cx - w * 0.08f, h * 0.26f)
+            lineTo(cx + w * 0.08f, h * 0.26f)
+            lineTo(cx + w * 0.22f, h * 0.48f)
+            lineTo(cx - w * 0.22f, h * 0.48f)
+            close()
+        }
+        drawPath(nozzle, color = Color(0xFFE2E8F0))
+        drawPath(nozzle, color = Color(0xFF475569), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
+
+        // Metallic body with color indicator cup
+        drawRoundRect(
+            color = Color(0xFF94A3B8),
+            topLeft = Offset(cx - w * 0.24f, h * 0.48f),
+            size = Size(w * 0.48f, h * 0.56f),
+            cornerRadius = CornerRadius(w * 0.07f)
+        )
+        drawCircle(
+            color = sprayColor,
+            radius = w * 0.13f,
+            center = Offset(cx, h * 0.72f)
+        )
+        drawCircle(
+            color = Color(0xFF334155),
+            radius = w * 0.13f,
+            center = Offset(cx, h * 0.72f),
+            style = Stroke(width = w * 0.035f)
+        )
+        drawRoundRect(
+            color = Color(0xFF334155),
+            topLeft = Offset(cx - w * 0.24f, h * 0.48f),
+            size = Size(w * 0.48f, h * 0.56f),
+            cornerRadius = CornerRadius(w * 0.07f),
+            style = Stroke(width = w * 0.042f)
+        )
+    }
+}
+

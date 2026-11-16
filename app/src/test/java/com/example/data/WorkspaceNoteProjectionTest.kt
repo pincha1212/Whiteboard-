@@ -237,4 +237,80 @@ class WorkspaceNoteProjectionTest {
         assertNotNull(restored)
         assertNull(restored?.stickyNotes?.singleOrNull()?.title)
     }
+
+    @Test
+    fun bidirectionalSingleSourceOfTruthSyncRenameTrashRestoreAndFocus() {
+        val store = LocalFirstWorkspaceStore()
+        val whiteboardVm = com.example.viewmodel.WhiteboardViewModel(store)
+        val notesVm = com.example.notes.viewmodel.NotesViewModel(store)
+
+        val boardId = whiteboardVm.uiState.value.board.id
+        whiteboardVm.openBoard(boardId)
+
+        // 1. Add sticky note on whiteboard -> immediately appears in Notes under linked board folder
+        whiteboardVm.addStickyNote(1080f, 1920f, "#FFF275")
+        val stickyId = whiteboardVm.uiState.value.board.stickyNotes.single().id
+        assertEquals(1, notesVm.uiState.value.notes.size)
+        assertEquals(boardId, notesVm.uiState.value.folders.find { it.linkedBoardId == boardId }?.linkedBoardId)
+
+        // 2. Edit sticky title and body on whiteboard -> Notes reflects both independently
+        whiteboardVm.updateStickyNoteTitle(stickyId, "Idea central")
+        whiteboardVm.updateStickyNoteText(stickyId, "Detalle extendido desde lienzo")
+        val noteFromStore = notesVm.uiState.value.notes.single { it.id == stickyId }
+        assertEquals("Idea central", noteFromStore.title)
+        assertEquals("Detalle extendido desde lienzo", noteFromStore.content)
+
+        // 3. Edit title and body in Notes -> immediately updates whiteboard sticky note
+        notesVm.openNote(noteFromStore)
+        notesVm.updateActiveNoteTitle("Idea editada en Notas")
+        notesVm.updateActiveNoteContent("Contenido sincronizado bidireccionalmente")
+        notesVm.closeActiveNote()
+        val updatedSticky = whiteboardVm.uiState.value.board.stickyNotes.single { it.id == stickyId }
+        assertEquals("Idea editada en Notas", updatedSticky.title)
+        assertEquals("Contenido sincronizado bidireccionalmente", updatedSticky.text)
+
+        // 4. Rename board -> folder updates & canvasData stays intact
+        whiteboardVm.renameBoardById(boardId, "Diseño Producto")
+        assertEquals("Diseño Producto", whiteboardVm.uiState.value.board.title)
+        val renamedNote = notesVm.uiState.value.notes.single { it.id == stickyId }
+        assertEquals("Diseño Producto", renamedNote.folder)
+        assertEquals(boardId, renamedNote.canvasData?.boardId)
+        assertEquals("Diseño Producto", notesVm.uiState.value.boardTitlesById[boardId])
+
+        // 5. Duplicate board -> assigns completely independent element IDs
+        whiteboardVm.duplicateCurrentBoard(boardId)
+        assertEquals(2, whiteboardVm.uiState.value.allBoards.size)
+        val originalBoard = whiteboardVm.uiState.value.allBoards.first { it.id == boardId }
+        val duplicatedBoard = whiteboardVm.uiState.value.allBoards.first { it.id != boardId }
+        org.junit.Assert.assertTrue(
+            originalBoard.stickyNotes.map { it.id }.intersect(duplicatedBoard.stickyNotes.map { it.id }.toSet()).isEmpty()
+        )
+
+        // 6. openBoardAndFocusNote opens target board, selects note, and centers camera on it
+        whiteboardVm.openBoardAndFocusNote(boardId, stickyId)
+        val focusedState = whiteboardVm.uiState.value
+        assertEquals(boardId, focusedState.board.id)
+        assertEquals(false, focusedState.isViewingBoardsHome)
+        assertEquals(stickyId, focusedState.selectedNoteId)
+        assertEquals(1.0f, focusedState.scale, 0.001f)
+        val expectedPanX = focusedState.viewportWidthPx * 0.5f - (updatedSticky.x + updatedSticky.width * 0.5f)
+        assertEquals(expectedPanX, focusedState.panX, 0.5f)
+
+        // 7. Soft delete from whiteboard -> moves to Papelera in Notes & removes from board; restoring brings both back
+        whiteboardVm.deleteStickyNote(stickyId)
+        assertEquals(0, whiteboardVm.uiState.value.board.stickyNotes.size)
+        assertNull(notesVm.uiState.value.notes.find { it.id == stickyId })
+        assertEquals(stickyId, notesVm.uiState.value.trashNotes.single { it.id == stickyId }.id)
+
+        notesVm.restoreNoteFromTrash(stickyId)
+        assertEquals(1, whiteboardVm.uiState.value.board.stickyNotes.size)
+        assertNotNull(notesVm.uiState.value.notes.find { it.id == stickyId })
+        assertNull(notesVm.uiState.value.trashNotes.find { it.id == stickyId })
+
+        // 8. Detach from board -> removes from whiteboard but keeps active in Notes with null canvasData
+        whiteboardVm.detachStickyNoteFromBoard(stickyId)
+        assertEquals(0, whiteboardVm.uiState.value.board.stickyNotes.size)
+        val detachedNote = notesVm.uiState.value.notes.single { it.id == stickyId }
+        assertNull(detachedNote.canvasData)
+    }
 }

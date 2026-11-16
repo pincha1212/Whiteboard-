@@ -373,7 +373,7 @@ class ExampleUnitTest {
         }
         val lowStab = com.example.ink.StrokeStabilizer.stabilizePoints(
             jitteryPoints,
-            com.example.model.StrokeBrushType.GRAPHITE_PENCIL.stabilization
+            com.example.model.StrokeBrushType.CALLIGRAPHY.stabilization
         )
         val highStab = com.example.ink.StrokeStabilizer.stabilizePoints(
             jitteryPoints,
@@ -383,8 +383,8 @@ class ExampleUnitTest {
         val highVariance = highStab.map { kotlin.math.abs(it.y - 100f) }.average()
         assertTrue(highVariance < lowVariance)
 
-        // Commit strokes with Pencil & Soft Brush and verify brushType + opacity
-        vm.setTool(com.example.model.ToolType.PENCIL)
+        // Commit strokes with Calligraphy & Soft Brush and verify brushType + opacity
+        vm.setTool(com.example.model.ToolType.CALLIGRAPHY)
         vm.commitCompletedStroke(
             listOf(
                 com.example.model.StrokePoint(0f, 100f),
@@ -395,9 +395,9 @@ class ExampleUnitTest {
             ),
             isHighlighter = false
         )
-        val pencilStroke = vm.uiState.value.board.strokes.last()
-        assertEquals(com.example.model.StrokeBrushType.GRAPHITE_PENCIL, pencilStroke.brushType)
-        assertTrue(pencilStroke.opacity < 1.0f)
+        val calligStroke = vm.uiState.value.board.strokes.last()
+        assertEquals(com.example.model.StrokeBrushType.CALLIGRAPHY, calligStroke.brushType)
+        assertTrue(calligStroke.opacity < 1.0f)
 
         vm.setTool(com.example.model.ToolType.BRUSH)
         vm.commitCompletedStroke(

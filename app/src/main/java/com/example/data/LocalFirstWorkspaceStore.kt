@@ -47,15 +47,26 @@ class LocalFirstWorkspaceStore(
         listeners.remove(listener)
     }
 
-    private fun commit(transform: (WorkspaceDbState) -> WorkspaceDbState): WorkspaceDbState {
+    private fun commit(
+        persist: Boolean = true,
+        transform: (WorkspaceDbState) -> WorkspaceDbState
+    ): WorkspaceDbState {
         val next: WorkspaceDbState
         synchronized(lock) {
             next = projectBoardsFromNotes(transform(_dbState.value))
             _dbState.value = next
-            persistToDisk(next)
+            if (persist) {
+                persistToDisk(next)
+            }
         }
         listeners.forEach { it(next) }
         return next
+    }
+
+    fun flushToDisk() {
+        synchronized(lock) {
+            persistToDisk(_dbState.value)
+        }
     }
 
     // --- BOARD <-> FOLDER & STICKY NOTE SSOT OPERATIONS ---
@@ -152,9 +163,10 @@ class LocalFirstWorkspaceStore(
 
     fun syncBoardFromWhiteboard(
         board: WhiteboardBoard,
-        softDeleteMissingNotes: Boolean = true
+        softDeleteMissingNotes: Boolean = true,
+        persist: Boolean = true
     ): WorkspaceDbState {
-        return commit { cur ->
+        return commit(persist = persist) { cur ->
             val (folders, linkedFolder) = ensureLinkedFolderInternal(cur.folders, board.id, board.title)
             val updatedNotes = syncBoardStickyNotesInternal(
                 existingNotes = cur.notes,
