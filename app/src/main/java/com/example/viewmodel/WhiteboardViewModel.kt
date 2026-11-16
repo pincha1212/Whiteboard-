@@ -123,6 +123,16 @@ class WhiteboardViewModel(
                 state.copy(board = cur, allBoards = currentBoards)
             }
         }
+        store.currentState.boards.forEach { board ->
+            store.migrateBoardStickyNotesToDocuments(board.id)
+        }
+        val migratedBoards = store.currentState.boards
+        if (migratedBoards.isNotEmpty()) {
+            _uiState.update { state ->
+                val current = migratedBoards.find { it.id == state.board.id } ?: migratedBoards.first()
+                state.copy(board = current, allBoards = migratedBoards)
+            }
+        }
         store.addListener(storeListener)
     }
 
