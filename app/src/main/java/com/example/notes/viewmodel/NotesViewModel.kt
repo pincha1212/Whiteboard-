@@ -241,6 +241,7 @@ class NotesViewModel(
                 unlockedNoteIds = nextUnlocked
             )
         }
+        flushPendingPersistence()
     }
 
     fun updateActiveNoteTitle(newTitle: String) {
