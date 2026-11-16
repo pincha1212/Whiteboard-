@@ -346,6 +346,24 @@ fun WhiteboardTopBar(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                            if (onSwitchToNotes != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Notas", style = MaterialTheme.typography.bodyMedium) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.Description,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        showHeaderMenu = false
+                                        onSwitchToNotes()
+                                    }
+                                )
+                            }
+
                             // Section 2: Canvas Settings & Board Management
                             DropdownMenuItem(
                                 text = { Text("Ajustar a cuadrícula", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
