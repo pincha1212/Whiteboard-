@@ -125,34 +125,6 @@ fun WhiteboardTopBar(
                         )
                     }
 
-                    if (onSwitchToNotes != null) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                .padding(3.dp)
-                        ) {
-                            WorkspaceSegmentItem(
-                                icon = Icons.Default.Draw,
-                                label = "Pizarra",
-                                isSelected = true,
-                                onClick = {},
-                                testTag = "btn_topbar_workspace_whiteboard"
-                            )
-
-                            Spacer(modifier = Modifier.width(2.dp))
-
-                            WorkspaceSegmentItem(
-                                icon = Icons.Default.Description,
-                                label = "Notas",
-                                isSelected = false,
-                                onClick = onSwitchToNotes,
-                                testTag = "btn_topbar_switch_to_notes"
-                            )
-                        }
-                    }
                 }
 
                 // Center: Pertinent Info Only (Board Title + Live Zoom/Snap Summary), generous spacing
