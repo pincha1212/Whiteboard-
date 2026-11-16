@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -57,6 +58,7 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -71,6 +73,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -794,14 +797,16 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
+        // Lightweight canvas text objects: editable, movable and width-resizable.
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val sx = (tItem.x * state.scale + state.panX).roundToInt()
             val sy = (tItem.y * state.scale + state.panY).roundToInt()
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
             val widthDp = with(density) { (tItem.width * state.scale).coerceAtLeast(80f).toDp() }
-            val fontSizeSp = (tItem.fontSize * state.scale).coerceIn(10f, 28f).sp
+            val fontSizeSp = (tItem.fontSize * state.scale).coerceIn(10f, 48f).sp
+            var textFocused by remember(tItem.id) { mutableStateOf(false) }
+            var showTextMenu by remember(tItem.id) { mutableStateOf(false) }
 
             if (tItem.isLocked) {
                 Box(
@@ -814,11 +819,11 @@ fun WhiteboardCanvasScreen(
                         text = tItem.text,
                         color = tColor,
                         fontSize = fontSizeSp,
-                        fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium,
+                        fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Normal,
                         lineHeight = (fontSizeSp.value * 1.25f).sp
                     )
                 }
-            } else {
+            } else if (tItem.isEditableCard) {
                 val cardBg = tItem.backgroundColorHex?.let { parseColor(it, Color.White) } ?: Color.White
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -844,8 +849,157 @@ fun WhiteboardCanvasScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .onFocusChanged {
+                                if (!it.isFocused) viewModel.commitTextItemChanges()
+                            }
                             .testTag("editable_text_input_${tItem.id}")
                     )
+                }
+            } else {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(sx, sy) }
+                        .width(widthDp)
+                        .border(
+                            width = if (textFocused) 1.dp else 0.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(3.dp)
+                        )
+                        .testTag("editable_text_item_${tItem.id}")
+                ) {
+                    BasicTextField(
+                        value = tItem.text,
+                        onValueChange = { viewModel.updateTextItem(tItem.id, it) },
+                        enabled = !isPanOnlyMode,
+                        readOnly = isPanOnlyMode,
+                        textStyle = TextStyle(
+                            color = tColor,
+                            fontSize = fontSizeSp,
+                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Normal,
+                            textAlign = when (tItem.textAlign.uppercase()) {
+                                "CENTER" -> TextAlign.Center
+                                "END", "RIGHT" -> TextAlign.End
+                                else -> TextAlign.Start
+                            }
+                        ),
+                        cursorBrush = SolidColor(tColor),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp, vertical = 4.dp)
+                            .onFocusChanged {
+                                if (it.isFocused && !textFocused) viewModel.beginTextItemTransform()
+                                textFocused = it.isFocused
+                                if (!it.isFocused) viewModel.commitTextItemChanges()
+                            }
+                            .testTag("editable_text_input_${tItem.id}")
+                    )
+
+                    if (textFocused) {
+                        Row(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .pointerInput(tItem.id, state.scale) {
+                                        detectDragGestures(
+                                            onDragStart = { viewModel.beginTextItemTransform() },
+                                            onDragEnd = { viewModel.commitTextItemChanges() },
+                                            onDragCancel = { viewModel.commitTextItemChanges() }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            viewModel.moveTextItemBy(tItem.id, dragAmount.x / state.scale, dragAmount.y / state.scale)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) { Text("↕", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+
+                            Box {
+                                Text(
+                                    text = "⋮",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable { showTextMenu = true }
+                                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                                )
+                                androidx.compose.material3.DropdownMenu(
+                                    expanded = showTextMenu,
+                                    onDismissRequest = { showTextMenu = false }
+                                ) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("Aumentar tamaño") },
+                                        onClick = {
+                                            viewModel.updateTextItemStyle(tItem.id, fontSize = (tItem.fontSize + 2f).coerceAtMost(64f))
+                                            showTextMenu = false
+                                        }
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("Reducir tamaño") },
+                                        onClick = {
+                                            viewModel.updateTextItemStyle(tItem.id, fontSize = (tItem.fontSize - 2f).coerceAtLeast(8f))
+                                            showTextMenu = false
+                                        }
+                                    )
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(if (tItem.isBold) "Quitar negrita" else "Negrita") },
+                                        onClick = {
+                                            viewModel.updateTextItemStyle(tItem.id, isBold = !tItem.isBold)
+                                            showTextMenu = false
+                                        }
+                                    )
+                                    listOf("START" to "Alinear izquierda", "CENTER" to "Centrar", "END" to "Alinear derecha").forEach { (align, label) ->
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                viewModel.updateTextItemStyle(tItem.id, textAlign = align)
+                                                showTextMenu = false
+                                            }
+                                        )
+                                    }
+                                    listOf("#1E1E1E" to "Negro", "#2563EB" to "Azul", "#DC2626" to "Rojo").forEach { (hex, label) ->
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                viewModel.updateTextItemStyle(tItem.id, colorHex = hex)
+                                                showTextMenu = false
+                                            }
+                                        )
+                                    }
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("Eliminar texto", color = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            viewModel.deleteTextItem(tItem.id)
+                                            showTextMenu = false
+                                        }
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .pointerInput(tItem.id, state.scale) {
+                                        detectDragGestures(
+                                            onDragStart = { viewModel.beginTextItemTransform() },
+                                            onDragEnd = { viewModel.commitTextItemChanges() },
+                                            onDragCancel = { viewModel.commitTextItemChanges() }
+                                        ) { change, dragAmount ->
+                                            change.consume()
+                                            viewModel.resizeTextItemBy(tItem.id, dragAmount.x / state.scale)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) { Text("↘", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
                 }
             }
         }
@@ -1173,8 +1327,7 @@ fun WhiteboardCanvasScreen(
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
                     onOpenShapePicker = { showShapePicker = true },
-                    onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
-                    onAddText = { viewModel.requestAddStickyNote("#FFF275") },
+                    onAddText = { viewModel.addTextItem(screenWidthPx, screenHeightPx) },
                     onOpenTemplates = { showTemplatePicker = true },
                     onClearBoard = { viewModel.clearBoard() },
                     modifier = Modifier

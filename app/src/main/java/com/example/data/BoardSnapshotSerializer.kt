@@ -131,6 +131,7 @@ object BoardSnapshotSerializer {
                 t.groupId?.let { put("groupId", it) }
                 t.parentId?.let { put("parentId", it) }
                 put("isHiddenByCollapse", t.isHiddenByCollapse)
+                put("textAlign", t.textAlign)
             })
         }
         root.put("textItems", textsArr)
@@ -300,7 +301,8 @@ object BoardSnapshotSerializer {
                             width = obj.optDouble("width", 190.0).toFloat(),
                             groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                             parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
-                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
+                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false),
+                            textAlign = obj.optString("textAlign", "START")
                         )
                     )
                 }

@@ -123,6 +123,16 @@ class WhiteboardViewModel(
                 state.copy(board = cur, allBoards = currentBoards)
             }
         }
+        store.currentState.boards.forEach { board ->
+            store.migrateBoardStickyNotesToDocuments(board.id)
+        }
+        val migratedBoards = store.currentState.boards
+        if (migratedBoards.isNotEmpty()) {
+            _uiState.update { state ->
+                val current = migratedBoards.find { it.id == state.board.id } ?: migratedBoards.first()
+                state.copy(board = current, allBoards = migratedBoards)
+            }
+        }
         store.addListener(storeListener)
     }
 
@@ -163,6 +173,7 @@ class WhiteboardViewModel(
     }
 
     fun commitWorkspaceSync() {
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         store.flushToDisk()
     }
 
@@ -790,6 +801,25 @@ class WhiteboardViewModel(
 
     fun dismissShapeProposal() {
         _uiState.update { it.copy(shapeRecognitionProposal = null) }
+    }
+
+    fun addTextItem(screenW: Float = 1080f, screenH: Float = 1920f) {
+        saveUndoSnapshot()
+        val state = _uiState.value
+        val worldCenterX = (screenW / 2f - state.panX) / state.scale
+        val worldCenterY = (screenH / 2f - state.panY) / state.scale
+        val item = TextItem(
+            text = "Escribe aquí...",
+            x = worldCenterX - 120f,
+            y = worldCenterY - 18f,
+            fontSize = 24f,
+            colorHex = "#1E1E1E",
+            width = 240f
+        )
+        _uiState.update { current ->
+            current.withUpdatedBoard { board -> board.copy(textItems = board.textItems + item) }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun addStickyNote(screenW: Float = 1080f, screenH: Float = 1920f, colorHex: String = "#FFF275") {
@@ -2278,6 +2308,61 @@ class WhiteboardViewModel(
                 b.copy(textItems = b.textItems.map { t -> if (t.id == id && !t.isLocked) t.copy(text = newText) else t })
             }
         }
+    }
+
+    fun beginTextItemTransform() {
+        saveUndoSnapshot()
+    }
+
+    fun moveTextItemBy(id: String, deltaX: Float, deltaY: Float) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id && !item.isLocked) item.copy(x = item.x + deltaX, y = item.y + deltaY) else item
+                })
+            }
+        }
+    }
+
+    fun resizeTextItemBy(id: String, deltaWidth: Float) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id && !item.isLocked) item.copy(width = (item.width + deltaWidth).coerceIn(80f, 1200f)) else item
+                })
+            }
+        }
+    }
+
+    fun updateTextItemStyle(id: String, fontSize: Float? = null, colorHex: String? = null, isBold: Boolean? = null, textAlign: String? = null) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id && !item.isLocked) item.copy(
+                        fontSize = fontSize ?: item.fontSize,
+                        colorHex = colorHex ?: item.colorHex,
+                        isBold = isBold ?: item.isBold,
+                        textAlign = textAlign ?: item.textAlign
+                    ) else item
+                })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun deleteTextItem(id: String) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.filterNot { it.id == id })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun commitTextItemChanges() {
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun updateShapeLabel(id: String, newLabel: String) {

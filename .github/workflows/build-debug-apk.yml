@@ -3,9 +3,14 @@ name: Build Android debug APK
 on:
   push:
     branches:
-      - feat/unified-notes-whiteboard
-      - feat/rich-notes-on-whiteboard
-      - integration/rich-notes-main
+      - feat/complete-lightweight-text-and-note-links
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: whiteboard-android-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -22,7 +27,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -47,13 +52,23 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest --tests "com.example.data.WorkspaceNoteProjectionTest" --tests "com.example.ui.canvas.ShapeCanvasCoordinatesTest" :app:assembleDebug
+      - name: Run unit tests and build debug APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Whiteboard-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Whiteboard-test-reports-${{ github.sha }}
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
           retention-days: 7

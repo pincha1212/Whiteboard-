@@ -122,6 +122,25 @@ object NoteExportImportService {
                     put("isHiddenByCollapse", cd.isHiddenByCollapse)
                 })
             }
+            n.archivedCanvasData?.let { cd ->
+                no.put("archivedCanvasData", JSONObject().apply {
+                    put("boardId", cd.boardId)
+                    put("x", cd.x.toDouble())
+                    put("y", cd.y.toDouble())
+                    put("width", cd.width.toDouble())
+                    put("height", cd.height.toDouble())
+                    put("rotation", cd.rotation.toDouble())
+                    put("color", cd.color)
+                    put("isLocked", cd.isLocked)
+                    put("isAspectRatioLocked", cd.isAspectRatioLocked)
+                    cd.groupId?.let { put("groupId", it) }
+                    cd.parentId?.let { put("parentId", it) }
+                    put("isHiddenByCollapse", cd.isHiddenByCollapse)
+                })
+            }
+            val linkedBoardsArr = JSONArray()
+            n.linkedBoardIds.forEach { linkedBoardsArr.put(it) }
+            no.put("linkedBoardIds", linkedBoardsArr)
             no.put("createdAt", n.createdAt)
             no.put("updatedAt", n.updatedAt)
 
@@ -255,6 +274,29 @@ object NoteExportImportService {
                         isHiddenByCollapse = cdObj.optBoolean("isHiddenByCollapse", false)
                     )
                 } else null
+                val archivedCdObj = no.optJSONObject("archivedCanvasData")
+                val archivedCanvasData = if (archivedCdObj != null && archivedCdObj.optString("boardId").isNotBlank()) {
+                    CanvasNoteData(
+                        boardId = archivedCdObj.optString("boardId"),
+                        x = archivedCdObj.optDouble("x", 0.0).toFloat(),
+                        y = archivedCdObj.optDouble("y", 0.0).toFloat(),
+                        width = archivedCdObj.optDouble("width", 220.0).toFloat(),
+                        height = archivedCdObj.optDouble("height", 200.0).toFloat(),
+                        rotation = archivedCdObj.optDouble("rotation", 0.0).toFloat(),
+                        color = archivedCdObj.optString("color", "#FFF275"),
+                        isLocked = archivedCdObj.optBoolean("isLocked", false),
+                        isAspectRatioLocked = archivedCdObj.optBoolean("isAspectRatioLocked", false),
+                        groupId = archivedCdObj.optString("groupId", "").takeIf { it.isNotBlank() },
+                        parentId = archivedCdObj.optString("parentId", "").takeIf { it.isNotBlank() },
+                        isHiddenByCollapse = archivedCdObj.optBoolean("isHiddenByCollapse", false)
+                    )
+                } else null
+                val linkedBoardIds = mutableSetOf<String>()
+                no.optJSONArray("linkedBoardIds")?.let { linked ->
+                    for (index in 0 until linked.length()) {
+                        linked.optString(index).takeIf { it.isNotBlank() }?.let(linkedBoardIds::add)
+                    }
+                }
                 val isDeleted = no.optBoolean("isDeleted", false)
                 val deletedAt = if (no.has("deletedAt")) no.optLong("deletedAt") else null
 
@@ -275,6 +317,8 @@ object NoteExportImportService {
                         checklists = checklists,
                         versionHistory = versions,
                         canvasData = canvasData,
+                        archivedCanvasData = archivedCanvasData,
+                        linkedBoardIds = linkedBoardIds,
                         isDeleted = isDeleted,
                         deletedAt = deletedAt,
                         createdAt = no.optLong("createdAt", System.currentTimeMillis()),

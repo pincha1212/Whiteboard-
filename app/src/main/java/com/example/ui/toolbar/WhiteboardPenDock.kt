@@ -91,7 +91,6 @@ fun WhiteboardPenDock(
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onOpenShapePicker: () -> Unit,
-    onAddStickyNote: () -> Unit,
     onAddText: () -> Unit,
     onOpenTemplates: () -> Unit,
     onClearBoard: () -> Unit,
@@ -234,18 +233,6 @@ fun WhiteboardPenDock(
                             }
 
                             UprightTrayToolSlot(
-                                isSelected = pendingShapeType == null && currentTool == ToolType.AIRBRUSH,
-                                description = "Aerógrafo",
-                                onClick = { onSelectTool(ToolType.AIRBRUSH) },
-                                testTag = "dock_menu_tool_airbrush"
-                            ) {
-                                PhysicalAirbrushIcon(
-                                    sprayColor = parsedPenColor,
-                                    modifier = Modifier.size(width = 28.dp, height = 40.dp)
-                                )
-                            }
-
-                            UprightTrayToolSlot(
                                 isSelected = pendingShapeType == null && currentTool == ToolType.LASER_POINTER,
                                 description = "Puntero láser",
                                 onClick = { onSelectTool(ToolType.LASER_POINTER) },
@@ -369,16 +356,6 @@ fun WhiteboardPenDock(
                             tint = if (isInkBarActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp)
                         )
-                    }
-
-                    // Sticky Note
-                    CompactDockActionButton(
-                        isSelected = false,
-                        description = "Agregar nota adhesiva",
-                        onClick = onAddStickyNote,
-                        testTag = "dock_action_sticky_note"
-                    ) {
-                        PhysicalStickyNoteIcon(modifier = Modifier.size(22.dp))
                     }
 
                     // Geometric Shapes

@@ -65,7 +65,9 @@ data class NoteItem(
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val linkedBoardIds: Set<String> = emptySet(),
+    val archivedCanvasData: CanvasNoteData? = null
 )
 
 data class VaultSecuritySettings(

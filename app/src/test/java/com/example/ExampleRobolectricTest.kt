@@ -531,7 +531,6 @@ class ExampleRobolectricTest {
           onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
           onToggleRuler = { viewModel.toggleRuler() },
           onOpenShapePicker = {},
-          onAddStickyNote = {},
           onAddText = {},
           onOpenTemplates = {},
           onClearBoard = {}

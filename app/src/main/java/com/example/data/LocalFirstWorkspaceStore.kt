@@ -126,7 +126,7 @@ class LocalFirstWorkspaceStore(
             val (updatedFolders, _) = ensureLinkedFolderInternal(cur.folders, boardId, clean)
             val updatedNotes = cur.notes.map { n ->
                 val belongsToBoard = n.canvasData?.boardId == boardId ||
-                    (oldFolderName != null && n.folder.equals(oldFolderName, ignoreCase = true) && n.canvasData?.boardId == boardId)
+                    (oldFolderName != null && n.folder.equals(oldFolderName, ignoreCase = true))
                 if (belongsToBoard) {
                     n.copy(folder = clean, updatedAt = System.currentTimeMillis())
                 } else n
@@ -145,8 +145,11 @@ class LocalFirstWorkspaceStore(
             }
             // Preserve notes safely in Notas by detaching canvasData when their board is deleted
             val updatedNotes = cur.notes.map { n ->
+                val nextLinks = n.linkedBoardIds - boardId
                 if (n.canvasData?.boardId == boardId) {
-                    n.copy(canvasData = null, updatedAt = System.currentTimeMillis())
+                    n.copy(canvasData = null, linkedBoardIds = nextLinks, updatedAt = System.currentTimeMillis())
+                } else if (nextLinks != n.linkedBoardIds) {
+                    n.copy(linkedBoardIds = nextLinks, updatedAt = System.currentTimeMillis())
                 } else n
             }
             val updatedFolders = cur.folders.map { f ->
@@ -158,6 +161,61 @@ class LocalFirstWorkspaceStore(
                 updatedFolders
             }
             cur.copy(notes = updatedNotes, folders = finalFolders, boards = nextBoards)
+        }
+    }
+
+    /**
+     * Converts legacy canvas sticky notes into regular Notes documents linked by board ID.
+     * The note ID and all rich-note fields remain unchanged; only canvas placement metadata is detached.
+     */
+    fun migrateBoardStickyNotesToDocuments(boardId: String): WorkspaceDbState {
+        return commit { cur ->
+            val board = cur.boards.find { it.id == boardId } ?: return@commit cur
+            val (folders, linkedFolder) = ensureLinkedFolderInternal(cur.folders, board.id, board.title)
+            val upserted = upsertBoardStickyNotesInternal(
+                existingNotes = cur.notes,
+                boardId = board.id,
+                folderName = linkedFolder.name,
+                stickyNotes = board.stickyNotes
+            )
+            val now = System.currentTimeMillis()
+            val migratedNotes = upserted.map { note ->
+                if (note.canvasData?.boardId == boardId) {
+                    note.copy(
+                        canvasData = null,
+                        archivedCanvasData = note.canvasData ?: note.archivedCanvasData,
+                        linkedBoardIds = note.linkedBoardIds + boardId,
+                        updatedAt = now
+                    )
+                } else note
+            }
+            val migratedBoards = cur.boards.map { current ->
+                if (current.id == boardId && current.stickyNotes.isNotEmpty()) {
+                    current.copy(stickyNotes = emptyList(), updatedAt = now)
+                } else current
+            }
+            cur.copy(notes = migratedNotes, folders = folders, boards = migratedBoards)
+        }
+    }
+
+    fun linkNoteToBoard(noteId: String, boardId: String): WorkspaceDbState {
+        return commit { cur ->
+            if (cur.boards.none { it.id == boardId }) return@commit cur
+            cur.copy(notes = cur.notes.map { note ->
+                if (note.id == noteId && !note.isDeleted) {
+                    note.copy(linkedBoardIds = note.linkedBoardIds + boardId, updatedAt = System.currentTimeMillis())
+                } else note
+            })
+        }
+    }
+
+    fun unlinkNoteFromBoard(noteId: String, boardId: String): WorkspaceDbState {
+        return commit { cur ->
+            cur.copy(notes = cur.notes.map { note ->
+                if (note.id == noteId) {
+                    note.copy(linkedBoardIds = note.linkedBoardIds - boardId, updatedAt = System.currentTimeMillis())
+                } else note
+            })
         }
     }
 

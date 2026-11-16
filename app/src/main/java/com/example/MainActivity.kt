@@ -46,6 +46,11 @@ class MainActivity : ComponentActivity() {
     private val whiteboardViewModel: WhiteboardViewModel by viewModels { workspaceFactory }
     private val notesViewModel: NotesViewModel by viewModels { workspaceFactory }
 
+    override fun onStop() {
+        whiteboardViewModel.commitWorkspaceSync()
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -87,13 +92,13 @@ class MainActivity : ComponentActivity() {
                                 onRenameBoard = { id, title -> whiteboardViewModel.renameBoardById(id, title) },
                                 onDuplicateBoard = { whiteboardViewModel.duplicateCurrentBoard(it) },
                                 onDeleteBoard = { whiteboardViewModel.deleteBoard(it) },
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                onSwitchToNotes = { notesViewModel.setBoardFilter(whiteboardState.board.id); currentWorkspace = AppActiveWorkspace.NOTES },
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
                             WhiteboardCanvasScreen(
                                 viewModel = whiteboardViewModel,
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                onSwitchToNotes = { notesViewModel.setBoardFilter(whiteboardState.board.id); currentWorkspace = AppActiveWorkspace.NOTES },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -101,7 +106,7 @@ class MainActivity : ComponentActivity() {
                     AppActiveWorkspace.NOTES -> {
                         NotesMasterDetailScreen(
                             notesViewModel = notesViewModel,
-                            onOpenWhiteboard = { currentWorkspace = AppActiveWorkspace.WHITEBOARD },
+                            onOpenWhiteboard = { notesViewModel.setBoardFilter(null); currentWorkspace = AppActiveWorkspace.WHITEBOARD },
                             onOpenNoteInBoard = { boardId, noteId ->
                                 notesViewModel.closeActiveNote()
                                 whiteboardViewModel.openBoardAndFocusNote(boardId, noteId)

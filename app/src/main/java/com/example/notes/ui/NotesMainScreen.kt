@@ -89,12 +89,14 @@ fun NotesMainScreen(
     modifier: Modifier = Modifier
 ) {
     val state by notesViewModel.uiState.collectAsState()
+    val boardFilterId = state.boardFilterId
     val snackbarHostState = remember { SnackbarHostState() }
     var showVoiceModal by remember { mutableStateOf(false) }
     var showHeaderMenu by remember { mutableStateOf(false) }
     var showDockFoldersMenu by remember { mutableStateOf(false) }
     var showDockMoreMenu by remember { mutableStateOf(false) }
     var notePendingDelete by remember { mutableStateOf<NoteItem?>(null) }
+    var showLinkNoteDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.statusNotification) {
         state.statusNotification?.let {
@@ -105,7 +107,10 @@ fun NotesMainScreen(
 
     if (state.isEditingNote && state.activeNote != null && !isEmbeddedInSplit) {
         val active = state.activeNote!!
-        val originBoardName = active.canvasData?.let { state.boardTitlesById[it.boardId] ?: active.folder }
+        val originBoardId = state.boardFilterId?.takeIf { it in active.linkedBoardIds || active.canvasData?.boardId == it }
+            ?: active.linkedBoardIds.firstOrNull()
+            ?: active.canvasData?.boardId
+        val originBoardName = originBoardId?.let { state.boardTitlesById[it] ?: active.folder }
         NoteEditorScreen(
             note = active,
             folders = state.folders,
@@ -114,7 +119,10 @@ fun NotesMainScreen(
             initialShowChecklist = state.isChecklistFocusRequested,
             enableBackHandler = true,
             originBoardName = originBoardName,
-            onOpenInBoard = active.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, active.id) } },
+            onOpenInBoard = originBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, active.id) } },
+            onUnlinkFromBoard = boardFilterId?.takeIf { it in active.linkedBoardIds }?.let { boardId ->
+                { notesViewModel.unlinkNoteFromBoard(active.id, boardId) }
+            },
             onBack = { notesViewModel.closeActiveNote() },
             onUpdateTitle = { notesViewModel.updateActiveNoteTitle(it) },
             onUpdateContent = { notesViewModel.updateActiveNoteContent(it) },
@@ -488,7 +496,8 @@ fun NotesMainScreen(
                             }
 
                             items(pinnedNotes, key = { it.id }) { note ->
-                                val boardName = note.canvasData?.let { state.boardTitlesById[it.boardId] ?: note.folder }
+                                val noteBoardId = state.boardFilterId ?: note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
+                                val boardName = noteBoardId?.let { state.boardTitlesById[it] ?: note.folder }
                                 NoteCardView(
                                     note = note,
                                     isUnlocked = notesViewModel.isNoteUnlocked(note.id),
@@ -498,7 +507,7 @@ fun NotesMainScreen(
                                     onClick = { notesViewModel.openNote(note) },
                                     onTogglePin = { notesViewModel.toggleNotePin(note.id) },
                                     onDelete = { notesViewModel.deleteNote(note.id) },
-                                    onOpenInBoard = note.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, note.id) } },
+                                    onOpenInBoard = noteBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, note.id) } },
                                     onRestore = { notesViewModel.restoreNoteFromTrash(note.id) },
                                     onDeletePermanently = { notePendingDelete = note }
                                 )
@@ -514,7 +523,8 @@ fun NotesMainScreen(
                             }
 
                             items(otherNotes, key = { it.id }) { note ->
-                                val boardName = note.canvasData?.let { state.boardTitlesById[it.boardId] ?: note.folder }
+                                val noteBoardId = state.boardFilterId ?: note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
+                                val boardName = noteBoardId?.let { state.boardTitlesById[it] ?: note.folder }
                                 NoteCardView(
                                     note = note,
                                     isUnlocked = notesViewModel.isNoteUnlocked(note.id),
@@ -524,7 +534,7 @@ fun NotesMainScreen(
                                     onClick = { notesViewModel.openNote(note) },
                                     onTogglePin = { notesViewModel.toggleNotePin(note.id) },
                                     onDelete = { notesViewModel.deleteNote(note.id) },
-                                    onOpenInBoard = note.canvasData?.let { cd -> { onOpenNoteInBoard(cd.boardId, note.id) } },
+                                    onOpenInBoard = noteBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, note.id) } },
                                     onRestore = { notesViewModel.restoreNoteFromTrash(note.id) },
                                     onDeletePermanently = { notePendingDelete = note }
                                 )
@@ -612,7 +622,8 @@ fun NotesMainScreen(
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.primary)
                                     .clickable {
-                                        notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
+                                        boardFilterId?.let { notesViewModel.createNewNoteForBoard(it) }
+                                            ?: notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
                                     }
                                     .padding(horizontal = 11.dp, vertical = 7.dp)
                                     .testTag("fab_new_note")
@@ -631,6 +642,12 @@ fun NotesMainScreen(
                                     color = MaterialTheme.colorScheme.onPrimary,
                                     maxLines = 1
                                 )
+                            }
+
+                            if (state.boardFilterId != null) {
+                                TextButton(onClick = { showLinkNoteDialog = true }) {
+                                    Text("Vincular existente", style = MaterialTheme.typography.labelMedium)
+                                }
                             }
 
                             // 5. Dock 3-dots overflow menu
@@ -673,6 +690,43 @@ fun NotesMainScreen(
                 }
             }
         }
+    }
+
+    if (showLinkNoteDialog && boardFilterId != null) {
+        val currentBoardId = boardFilterId
+        val candidates = state.notes.filter { note ->
+            !note.isDeleted && currentBoardId !in note.linkedBoardIds &&
+                note.canvasData?.boardId != currentBoardId
+        }
+        AlertDialog(
+            onDismissRequest = { showLinkNoteDialog = false },
+            title = { Text("Vincular una nota existente") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    if (candidates.isEmpty()) {
+                        Text("No hay notas disponibles para vincular.")
+                    } else {
+                        candidates.take(30).forEach { note ->
+                            TextButton(
+                                onClick = {
+                                    notesViewModel.linkNoteToBoard(note.id, currentBoardId)
+                                    showLinkNoteDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = note.title.ifBlank { note.content.take(48).ifBlank { "Nota sin título" } },
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLinkNoteDialog = false }) { Text("Cerrar") }
+            }
+        )
     }
 
     // --- MODALS ---
@@ -1016,7 +1070,8 @@ private fun NotesOverflowDropdownMenu(
             leadingIcon = { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp)) },
             onClick = {
                 onDismissRequest()
-                notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
+                state.boardFilterId?.let { notesViewModel.createNewNoteForBoard(it) }
+                    ?: notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
             }
         )
 

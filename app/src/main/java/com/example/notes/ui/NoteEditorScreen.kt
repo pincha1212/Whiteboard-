@@ -123,6 +123,7 @@ fun NoteEditorScreen(
     enableBackHandler: Boolean = false,
     originBoardName: String? = null,
     onOpenInBoard: (() -> Unit)? = null,
+    onUnlinkFromBoard: (() -> Unit)? = null,
     onBack: () -> Unit,
     onUpdateTitle: (String) -> Unit,
     onUpdateContent: (String) -> Unit,
@@ -528,6 +529,18 @@ fun NoteEditorScreen(
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        if (onUnlinkFromBoard != null) {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "Quitar vínculo",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier
+                                    .clickable(onClick = onUnlinkFromBoard)
+                                    .testTag("btn_editor_unlink_board")
+                            )
+                        }
                     }
                 }
 
