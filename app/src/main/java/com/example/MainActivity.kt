@@ -46,6 +46,11 @@ class MainActivity : ComponentActivity() {
     private val whiteboardViewModel: WhiteboardViewModel by viewModels { workspaceFactory }
     private val notesViewModel: NotesViewModel by viewModels { workspaceFactory }
 
+    override fun onStop() {
+        whiteboardViewModel.commitWorkspaceSync()
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
