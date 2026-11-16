@@ -122,6 +122,9 @@ object NoteExportImportService {
                     put("isHiddenByCollapse", cd.isHiddenByCollapse)
                 })
             }
+            val linkedBoardsArr = JSONArray()
+            n.linkedBoardIds.forEach { linkedBoardsArr.put(it) }
+            no.put("linkedBoardIds", linkedBoardsArr)
             no.put("createdAt", n.createdAt)
             no.put("updatedAt", n.updatedAt)
 
@@ -255,6 +258,12 @@ object NoteExportImportService {
                         isHiddenByCollapse = cdObj.optBoolean("isHiddenByCollapse", false)
                     )
                 } else null
+                val linkedBoardIds = mutableSetOf<String>()
+                no.optJSONArray("linkedBoardIds")?.let { linked ->
+                    for (index in 0 until linked.length()) {
+                        linked.optString(index).takeIf { it.isNotBlank() }?.let(linkedBoardIds::add)
+                    }
+                }
                 val isDeleted = no.optBoolean("isDeleted", false)
                 val deletedAt = if (no.has("deletedAt")) no.optLong("deletedAt") else null
 
@@ -275,6 +284,7 @@ object NoteExportImportService {
                         checklists = checklists,
                         versionHistory = versions,
                         canvasData = canvasData,
+                        linkedBoardIds = linkedBoardIds,
                         isDeleted = isDeleted,
                         deletedAt = deletedAt,
                         createdAt = no.optLong("createdAt", System.currentTimeMillis()),
