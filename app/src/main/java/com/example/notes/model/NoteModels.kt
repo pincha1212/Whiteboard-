@@ -62,11 +62,11 @@ data class NoteItem(
     val checklists: List<ChecklistItem> = emptyList(),
     val versionHistory: List<NoteVersion> = emptyList(),
     val canvasData: CanvasNoteData? = null,
-    val linkedBoardIds: Set<String> = emptySet(),
     val isDeleted: Boolean = false,
     val deletedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val linkedBoardIds: Set<String> = emptySet(),
     val archivedCanvasData: CanvasNoteData? = null
 )
 
