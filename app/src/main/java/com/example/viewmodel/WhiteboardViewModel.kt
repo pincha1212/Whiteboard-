@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.data.BoardSnapshotSerializer
 import com.example.data.LocalFirstWorkspaceStore
 import com.example.data.WorkspaceDbState
@@ -32,6 +33,9 @@ import com.example.model.TextItem
 import com.example.model.ToolType
 import com.example.model.WhiteboardBoard
 import com.example.model.WhiteboardStroke
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -103,6 +107,8 @@ class WhiteboardViewModel(
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
     private var isCommittingToStore = false
+    private var hasPendingBoardSync = false
+    private var pendingPersistenceJob: Job? = null
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
@@ -127,6 +133,12 @@ class WhiteboardViewModel(
     }
 
     override fun onCleared() {
+        pendingPersistenceJob?.cancel()
+        if (hasPendingBoardSync) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+            hasPendingBoardSync = false
+        }
+        store.flushToDisk()
         store.removeListener(storeListener)
         super.onCleared()
     }
@@ -163,7 +175,22 @@ class WhiteboardViewModel(
     }
 
     fun commitWorkspaceSync() {
+        pendingPersistenceJob?.cancel()
+        pendingPersistenceJob = null
+        if (hasPendingBoardSync) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+            hasPendingBoardSync = false
+        }
         store.flushToDisk()
+    }
+
+    private fun scheduleWorkspacePersistence() {
+        pendingPersistenceJob?.cancel()
+        pendingPersistenceJob = viewModelScope.launch {
+            delay(500L)
+            store.flushToDisk()
+            pendingPersistenceJob = null
+        }
     }
 
     private fun createInitialState(): WhiteboardUiState {
@@ -837,7 +864,8 @@ class WhiteboardViewModel(
                 })
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        scheduleWorkspacePersistence()
     }
 
     fun updateStickyNoteText(id: String, newText: String) {
@@ -863,7 +891,8 @@ class WhiteboardViewModel(
                 })
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        scheduleWorkspacePersistence()
     }
 
     fun updateStickyNoteColor(id: String, colorHex: String) {
@@ -904,7 +933,7 @@ class WhiteboardViewModel(
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        hasPendingBoardSync = true
     }
 
     fun resizeStickyNoteHandle(
@@ -941,7 +970,7 @@ class WhiteboardViewModel(
                 IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        hasPendingBoardSync = true
     }
 
     fun resizeStickyNoteBounds(
