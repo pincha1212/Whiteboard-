@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
                         } else {
                             WhiteboardCanvasScreen(
                                 viewModel = whiteboardViewModel,
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                onSwitchToNotes = { notesViewModel.setBoardFilter(whiteboardState.board.id); currentWorkspace = AppActiveWorkspace.NOTES },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
