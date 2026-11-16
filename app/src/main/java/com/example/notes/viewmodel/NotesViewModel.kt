@@ -1,6 +1,7 @@
 package com.example.notes.viewmodel
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.example.data.LocalFirstWorkspaceStore
 import com.example.data.WorkspaceDbState
 import com.example.notes.data.NoteExportImportService
@@ -10,6 +11,9 @@ import com.example.notes.model.NoteItem
 import com.example.notes.model.NoteTag
 import com.example.notes.model.NoteVersion
 import com.example.notes.model.VaultSecuritySettings
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -84,6 +88,7 @@ class NotesViewModel(
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(NotesUiState())
+    private var pendingPersistenceJob: Job? = null
     val uiState: StateFlow<NotesUiState> = _uiState.asStateFlow()
 
     private val storeListener: (WorkspaceDbState) -> Unit = { db ->
@@ -96,6 +101,8 @@ class NotesViewModel(
     }
 
     override fun onCleared() {
+        pendingPersistenceJob?.cancel()
+        store.flushToDisk()
         store.removeListener(storeListener)
         super.onCleared()
     }
@@ -234,6 +241,7 @@ class NotesViewModel(
                 unlockedNoteIds = nextUnlocked
             )
         }
+        flushPendingPersistence()
     }
 
     fun updateActiveNoteTitle(newTitle: String) {
@@ -575,13 +583,30 @@ class NotesViewModel(
     }
 
     private fun updateNoteInState(updated: NoteItem) {
-        val db = store.upsertNote(updated, prependIfNew = false)
+        val db = store.upsertNote(updated, prependIfNew = false, persist = false)
+        schedulePersistence()
         val canonical = db.notes.find { it.id == updated.id } ?: updated
         _uiState.update { state ->
             state.copy(
                 activeNote = if (state.activeNote?.id == updated.id) canonical else state.activeNote
             )
         }
+    }
+
+    private fun schedulePersistence() {
+        pendingPersistenceJob?.cancel()
+        pendingPersistenceJob = viewModelScope.launch {
+            delay(500L)
+            store.flushToDisk()
+            pendingPersistenceJob = null
+        }
+    }
+
+    fun flushPendingPersistence() {
+        val hadPendingPersistence = pendingPersistenceJob != null
+        pendingPersistenceJob?.cancel()
+        pendingPersistenceJob = null
+        if (hadPendingPersistence) store.flushToDisk()
     }
 
     /**

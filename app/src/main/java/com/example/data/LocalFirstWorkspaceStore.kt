@@ -281,8 +281,12 @@ class LocalFirstWorkspaceStore(
 
     // --- NOTES MODULE OPERATIONS ---
 
-    fun upsertNote(note: NoteItem, prependIfNew: Boolean = true): WorkspaceDbState {
-        return commit { cur ->
+    fun upsertNote(
+        note: NoteItem,
+        prependIfNew: Boolean = true,
+        persist: Boolean = true
+    ): WorkspaceDbState {
+        return commit(persist = persist) { cur ->
             val linkedFolder = cur.folders.find {
                 it.name.equals(note.folder, ignoreCase = true) && it.linkedBoardId != null
             }

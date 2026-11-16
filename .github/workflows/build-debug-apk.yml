@@ -3,9 +3,14 @@ name: Build Android debug APK
 on:
   push:
     branches:
+      - main
+      - perf/low-end-device-optimization
       - feat/unified-notes-whiteboard
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -15,14 +20,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout feature branch
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -36,24 +41,25 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Generate local debug signing key
-        run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
+        run: keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest --tests "com.example.data.WorkspaceNoteProjectionTest" --tests "com.example.ui.canvas.ShapeCanvasCoordinatesTest" :app:assembleDebug
+      - name: Run unit tests and build debug APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Whiteboard-debug-${{ github.sha }}
           path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Whiteboard-unit-test-reports-${{ github.sha }}
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
           retention-days: 7
