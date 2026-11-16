@@ -145,8 +145,11 @@ class LocalFirstWorkspaceStore(
             }
             // Preserve notes safely in Notas by detaching canvasData when their board is deleted
             val updatedNotes = cur.notes.map { n ->
+                val nextLinks = n.linkedBoardIds - boardId
                 if (n.canvasData?.boardId == boardId) {
-                    n.copy(canvasData = null, linkedBoardIds = n.linkedBoardIds - boardId, updatedAt = System.currentTimeMillis())
+                    n.copy(canvasData = null, linkedBoardIds = nextLinks, updatedAt = System.currentTimeMillis())
+                } else if (nextLinks != n.linkedBoardIds) {
+                    n.copy(linkedBoardIds = nextLinks, updatedAt = System.currentTimeMillis())
                 } else n
             }
             val updatedFolders = cur.folders.map { f ->
