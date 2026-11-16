@@ -183,6 +183,7 @@ class LocalFirstWorkspaceStore(
                 if (note.canvasData?.boardId == boardId) {
                     note.copy(
                         canvasData = null,
+                        archivedCanvasData = note.canvasData ?: note.archivedCanvasData,
                         linkedBoardIds = note.linkedBoardIds + boardId,
                         updatedAt = now
                     )
