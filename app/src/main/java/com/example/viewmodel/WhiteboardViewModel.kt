@@ -792,6 +792,25 @@ class WhiteboardViewModel(
         _uiState.update { it.copy(shapeRecognitionProposal = null) }
     }
 
+    fun addTextItem(screenW: Float = 1080f, screenH: Float = 1920f) {
+        saveUndoSnapshot()
+        val state = _uiState.value
+        val worldCenterX = (screenW / 2f - state.panX) / state.scale
+        val worldCenterY = (screenH / 2f - state.panY) / state.scale
+        val item = TextItem(
+            text = "Escribe aquí...",
+            x = worldCenterX - 120f,
+            y = worldCenterY - 18f,
+            fontSize = 24f,
+            colorHex = "#1E1E1E",
+            width = 240f
+        )
+        _uiState.update { current ->
+            current.withUpdatedBoard { board -> board.copy(textItems = board.textItems + item) }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
     fun addStickyNote(screenW: Float = 1080f, screenH: Float = 1920f, colorHex: String = "#FFF275") {
         saveUndoSnapshot()
         val state = _uiState.value
