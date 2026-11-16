@@ -224,6 +224,7 @@ class NotesViewModel(
             folder = if (folder == "Todas") "Bandeja de Entrada" else folder,
             tags = emptyList(),
             colorHex = "#FFFFFF",
+            linkedBoardIds = _uiState.value.boardFilterId?.let { setOf(it) } ?: emptySet(),
             createdAt = System.currentTimeMillis(),
             updatedAt = System.currentTimeMillis()
         )
@@ -472,7 +473,8 @@ class NotesViewModel(
             colorHex = "#FBF4FE",
             isVoiceNote = true,
             voiceDurationSec = duration,
-            voiceAudioUri = audioFilePath
+            voiceAudioUri = audioFilePath,
+            linkedBoardIds = _uiState.value.boardFilterId?.let { setOf(it) } ?: emptySet()
         )
 
         val db = store.upsertNote(voiceNote, prependIfNew = true)
