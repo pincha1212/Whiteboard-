@@ -692,10 +692,11 @@ fun NotesMainScreen(
         }
     }
 
-    if (showLinkNoteDialog && state.boardFilterId != null) {
+    if (showLinkNoteDialog && boardFilterId != null) {
+        val currentBoardId = boardFilterId
         val candidates = state.notes.filter { note ->
-            !note.isDeleted && state.boardFilterId !in note.linkedBoardIds &&
-                note.canvasData?.boardId != state.boardFilterId
+            !note.isDeleted && currentBoardId !in note.linkedBoardIds &&
+                note.canvasData?.boardId != currentBoardId
         }
         AlertDialog(
             onDismissRequest = { showLinkNoteDialog = false },
@@ -708,7 +709,7 @@ fun NotesMainScreen(
                         candidates.take(30).forEach { note ->
                             TextButton(
                                 onClick = {
-                                    notesViewModel.linkNoteToBoard(note.id, state.boardFilterId!!)
+                                    notesViewModel.linkNoteToBoard(note.id, currentBoardId)
                                     showLinkNoteDialog = false
                                 },
                                 modifier = Modifier.fillMaxWidth()
