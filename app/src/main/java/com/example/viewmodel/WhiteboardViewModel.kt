@@ -175,13 +175,16 @@ class WhiteboardViewModel(
     }
 
     fun commitWorkspaceSync() {
+        val hadPendingPersistence = pendingPersistenceJob != null
         pendingPersistenceJob?.cancel()
         pendingPersistenceJob = null
         if (hasPendingBoardSync) {
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
             hasPendingBoardSync = false
         }
-        store.flushToDisk()
+        if (hadPendingPersistence || hasPendingBoardSync.not()) {
+            if (hadPendingPersistence) store.flushToDisk()
+        }
     }
 
     private fun scheduleWorkspacePersistence() {
