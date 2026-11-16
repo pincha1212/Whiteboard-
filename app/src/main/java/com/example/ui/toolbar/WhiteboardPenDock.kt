@@ -91,7 +91,6 @@ fun WhiteboardPenDock(
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onOpenShapePicker: () -> Unit,
-    onAddStickyNote: () -> Unit,
     onAddText: () -> Unit,
     onOpenTemplates: () -> Unit,
     onClearBoard: () -> Unit,
@@ -357,16 +356,6 @@ fun WhiteboardPenDock(
                             tint = if (isInkBarActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp)
                         )
-                    }
-
-                    // Sticky Note
-                    CompactDockActionButton(
-                        isSelected = false,
-                        description = "Agregar nota adhesiva",
-                        onClick = onAddStickyNote,
-                        testTag = "dock_action_sticky_note"
-                    ) {
-                        PhysicalStickyNoteIcon(modifier = Modifier.size(22.dp))
                     }
 
                     // Geometric Shapes
