@@ -3,6 +3,8 @@ name: Build Android debug APK
 on:
   push:
     branches:
+      - main
+      - perf/low-end-device-optimization
       - feat/unified-notes-whiteboard
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
@@ -15,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout feature branch
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Java
@@ -37,18 +39,18 @@ jobs:
 
       - name: Generate local debug signing key
         run: |
-          keytool -genkeypair -v \
-            -keystore debug.keystore \
-            -storepass android \
-            -keypass android \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
+          keytool -genkeypair -v \\
+            -keystore debug.keystore \\
+            -storepass android \\
+            -keypass android \\
+            -alias androiddebugkey \\
+            -keyalg RSA \\
+            -keysize 2048 \\
+            -validity 10000 \\
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:testDebugUnitTest --tests "com.example.data.WorkspaceNoteProjectionTest" --tests "com.example.ui.canvas.ShapeCanvasCoordinatesTest" :app:assembleDebug
+      - name: Run unit tests and build debug APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
