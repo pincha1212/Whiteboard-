@@ -89,6 +89,7 @@ fun NotesMainScreen(
     modifier: Modifier = Modifier
 ) {
     val state by notesViewModel.uiState.collectAsState()
+    val boardFilterId = state.boardFilterId
     val snackbarHostState = remember { SnackbarHostState() }
     var showVoiceModal by remember { mutableStateOf(false) }
     var showHeaderMenu by remember { mutableStateOf(false) }
@@ -119,9 +120,9 @@ fun NotesMainScreen(
             enableBackHandler = true,
             originBoardName = originBoardName,
             onOpenInBoard = originBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, active.id) } },
-            onUnlinkFromBoard = if (state.boardFilterId != null && state.boardFilterId in active.linkedBoardIds) {
-                { notesViewModel.unlinkNoteFromBoard(active.id, state.boardFilterId) }
-            } else null,
+            onUnlinkFromBoard = boardFilterId?.takeIf { it in active.linkedBoardIds }?.let { boardId ->
+                { notesViewModel.unlinkNoteFromBoard(active.id, boardId) }
+            },
             onBack = { notesViewModel.closeActiveNote() },
             onUpdateTitle = { notesViewModel.updateActiveNoteTitle(it) },
             onUpdateContent = { notesViewModel.updateActiveNoteContent(it) },
@@ -621,7 +622,8 @@ fun NotesMainScreen(
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.primary)
                                     .clickable {
-                                        if (state.boardFilterId != null) notesViewModel.createNewNoteForBoard(state.boardFilterId) else notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
+                                        boardFilterId?.let { notesViewModel.createNewNoteForBoard(it) }
+                                            ?: notesViewModel.createNewNote(state.selectedFolder ?: "Bandeja de Entrada")
                                     }
                                     .padding(horizontal = 11.dp, vertical = 7.dp)
                                     .testTag("fab_new_note")
