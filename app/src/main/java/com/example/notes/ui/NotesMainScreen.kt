@@ -106,7 +106,7 @@ fun NotesMainScreen(
 
     if (state.isEditingNote && state.activeNote != null && !isEmbeddedInSplit) {
         val active = state.activeNote!!
-        val originBoardId = active.linkedBoardIds.firstOrNull() ?: active.canvasData?.boardId
+        val originBoardId = state.boardFilterId ?: active.linkedBoardIds.firstOrNull() ?: active.canvasData?.boardId
         val originBoardName = originBoardId?.let { state.boardTitlesById[it] ?: active.folder }
         NoteEditorScreen(
             note = active,
@@ -117,6 +117,9 @@ fun NotesMainScreen(
             enableBackHandler = true,
             originBoardName = originBoardName,
             onOpenInBoard = originBoardId?.let { boardId -> { onOpenNoteInBoard(boardId, active.id) } },
+            onUnlinkFromBoard = if (state.boardFilterId != null && state.boardFilterId in active.linkedBoardIds) {
+                { notesViewModel.unlinkNoteFromBoard(active.id, state.boardFilterId) }
+            } else null,
             onBack = { notesViewModel.closeActiveNote() },
             onUpdateTitle = { notesViewModel.updateActiveNoteTitle(it) },
             onUpdateContent = { notesViewModel.updateActiveNoteContent(it) },
@@ -490,7 +493,7 @@ fun NotesMainScreen(
                             }
 
                             items(pinnedNotes, key = { it.id }) { note ->
-                                val noteBoardId = note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
+                                val noteBoardId = state.boardFilterId ?: note.linkedBoardIds.firstOrNull() ?: note.canvasData?.boardId
                                 val boardName = noteBoardId?.let { state.boardTitlesById[it] ?: note.folder }
                                 NoteCardView(
                                     note = note,
