@@ -2334,7 +2334,7 @@ class WhiteboardViewModel(
         }
     }
 
-    fun updateTextItemStyle(id: String, fontSize: Float? = null, colorHex: String? = null, isBold: Boolean? = null) {
+    fun updateTextItemStyle(id: String, fontSize: Float? = null, colorHex: String? = null, isBold: Boolean? = null, textAlign: String? = null) {
         saveUndoSnapshot()
         _uiState.update { state ->
             state.withUpdatedBoard { board ->
@@ -2342,7 +2342,8 @@ class WhiteboardViewModel(
                     if (item.id == id && !item.isLocked) item.copy(
                         fontSize = fontSize ?: item.fontSize,
                         colorHex = colorHex ?: item.colorHex,
-                        isBold = isBold ?: item.isBold
+                        isBold = isBold ?: item.isBold,
+                        textAlign = textAlign ?: item.textAlign
                     ) else item
                 })
             }
