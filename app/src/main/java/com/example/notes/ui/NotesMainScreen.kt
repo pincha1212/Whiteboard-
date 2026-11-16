@@ -94,8 +94,8 @@ fun NotesMainScreen(
     var showHeaderMenu by remember { mutableStateOf(false) }
     var showDockFoldersMenu by remember { mutableStateOf(false) }
     var showDockMoreMenu by remember { mutableStateOf(false) }
-    var notePendingDelete by remember { mutableStateOf<NoteItem?>(null)
-    var showLinkNoteDialog by remember { mutableStateOf(false) } }
+    var notePendingDelete by remember { mutableStateOf<NoteItem?>(null) }
+    var showLinkNoteDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.statusNotification) {
         state.statusNotification?.let {
