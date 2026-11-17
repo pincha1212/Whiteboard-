@@ -312,9 +312,9 @@ class WorkspaceNoteProjectionTest {
         assertEquals(boardId, focusedState.board.id)
         assertEquals(false, focusedState.isViewingBoardsHome)
         assertEquals(stickyId, focusedState.selectedNoteId)
-        assertEquals(1.0f, focusedState.scale, 0.001f)
-        val expectedPanX = focusedState.viewportWidthPx * 0.5f - (updatedSticky.x + updatedSticky.width * 0.5f)
-        assertEquals(expectedPanX, focusedState.panX, 0.5f)
+        assertEquals(1.0f, whiteboardVm.cameraState.value.scale, 0.001f)
+        val expectedPanX = whiteboardVm.cameraState.value.viewportWidthPx * 0.5f - (updatedSticky.x + updatedSticky.width * 0.5f)
+        assertEquals(expectedPanX, whiteboardVm.cameraState.value.panX, 0.5f)
 
         // 7. Soft delete from whiteboard -> moves to Papelera in Notes & removes from board; restoring brings both back
         whiteboardVm.deleteStickyNote(stickyId)
