@@ -66,7 +66,7 @@ The repository workflow runs the full `:app:testDebugUnitTest` suite and builds 
 
 - Before these changes, run #112 on `d9ef55e` completed successfully.
 - The sticky-note batching correction, including its regression test, passed the workflow on `6fd0e7c` (run #116).
-- Grid batching and its geometry tests are committed separately. Their final workflow status must be checked against the current `main` head.
+- Grid batching and its geometry tests passed the full workflow on `99ee9b1` (run #120): `:app:testDebugUnitTest`, `:app:assembleDebug`, and APK artifact upload all succeeded. See [run #120](https://github.com/pincha1212/Whiteboard-/actions/runs/44002442791).
 
 ## Metrics not yet collected
 
