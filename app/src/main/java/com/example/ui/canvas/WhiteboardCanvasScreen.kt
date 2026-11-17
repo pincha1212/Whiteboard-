@@ -245,6 +245,11 @@ fun WhiteboardCanvasScreen(
         state.board.strokes.firstOrNull { it.id == state.selectedStrokeId }
     }
 
+    // Selection membership is queried for every visible object on each canvas frame.
+    // Keep hash sets keyed to selection-list identity to avoid repeated linear scans.
+    val selectedStrokeIdSet = remember(state.selectedStrokeIds) { state.selectedStrokeIds.toHashSet() }
+    val selectedShapeIdSet = remember(state.selectedShapeIds) { state.selectedShapeIds.toHashSet() }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -323,17 +328,20 @@ fun WhiteboardCanvasScreen(
                             strokeRotCenterWorld = Offset((minX + maxX) / 2f, (minY + maxY) / 2f)
                         }
 
+                        val selectedShapeIds = curState.selectedShapeIds.toHashSet()
+                        val selectedStrokeIds = curState.selectedStrokeIds.toHashSet()
+                        val selectedNoteIds = curState.selectedNoteIds.toHashSet()
                         val hitSelectedShape = curState.board.shapes.any { s ->
                             !s.isLocked && !s.isHiddenByCollapse &&
-                            (s.id == curState.selectedShapeId || curState.selectedShapeIds.contains(s.id)) &&
+                            (s.id == curState.selectedShapeId || selectedShapeIds.contains(s.id)) &&
                             isPointHittingShape(s, wX, wY, hitTolerance)
                         }
                         val hitSelectedStroke = curState.board.strokes.any { s ->
-                            (s.id == curState.selectedStrokeId || curState.selectedStrokeIds.contains(s.id)) &&
+                            (s.id == curState.selectedStrokeId || selectedStrokeIds.contains(s.id)) &&
                             isPointHittingStroke(s, wX, wY, hitTolerance)
                         }
                         val hitSelectedNote = curState.board.stickyNotes.any { n ->
-                            if (n.isLocked || n.isHiddenByCollapse || !(n.id == curState.selectedNoteId || curState.selectedNoteIds.contains(n.id))) {
+                            if (n.isLocked || n.isHiddenByCollapse || !(n.id == curState.selectedNoteId || selectedNoteIds.contains(n.id))) {
                                 false
                             } else {
                                 val (lx, ly) = StickyNoteGeometry.toLocalUnrotated(n.x, n.y, n.width, n.height, n.rotation, wX, wY)
@@ -668,7 +676,7 @@ fun WhiteboardCanvasScreen(
             val visibleWorldBottom = (size.height - state.panY) / safeScale
 
             state.board.strokes.forEach { stroke ->
-                val isSelected = stroke.id == state.selectedStrokeId || state.selectedStrokeIds.contains(stroke.id)
+                val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
                 val bounds = stroke.geometryMetrics
                 if (bounds.hasPoints) {
                     val pad = stroke.width * 1.5f + 16f
@@ -765,7 +773,7 @@ fun WhiteboardCanvasScreen(
                     return@forEach
                 }
                 val shape = cached.shape
-                val isSelected = shape.id == state.selectedShapeId || state.selectedShapeIds.contains(shape.id)
+                val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
                 drawShapeVector(
                     shape = shape,
                     panX = state.panX,
