@@ -36,7 +36,8 @@ object AdvancedLineEffects {
         isOpaqueCanvasBackground: Boolean = true,
         handDrawnFactor: Float = UnifiedBrushPipeline.DEFAULT_HAND_DRAWN_FACTOR,
         viewportW: Float = size.width,
-        viewportH: Float = size.height
+        viewportH: Float = size.height,
+        preserveInputPoints: Boolean = false
     ) {
         if (stroke.points.size < 2) return
         drawIntoCanvas { composeCanvas ->
@@ -52,7 +53,8 @@ object AdvancedLineEffects {
                 isOpaqueCanvasBackground = isOpaqueCanvasBackground,
                 handDrawnFactor = handDrawnFactor,
                 viewportW = viewportW,
-                viewportH = viewportH
+                viewportH = viewportH,
+                preserveInputPoints = preserveInputPoints
             )
         }
     }
