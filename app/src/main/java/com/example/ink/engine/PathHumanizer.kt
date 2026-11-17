@@ -126,13 +126,14 @@ class PathHumanizer(
                     hypot(startPos[0] - endPos[0], startPos[1] - endPos[1]) < 0.75f
                 val isClosed = pm.isClosed || hasLoopEndpoints
 
+                // Sample from the contour origin at a fixed interval. Extending an open
+                // stroke must not redistribute nodes that were already rendered.
                 val rawSampleCount = ceil((len / safeStep).toDouble()).toInt().coerceIn(2, 800)
                 val endIndex = rawSampleCount
 
-                // Keep wobble proportional on tiny detail fragments (dots/arrow wings) while expressive on real shapes.
-                val lengthScale = (len / 70f).coerceIn(0.28f, 1.35f)
-                val maxNormalAmp = clampedFactor * 3.8f * lengthScale
-                val maxTangentAmp = clampedFactor * 1.1f * lengthScale
+                // Fixed amplitudes prevent earlier points from changing as total length grows.
+                val maxNormalAmp = clampedFactor * 3.8f
+                val maxTangentAmp = clampedFactor * 1.1f
 
                 val rawX = FloatArray(endIndex + 1)
                 val rawY = FloatArray(endIndex + 1)
@@ -140,8 +141,14 @@ class PathHumanizer(
                 val progresses = FloatArray(endIndex + 1)
 
                 for (i in 0..endIndex) {
-                    val progress = (i.toFloat() / endIndex.toFloat()).coerceIn(0f, 1f)
-                    val distance = (progress * len).coerceIn(0f, len)
+                    val distance = if (i == endIndex) len else (i * safeStep).coerceAtMost(len)
+                    // Open-stroke progress is local to the trailing tip, not normalized by
+                    // total path length. Existing nodes therefore keep their style values.
+                    val progress = if (isClosed) {
+                        (distance / len).coerceIn(0f, 1f)
+                    } else {
+                        (1f - ((len - distance) / 48f).coerceIn(0f, 1f)).coerceIn(0f, 1f)
+                    }
                     progresses[i] = progress
 
                     if (!pm.getPosTan(distance, pos, tan)) {
@@ -175,17 +182,14 @@ class PathHumanizer(
                                     0.38f * sin(theta * 6f + phaseA)
                         } else {
                             // Open strokes taper smoothly near endpoints so anchor vertices & arrowheads stay aligned.
-                            val endpointEnvelope = 0.18f + 0.82f * sin(progress * PI.toFloat())
                             val dScaled = distance
-                            normalWave = (
+                            normalWave =
                                 0.54f * sin(dScaled * 0.042f + phaseA + contourShift) +
                                     0.31f * cos(dScaled * 0.105f + phaseB + contourShift) +
                                     0.15f * sin(dScaled * 0.225f - phaseC)
-                                ) * endpointEnvelope
-                            tangentWave = (
+                            tangentWave =
                                 0.62f * cos(dScaled * 0.036f + phaseB) +
                                     0.38f * sin(dScaled * 0.088f + phaseA)
-                                ) * endpointEnvelope
                         }
 
                         rawX[i] = pos[0] + nx * (normalWave * maxNormalAmp) + tx * (tangentWave * maxTangentAmp)
@@ -269,8 +273,9 @@ class PathHumanizer(
             val cosTheta = ((v1x / l1) * (v2x / l2) + (v1y / l1) * (v2y / l2)).coerceIn(-1f, 1f)
             val straightness = ((cosTheta + 1f) * 0.5f).coerceIn(0f, 1f)
 
-            val arcEnvelope = sin(progress * PI.toFloat()).coerceIn(0f, 1f)
-            val syntheticVelocity = (0.18f + 0.55f * arcEnvelope * (0.45f + 0.55f * straightness))
+            // Velocity depends on local geometry only; total stroke length is not stable
+            // while the user is still drawing.
+            val syntheticVelocity = (0.18f + 0.55f * (0.45f + 0.55f * straightness))
                 .coerceIn(0.05f, 1f)
 
             if (timestampsMs != null && timestampsMs.size >= 2 && avgTimestampDtMs != null) {
