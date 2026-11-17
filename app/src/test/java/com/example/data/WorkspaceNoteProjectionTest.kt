@@ -10,6 +10,7 @@ import com.example.model.StrokePoint
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.ink.engine.UnifiedBrushPipeline
+import com.example.viewmodel.WhiteboardViewModel
 import com.example.notes.model.CanvasNoteData
 import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteItem
@@ -18,6 +19,7 @@ import com.example.notes.model.NoteVersion
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -483,6 +485,40 @@ class WorkspaceNoteProjectionTest {
                 bitmap.recycle()
             }
         }
+    }
+
+
+    @Test
+    fun erasersUseStrokeBoundsAsBroadPhaseWithoutChangingExactHitResults() {
+        val viewModel = WhiteboardViewModel(LocalFirstWorkspaceStore())
+        viewModel.commitCompletedStroke(
+            points = listOf(
+                StrokePoint(100f, 100f),
+                StrokePoint(500f, 100f),
+                StrokePoint(900f, 100f)
+            ),
+            isHighlighter = false
+        )
+        assertEquals(1, viewModel.uiState.value.board.strokes.size)
+
+        // A point outside the stroke's expanded bounding box must not trigger segment scanning
+        // or alter the board. A point on the stroke still goes through the exact geometry check.
+        assertFalse(viewModel.eraseObjectAt(500f, 180f, tolerance = 8f, saveSnapshot = false))
+        assertEquals(1, viewModel.uiState.value.board.strokes.size)
+        assertTrue(viewModel.eraseObjectAt(500f, 101f, tolerance = 8f, saveSnapshot = false))
+        assertEquals(0, viewModel.uiState.value.board.strokes.size)
+
+        viewModel.commitCompletedStroke(
+            points = listOf(
+                StrokePoint(100f, 300f),
+                StrokePoint(500f, 300f),
+                StrokePoint(900f, 300f)
+            ),
+            isHighlighter = false
+        )
+        assertFalse(viewModel.erasePixelAt(500f, 380f, radius = 8f, saveSnapshot = false))
+        assertEquals(1, viewModel.uiState.value.board.strokes.size)
+        assertTrue(viewModel.erasePixelAt(500f, 301f, radius = 8f, saveSnapshot = false))
     }
 
 }

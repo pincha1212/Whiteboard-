@@ -512,8 +512,10 @@ class WhiteboardViewModel(
         saveSnapshot: Boolean = true
     ): Boolean {
         val board = _uiState.value.board
-        val hitStroke = board.strokes.lastOrNull { s ->
-            isPointNearStroke(s.points, worldX, worldY, tolerance + s.width * 0.4f)
+        val hitStroke = board.strokes.lastOrNull { stroke ->
+            val hitRadius = tolerance + stroke.width * 0.4f
+            stroke.geometryMetrics.intersectsCircle(worldX, worldY, hitRadius) &&
+                isPointNearStroke(stroke.points, worldX, worldY, hitRadius)
         }
         if (hitStroke != null) {
             if (saveSnapshot) saveUndoSnapshot()
@@ -612,6 +614,10 @@ class WhiteboardViewModel(
 
         for (stroke in board.strokes) {
             val effectiveRadius = radius + (stroke.width * 0.35f)
+            if (!stroke.geometryMetrics.intersectsCircle(worldX, worldY, effectiveRadius)) {
+                nextStrokes.add(stroke)
+                continue
+            }
             val clipped = PixelEraserGeometry.clipContourOutsideCircle(
                 points = stroke.points,
                 isClosed = false,

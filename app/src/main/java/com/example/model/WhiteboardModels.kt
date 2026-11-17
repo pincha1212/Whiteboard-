@@ -212,7 +212,17 @@ internal data class StrokeGeometryMetrics(
     val maxX: Float,
     val maxY: Float,
     val hasPoints: Boolean
-)
+) {
+    /** Broad-phase hit test; false means the exact segment-distance check can be skipped. */
+    fun intersectsCircle(centerX: Float, centerY: Float, radius: Float): Boolean {
+        if (!hasPoints) return false
+        val safeRadius = radius.coerceAtLeast(0f)
+        return centerX + safeRadius >= minX &&
+            centerX - safeRadius <= maxX &&
+            centerY + safeRadius >= minY &&
+            centerY - safeRadius <= maxY
+    }
+}
 
 data class WhiteboardStroke(
     val id: String = UUID.randomUUID().toString(),
