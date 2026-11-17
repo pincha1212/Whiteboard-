@@ -547,20 +547,18 @@ fun WhiteboardCanvasScreen(
                                         change.consume()
                                     }
                                     CanvasGestureMode.DRAW_STROKE -> {
-                                        if (!snappedDuringHold) {
-                                            val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                            val nwY = (change.position.y - liveState.panY) / liveState.scale
-                                            val rawPt = StrokePoint(nwX, nwY)
-                                            val pt = if (liveState.isRulerActive) {
-                                                StrokeStabilizer.projectPointToRulerIfNear(rawPt, liveState.rulerState)
-                                            } else {
-                                                rawPt
-                                            }
-                                            val prevPt = localActivePoints.lastOrNull()
-                                            if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 2.2f / liveState.scale) {
-                                                localActivePoints.add(pt)
-                                                lastDrawMoveMs = System.currentTimeMillis()
-                                            }
+                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
+                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val rawPt = StrokePoint(nwX, nwY)
+                                        val pt = if (liveState.isRulerActive) {
+                                            StrokeStabilizer.projectPointToRulerIfNear(rawPt, liveState.rulerState)
+                                        } else {
+                                            rawPt
+                                        }
+                                        val prevPt = localActivePoints.lastOrNull()
+                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 2.2f / liveState.scale) {
+                                            localActivePoints.add(pt)
+                                            lastDrawMoveMs = System.currentTimeMillis()
                                         }
                                         change.consume()
                                     }
