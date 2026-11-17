@@ -189,10 +189,10 @@ object ShapeGenerator {
         return fromStrokePoints(pts)
     }
 
-    fun fromStrokePoints(points: List<StrokePoint>): Path {
+    fun fromStrokePoints(points: List<StrokePoint>, simplify: Boolean = true): Path {
         val path = Path()
         if (points.isEmpty()) return path
-        val simplified = simplifyStrokePoints(points, tolerance = 1.25f)
+        val simplified = if (simplify) simplifyStrokePoints(points, tolerance = 1.25f) else points
         if (simplified.size == 1) {
             val p = simplified[0]
             path.moveTo(p.x, p.y)
