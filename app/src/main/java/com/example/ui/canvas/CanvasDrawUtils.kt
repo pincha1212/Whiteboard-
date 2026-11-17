@@ -193,7 +193,8 @@ fun DrawScope.drawStrokeVector(
     isOpaqueCanvasBackground: Boolean = true,
     handDrawnFactor: Float = com.example.ink.engine.UnifiedBrushPipeline.DEFAULT_HAND_DRAWN_FACTOR,
     viewportW: Float = size.width,
-    viewportH: Float = size.height
+    viewportH: Float = size.height,
+    preserveInputPoints: Boolean = false
 ) {
     AdvancedLineEffects.run {
         drawAdvancedStroke(
@@ -207,7 +208,8 @@ fun DrawScope.drawStrokeVector(
             isOpaqueCanvasBackground = isOpaqueCanvasBackground,
             handDrawnFactor = handDrawnFactor,
             viewportW = viewportW,
-            viewportH = viewportH
+            viewportH = viewportH,
+            preserveInputPoints = preserveInputPoints
         )
     }
 }
