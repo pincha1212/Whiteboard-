@@ -46,13 +46,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,36 +150,6 @@ fun WhiteboardCanvasScreen(
 
     var isDrawingGestureActive by remember { mutableStateOf(false) }
     var lastDrawMoveMs by remember { mutableLongStateOf(0L) }
-
-    // Camera updates reuse the same immutable stroke/shape lists. Keep the scene scan
-    // keyed to content/style changes so pan and zoom do not rescan every object per frame.
-    val hasAnimatedContent = remember(
-        state.penStyle,
-        state.pendingStrokeStyle,
-        state.board.strokes,
-        state.board.shapes
-    ) {
-        state.penStyle == StrokeStyle.ANIMATED_PULSE ||
-            state.pendingStrokeStyle == StrokeStyle.ANIMATED_PULSE ||
-            state.board.strokes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE } ||
-            state.board.shapes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE }
-    }
-    var animPhase by remember { mutableFloatStateOf(0f) }
-
-    LaunchedEffect(hasAnimatedContent) {
-        if (hasAnimatedContent) {
-            var startMs = -1L
-            while (true) {
-                withFrameMillis { frameMs ->
-                    if (startMs < 0L) startMs = frameMs
-                    val elapsed = (frameMs - startMs) % 1200L
-                    animPhase = elapsed / 1200f
-                }
-            }
-        } else {
-            animPhase = 0f
-        }
-    }
 
     val canvasBg = try {
         Color(android.graphics.Color.parseColor(state.board.colorTheme.hex))
