@@ -1000,7 +1000,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  @Config(sdk = [36], qualifiers = "w800dp-h600dp")
+  @Config(sdk = [34], qualifiers = "w800dp-h600dp")
   fun `test two pane templates sidebar places mis plantillas directly below recomendado`() {
     composeTestRule.setContent {
       MaterialTheme {
@@ -1121,7 +1121,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  @Config(sdk = [36], qualifiers = "w480dp-h800dp")
+  @Config(sdk = [34], qualifiers = "w480dp-h800dp")
   fun `test sticky note ui renders 48dp resize handles and autofits font size proportionally`() {
     val noteState = androidx.compose.runtime.mutableStateOf(
       StickyNote(
@@ -1232,7 +1232,7 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  @Config(sdk = [36], qualifiers = "w480dp-h800dp")
+  @Config(sdk = [34], qualifiers = "w480dp-h800dp")
   fun `test sticky note editable title rotation handle drag and zoomed line coordinates`() {
     val noteState = androidx.compose.runtime.mutableStateOf(
       StickyNote(
