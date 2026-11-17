@@ -400,21 +400,13 @@ object ShapeGenerator {
         sourcePath: Path,
         style: StrokeStyle,
         strokeWidth: Float,
-        capStyle: LineCapStyle = LineCapStyle.NONE,
-        animPhase: Float = 0f
+        capStyle: LineCapStyle = LineCapStyle.NONE
     ): Path {
         val w = strokeWidth.coerceAtLeast(1.5f)
         val styledBody = when (style) {
             StrokeStyle.DASHED -> sliceDashedPath(sourcePath, floatArrayOf(w * 3f, w * 2f), 0f)
             StrokeStyle.DOTTED -> sliceDashedPath(sourcePath, floatArrayOf(max(1.5f, w * 0.85f), w * 1.55f), 0f)
             StrokeStyle.DASH_DOT -> sliceDashedPath(sourcePath, floatArrayOf(w * 4f, w * 1.6f, max(1.5f, w * 1.1f), w * 1.6f), 0f)
-            StrokeStyle.ANIMATED_PULSE -> {
-                val dashLen = w * 3.5f
-                val gapLen = w * 2.0f
-                val period = dashLen + gapLen
-                val phaseOffset = (animPhase * period) % period
-                sliceDashedPath(sourcePath, floatArrayOf(dashLen, gapLen), phaseOffset)
-            }
             StrokeStyle.DOUBLE -> buildDoubleParallelPath(sourcePath, w)
             StrokeStyle.RAILWAY -> buildRailwayPath(sourcePath, w)
             StrokeStyle.ZIGZAG -> buildZigzagPath(sourcePath, w)
