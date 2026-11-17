@@ -6,12 +6,15 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -27,8 +30,12 @@ import com.example.viewmodel.WhiteboardViewModel
 
 class MainActivity : ComponentActivity() {
 
+    private val workspaceStore by lazy {
+        LocalFirstWorkspaceStore.getInstance(applicationContext)
+    }
+
     private val workspaceFactory by lazy {
-        val store = LocalFirstWorkspaceStore.getInstance(applicationContext)
+        val store = workspaceStore
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -48,7 +55,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        whiteboardViewModel.commitWorkspaceSync()
+        // Do not instantiate ViewModels while the initial workspace read is still running.
+        if (workspaceStore.isReady.value) {
+            whiteboardViewModel.commitWorkspaceSync()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -56,64 +66,75 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             WhiteboardTheme {
-                val whiteboardState by whiteboardViewModel.uiState.collectAsStateWithLifecycle()
-                val notesState by notesViewModel.uiState.collectAsStateWithLifecycle()
-                var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
-
-                BackHandler(
-                    enabled = notesState.isEditingNote ||
-                        currentWorkspace == AppActiveWorkspace.NOTES ||
-                        !whiteboardState.isViewingBoardsHome
-                ) {
-                    if (notesState.isEditingNote) {
-                        notesViewModel.closeActiveNote()
-                    } else if (currentWorkspace == AppActiveWorkspace.NOTES) {
-                        currentWorkspace = AppActiveWorkspace.WHITEBOARD
-                    } else if (!whiteboardState.isViewingBoardsHome) {
-                        whiteboardViewModel.closeBoardToHome()
+                val workspaceReady by workspaceStore.isReady.collectAsStateWithLifecycle()
+                if (!workspaceReady) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
                     }
-                }
+                } else {
+                    // ViewModels are created only after the persisted workspace has been restored.
+                    val whiteboardState by whiteboardViewModel.uiState.collectAsStateWithLifecycle()
+                    val notesState by notesViewModel.uiState.collectAsStateWithLifecycle()
+                    var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
 
-                when (currentWorkspace) {
-                    AppActiveWorkspace.WHITEBOARD -> {
-                        if (whiteboardState.isViewingBoardsHome) {
-                            BoardsHomeScreen(
-                                boards = whiteboardState.allBoards,
-                                currentBoardId = whiteboardState.board.id,
-                                onOpenBoard = { whiteboardViewModel.openBoard(it) },
-                                onCreateBoard = { title, grid, theme ->
-                                    whiteboardViewModel.createNewBoard(
-                                        title = title,
-                                        gridType = grid,
-                                        colorTheme = theme,
-                                        openImmediately = true
-                                    )
+                    BackHandler(
+                        enabled = notesState.isEditingNote ||
+                            currentWorkspace == AppActiveWorkspace.NOTES ||
+                            !whiteboardState.isViewingBoardsHome
+                    ) {
+                        if (notesState.isEditingNote) {
+                            notesViewModel.closeActiveNote()
+                        } else if (currentWorkspace == AppActiveWorkspace.NOTES) {
+                            currentWorkspace = AppActiveWorkspace.WHITEBOARD
+                        } else if (!whiteboardState.isViewingBoardsHome) {
+                            whiteboardViewModel.closeBoardToHome()
+                        }
+                    }
+
+                    when (currentWorkspace) {
+                        AppActiveWorkspace.WHITEBOARD -> {
+                            if (whiteboardState.isViewingBoardsHome) {
+                                BoardsHomeScreen(
+                                    boards = whiteboardState.allBoards,
+                                    currentBoardId = whiteboardState.board.id,
+                                    onOpenBoard = { whiteboardViewModel.openBoard(it) },
+                                    onCreateBoard = { title, grid, theme ->
+                                        whiteboardViewModel.createNewBoard(
+                                            title = title,
+                                            gridType = grid,
+                                            colorTheme = theme,
+                                            openImmediately = true
+                                        )
+                                    },
+                                    onRenameBoard = { id, title -> whiteboardViewModel.renameBoardById(id, title) },
+                                    onDuplicateBoard = { whiteboardViewModel.duplicateCurrentBoard(it) },
+                                    onDeleteBoard = { whiteboardViewModel.deleteBoard(it) },
+                                    onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                WhiteboardCanvasScreen(
+                                    viewModel = whiteboardViewModel,
+                                    onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
+                        AppActiveWorkspace.NOTES -> {
+                            NotesMasterDetailScreen(
+                                notesViewModel = notesViewModel,
+                                onOpenWhiteboard = { currentWorkspace = AppActiveWorkspace.WHITEBOARD },
+                                onOpenNoteInBoard = { boardId, noteId ->
+                                    notesViewModel.closeActiveNote()
+                                    whiteboardViewModel.openBoardAndFocusNote(boardId, noteId)
+                                    currentWorkspace = AppActiveWorkspace.WHITEBOARD
                                 },
-                                onRenameBoard = { id, title -> whiteboardViewModel.renameBoardById(id, title) },
-                                onDuplicateBoard = { whiteboardViewModel.duplicateCurrentBoard(it) },
-                                onDeleteBoard = { whiteboardViewModel.deleteBoard(it) },
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        } else {
-                            WhiteboardCanvasScreen(
-                                viewModel = whiteboardViewModel,
-                                onSwitchToNotes = { currentWorkspace = AppActiveWorkspace.NOTES },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
-                    }
-                    AppActiveWorkspace.NOTES -> {
-                        NotesMasterDetailScreen(
-                            notesViewModel = notesViewModel,
-                            onOpenWhiteboard = { currentWorkspace = AppActiveWorkspace.WHITEBOARD },
-                            onOpenNoteInBoard = { boardId, noteId ->
-                                notesViewModel.closeActiveNote()
-                                whiteboardViewModel.openBoardAndFocusNote(boardId, noteId)
-                                currentWorkspace = AppActiveWorkspace.WHITEBOARD
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
                     }
                 }
             }

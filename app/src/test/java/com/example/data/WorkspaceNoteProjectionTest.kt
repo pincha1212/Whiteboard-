@@ -359,4 +359,34 @@ class WorkspaceNoteProjectionTest {
         }
     }
 
+
+    @Test
+    fun backgroundWorkspaceLoadPublishesRestoredStateBeforeReady() {
+        val tempDir = Files.createTempDirectory("whiteboard-startup-test").toFile()
+        try {
+            val storageFile = File(tempDir, "workspace_ssot_db.json")
+            val expectedBoard = WhiteboardBoard(
+                id = "startup-board",
+                title = "Loaded without blocking startup"
+            )
+            val seedStore = LocalFirstWorkspaceStore(storageFile)
+            seedStore.createBoard(expectedBoard)
+            seedStore.flushToDiskBlocking()
+
+            val restoredStore = LocalFirstWorkspaceStore(
+                storageFile = storageFile,
+                loadFromDiskInBackground = true
+            )
+            val deadline = System.currentTimeMillis() + 4_000L
+            while (!restoredStore.isReady.value && System.currentTimeMillis() < deadline) {
+                Thread.sleep(10L)
+            }
+
+            assertTrue("The background workspace load did not complete", restoredStore.isReady.value)
+            assertEquals("Loaded without blocking startup", restoredStore.currentState.boards.single().title)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
 }

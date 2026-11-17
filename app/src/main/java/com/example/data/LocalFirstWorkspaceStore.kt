@@ -49,7 +49,8 @@ private data class PersistRequest(
  * debouncing so that interactive drawing, note dragging, and edits never block the Main/UI thread.
  */
 class LocalFirstWorkspaceStore(
-    private val storageFile: File? = null
+    private val storageFile: File? = null,
+    private val loadFromDiskInBackground: Boolean = false
 ) {
     private val lock = Any()
     private val listeners = CopyOnWriteArrayList<(WorkspaceDbState) -> Unit>()
@@ -63,16 +64,32 @@ class LocalFirstWorkspaceStore(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    private val _dbState = MutableStateFlow(loadFromDiskOrEmpty())
+    private val _dbState = MutableStateFlow(
+        if (loadFromDiskInBackground) WorkspaceDbState() else loadFromDiskOrEmpty()
+    )
     val dbState: StateFlow<WorkspaceDbState> = _dbState.asStateFlow()
+
+    private val _isReady = MutableStateFlow(!loadFromDiskInBackground)
+    val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
     val currentState: WorkspaceDbState
         get() = _dbState.value
 
     init {
-        // All serialization and file writes are performed by this single IO worker.
-        // Normal edits are coalesced; lifecycle flushes bypass the debounce.
         storeScope.launch {
+            // The production singleton loads its initial workspace on Dispatchers.IO.
+            // The UI must wait for isReady before constructing ViewModels or mutating state.
+            if (loadFromDiskInBackground) {
+                val restored = loadFromDiskOrEmpty()
+                synchronized(lock) {
+                    _dbState.value = restored
+                }
+                listeners.forEach { it(restored) }
+                _isReady.value = true
+            }
+
+            // All serialization and file writes are performed by this single IO worker.
+            // Normal edits are coalesced; lifecycle flushes bypass the debounce.
             persistRequestFlow.collectLatest { request ->
                 if (!request.immediate) delay(250L)
                 persistSnapshot(request)
@@ -582,7 +599,8 @@ class LocalFirstWorkspaceStore(
         fun getInstance(context: Context): LocalFirstWorkspaceStore {
             return instance ?: synchronized(this) {
                 instance ?: LocalFirstWorkspaceStore(
-                    storageFile = File(context.applicationContext.filesDir, "workspace_ssot_db.json")
+                    storageFile = File(context.applicationContext.filesDir, "workspace_ssot_db.json"),
+                    loadFromDiskInBackground = true
                 ).also { instance = it }
             }
         }
