@@ -154,10 +154,19 @@ fun WhiteboardCanvasScreen(
     var lastDrawMoveMs by remember { mutableLongStateOf(0L) }
     var snappedDuringHold by remember { mutableStateOf(false) }
 
-    val hasAnimatedContent = state.penStyle == StrokeStyle.ANIMATED_PULSE ||
-        state.pendingStrokeStyle == StrokeStyle.ANIMATED_PULSE ||
-        state.board.strokes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE } ||
-        state.board.shapes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE }
+    // Camera updates reuse the same immutable stroke/shape lists. Keep the scene scan
+    // keyed to content/style changes so pan and zoom do not rescan every object per frame.
+    val hasAnimatedContent = remember(
+        state.penStyle,
+        state.pendingStrokeStyle,
+        state.board.strokes,
+        state.board.shapes
+    ) {
+        state.penStyle == StrokeStyle.ANIMATED_PULSE ||
+            state.pendingStrokeStyle == StrokeStyle.ANIMATED_PULSE ||
+            state.board.strokes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE } ||
+            state.board.shapes.any { it.strokeStyle == StrokeStyle.ANIMATED_PULSE }
+    }
     var animPhase by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(hasAnimatedContent) {
