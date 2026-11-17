@@ -415,7 +415,7 @@ fun WhiteboardCanvasScreen(
                             }
                             val activePointers = event.changes.filter { it.pressed }
 
-                            if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                            if (activePointers.size >= 2) {
                                 isMultiTouch = true
                                 isDrawingGestureActive = false
                                 localActivePoints.clear()
@@ -616,19 +616,9 @@ fun WhiteboardCanvasScreen(
                             }
                         } else if (gestureMode == CanvasGestureMode.DRAW_STROKE && localActivePoints.size >= 2 && !isMultiTouch) {
                             val pointsCopy = localActivePoints.toList()
-                            val heldStillAtEnd = System.currentTimeMillis() - lastDrawMoveMs >= 480L
-                            val tool = viewModel.uiState.value.currentTool
-                            val isSnapEligible = tool == ToolType.PEN ||
-                                tool == ToolType.FINE_MARKER ||
-                                tool == ToolType.BRUSH ||
-                                tool == ToolType.HIGHLIGHTER ||
-                                tool == ToolType.CALLIGRAPHY ||
-                                tool == ToolType.AIRBRUSH
-                            val snappedOnRelease = heldStillAtEnd && isSnapEligible &&
-                                viewModel.commitSnapToShapeFromPoints(pointsCopy)
-                            if (!snappedOnRelease) {
-                                viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
-                            }
+                            // A freehand gesture must always be committed as the same stroke.
+                            // Shape conversion is reserved for explicit shape tools / user actions.
+                            viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
                         } else if (hasTransformed && (
                                 gestureMode == CanvasGestureMode.ROTATE_SHAPE ||
                                     gestureMode == CanvasGestureMode.ROTATE_STROKE ||
