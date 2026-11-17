@@ -90,7 +90,6 @@ import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -153,7 +152,6 @@ fun WhiteboardCanvasScreen(
 
     var isDrawingGestureActive by remember { mutableStateOf(false) }
     var lastDrawMoveMs by remember { mutableLongStateOf(0L) }
-    var snappedDuringHold by remember { mutableStateOf(false) }
 
     // Camera updates reuse the same immutable stroke/shape lists. Keep the scene scan
     // keyed to content/style changes so pan and zoom do not rescan every object per frame.
@@ -182,27 +180,6 @@ fun WhiteboardCanvasScreen(
             }
         } else {
             animPhase = 0f
-        }
-    }
-
-    // Hold-still Snap-to-shape (~480ms at stroke end converts crooked circles/lines into clean geometry)
-    LaunchedEffect(isDrawingGestureActive, lastDrawMoveMs) {
-        if (isDrawingGestureActive && !snappedDuringHold) {
-            delay(480L)
-            val tool = viewModel.uiState.value.currentTool
-            val isSnapEligible = tool == ToolType.PEN ||
-                tool == ToolType.FINE_MARKER ||
-                tool == ToolType.BRUSH ||
-                tool == ToolType.HIGHLIGHTER ||
-                tool == ToolType.CALLIGRAPHY ||
-                tool == ToolType.AIRBRUSH
-            if (isDrawingGestureActive && isSnapEligible && localActivePoints.size >= 6) {
-                val snapped = viewModel.commitSnapToShapeFromPoints(localActivePoints.toList())
-                if (snapped) {
-                    snappedDuringHold = true
-                    localActivePoints.clear()
-                }
-            }
         }
     }
 
@@ -298,7 +275,6 @@ fun WhiteboardCanvasScreen(
                         var gestureMode = CanvasGestureMode.NONE
                         var activeHandleIndex = -1
                         var hasTransformed = false
-                        snappedDuringHold = false
                         localLassoPoints.clear()
                         pixelEraserCursorWorld = null
 
@@ -634,9 +610,21 @@ fun WhiteboardCanvasScreen(
                             } else {
                                 viewModel.clearSelection()
                             }
-                        } else if (gestureMode == CanvasGestureMode.DRAW_STROKE && !snappedDuringHold && localActivePoints.size >= 2 && !isMultiTouch) {
+                        } else if (gestureMode == CanvasGestureMode.DRAW_STROKE && localActivePoints.size >= 2 && !isMultiTouch) {
                             val pointsCopy = localActivePoints.toList()
-                            viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
+                            val heldStillAtEnd = System.currentTimeMillis() - lastDrawMoveMs >= 480L
+                            val tool = viewModel.uiState.value.currentTool
+                            val isSnapEligible = tool == ToolType.PEN ||
+                                tool == ToolType.FINE_MARKER ||
+                                tool == ToolType.BRUSH ||
+                                tool == ToolType.HIGHLIGHTER ||
+                                tool == ToolType.CALLIGRAPHY ||
+                                tool == ToolType.AIRBRUSH
+                            val snappedOnRelease = heldStillAtEnd && isSnapEligible &&
+                                viewModel.commitSnapToShapeFromPoints(pointsCopy)
+                            if (!snappedOnRelease) {
+                                viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
+                            }
                         } else if (hasTransformed && (
                                 gestureMode == CanvasGestureMode.ROTATE_SHAPE ||
                                     gestureMode == CanvasGestureMode.ROTATE_STROKE ||
@@ -648,7 +636,6 @@ fun WhiteboardCanvasScreen(
                         ) {
                             viewModel.persistCurrentBoard()
                         }
-                        snappedDuringHold = false
                         viewModel.resetStrokeDragAngle()
                         pendingDragStart = null
                         pendingDragEnd = null
