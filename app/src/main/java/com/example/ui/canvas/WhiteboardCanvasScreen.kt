@@ -1008,6 +1008,8 @@ fun WhiteboardCanvasScreen(
             onRotate = { da -> viewModel.rotateRuler(da) }
         )
 
+        } // End camera-only composition
+
         CameraAwareWhiteboardTopBar(
             viewModel = viewModel,
             state = state,
