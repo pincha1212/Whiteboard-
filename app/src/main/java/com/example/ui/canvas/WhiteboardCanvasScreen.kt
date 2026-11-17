@@ -939,7 +939,7 @@ fun WhiteboardCanvasScreen(
                 isSelected = isSelected,
                 isPanOnlyMode = isPanOnlyMode,
                 onSelect = { viewModel.selectNote(note.id) },
-                onBeginTransform = { viewModel.beginTransformSnapshot() },
+                onBeginTransform = { viewModel.beginStickyNoteTransformSnapshot() },
                 onEndTransform = { viewModel.commitWorkspaceSync() },
                 onUpdateText = { viewModel.updateStickyNoteText(note.id, it) },
                 onUpdateTitle = { viewModel.updateStickyNoteTitle(note.id, it) },
