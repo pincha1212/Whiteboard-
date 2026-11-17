@@ -199,6 +199,9 @@ class WorkspaceNoteProjectionTest {
             )
             store.upsertNote(note)
 
+            // This round-trip validates the on-disk format, so explicitly await persistence.
+            store.flushToDiskBlocking()
+
             val restored = LocalFirstWorkspaceStore(storageFile = file)
             val restoredNote = restored.currentState.notes.single { it.id == note.id }
             val restoredBoard = restored.currentState.boards.single { it.id == board.id }
