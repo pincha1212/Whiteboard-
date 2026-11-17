@@ -912,59 +912,47 @@ fun WhiteboardCanvasScreen(
         val visRightW = (screenWidthPx - state.panX) / safeScaleForNotes + noteCullMarginWorld
         val visBottomW = (screenHeightPx - state.panY) / safeScaleForNotes + noteCullMarginWorld
 
-        val orderedNotes = state.board.stickyNotes
-            .filter { note ->
-                if (note.isHiddenByCollapse) return@filter false
-                val isSelected = note.id == state.selectedNoteId || state.selectedNoteIds.contains(note.id)
-                if (isSelected || !hasViewport) return@filter true
-                val pad = kotlin.math.max(note.width, note.height) * 0.35f
-                (note.x + note.width + pad) >= visLeftW &&
-                    (note.x - pad) <= visRightW &&
-                    (note.y + note.height + pad) >= visTopW &&
-                    (note.y - pad) <= visBottomW
-            }
-            .sortedBy { n ->
-                if (n.id == state.selectedNoteId || state.selectedNoteIds.contains(n.id)) 1 else 0
-            }
-
-        orderedNotes.forEach { note ->
-            val isSelected = note.id == state.selectedNoteId || state.selectedNoteIds.contains(note.id)
-            StickyNoteView(
-                note = note,
-                scale = state.scale,
-                panX = state.panX,
-                panY = state.panY,
-                isSelected = isSelected,
-                isPanOnlyMode = isPanOnlyMode,
-                onSelect = { viewModel.selectNote(note.id) },
-                onBeginTransform = { viewModel.beginStickyNoteTransformSnapshot() },
-                onEndTransform = { viewModel.commitWorkspaceSync() },
-                onUpdateText = { viewModel.updateStickyNoteText(note.id, it) },
-                onUpdateTitle = { viewModel.updateStickyNoteTitle(note.id, it) },
-                onUpdateColor = { viewModel.updateStickyNoteColor(note.id, it) },
-                onTogglePin = { viewModel.toggleStickyNotePin(note.id) },
-                onDelete = {
-                    if (note.text.isNotBlank() || !note.title.isNullOrBlank()) {
-                        notePendingRemoval = note
-                    } else {
-                        viewModel.deleteStickyNote(note.id)
-                    }
-                },
-                onDragDelta = { dx, dy ->
-                    if (state.selectedNoteIds.contains(note.id) && (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1) {
-                        viewModel.moveSelectedObjects(dx / state.scale, dy / state.scale)
-                    } else {
-                        viewModel.moveStickyNote(note.id, dx, dy)
-                    }
-                },
-                onResizeHandle = { handle, dxScreen, dyScreen ->
-                    viewModel.resizeStickyNoteHandle(note.id, handle, dxScreen, dyScreen)
-                },
-                onRotate = { degrees ->
-                    viewModel.rotateStickyNote(note.id, degrees)
+        StickyNoteLayer(
+            notes = state.board.stickyNotes,
+            selectedNoteId = state.selectedNoteId,
+            selectedNoteIds = state.selectedNoteIds,
+            selectedStrokeIds = state.selectedStrokeIds,
+            selectedShapeIds = state.selectedShapeIds,
+            scale = state.scale,
+            panX = state.panX,
+            panY = state.panY,
+            isPanOnlyMode = isPanOnlyMode,
+            hasViewport = hasViewport,
+            visibleLeft = visLeftW,
+            visibleTop = visTopW,
+            visibleRight = visRightW,
+            visibleBottom = visBottomW,
+            onSelect = viewModel::selectNote,
+            onBeginTransform = viewModel::beginStickyNoteTransformSnapshot,
+            onEndTransform = viewModel::commitWorkspaceSync,
+            onUpdateText = viewModel::updateStickyNoteText,
+            onUpdateTitle = viewModel::updateStickyNoteTitle,
+            onUpdateColor = viewModel::updateStickyNoteColor,
+            onTogglePin = viewModel::toggleStickyNotePin,
+            onDelete = { note ->
+                if (note.text.isNotBlank() || !note.title.isNullOrBlank()) {
+                    notePendingRemoval = note
+                } else {
+                    viewModel.deleteStickyNote(note.id)
                 }
-            )
-        }
+            },
+            onDragDelta = { note, dx, dy ->
+                if (state.selectedNoteIds.contains(note.id) &&
+                    (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
+                ) {
+                    viewModel.moveSelectedObjects(dx / state.scale, dy / state.scale)
+                } else {
+                    viewModel.moveStickyNote(note.id, dx, dy)
+                }
+            },
+            onResizeHandle = viewModel::resizeStickyNoteHandle,
+            onRotate = viewModel::rotateStickyNote
+        )
 
         // Strict pan-only touch shield when standalone Hand tool is active: prevents any accidental object selection/editing
         if (isPanOnlyMode) {
@@ -1405,6 +1393,76 @@ fun WhiteboardCanvasScreen(
                         }
                     }
                 }
+            )
+        }
+    }
+}
+
+
+@Composable
+private fun StickyNoteLayer(
+    notes: List<StickyNote>,
+    selectedNoteId: String?,
+    selectedNoteIds: Set<String>,
+    selectedStrokeIds: Set<String>,
+    selectedShapeIds: Set<String>,
+    scale: Float,
+    panX: Float,
+    panY: Float,
+    isPanOnlyMode: Boolean,
+    hasViewport: Boolean,
+    visibleLeft: Float,
+    visibleTop: Float,
+    visibleRight: Float,
+    visibleBottom: Float,
+    onSelect: (String) -> Unit,
+    onBeginTransform: () -> Unit,
+    onEndTransform: () -> Unit,
+    onUpdateText: (String, String) -> Unit,
+    onUpdateTitle: (String, String) -> Unit,
+    onUpdateColor: (String, String) -> Unit,
+    onTogglePin: (String) -> Unit,
+    onDelete: (StickyNote) -> Unit,
+    onDragDelta: (StickyNote, Float, Float) -> Unit,
+    onResizeHandle: (String, Int, Float, Float) -> Unit,
+    onRotate: (String, Float) -> Unit
+) {
+    // Two stable passes preserve z-order (unselected first, selected last) without
+    // allocating and sorting a temporary list on every camera frame.
+    for (selectedPass in 0..1) {
+        notes.forEach { note ->
+            if (note.isHiddenByCollapse) return@forEach
+            val isSelected = note.id == selectedNoteId || selectedNoteIds.contains(note.id)
+            if (isSelected != (selectedPass == 1)) return@forEach
+
+            if (!isSelected && hasViewport) {
+                val pad = kotlin.math.max(note.width, note.height) * 0.35f
+                val intersectsViewport =
+                    (note.x + note.width + pad) >= visibleLeft &&
+                    (note.x - pad) <= visibleRight &&
+                    (note.y + note.height + pad) >= visibleTop &&
+                    (note.y - pad) <= visibleBottom
+                if (!intersectsViewport) return@forEach
+            }
+
+            StickyNoteView(
+                note = note,
+                scale = scale,
+                panX = panX,
+                panY = panY,
+                isSelected = isSelected,
+                isPanOnlyMode = isPanOnlyMode,
+                onSelect = { onSelect(note.id) },
+                onBeginTransform = onBeginTransform,
+                onEndTransform = onEndTransform,
+                onUpdateText = { onUpdateText(note.id, it) },
+                onUpdateTitle = { onUpdateTitle(note.id, it) },
+                onUpdateColor = { onUpdateColor(note.id, it) },
+                onTogglePin = { onTogglePin(note.id) },
+                onDelete = { onDelete(note) },
+                onDragDelta = { dx, dy -> onDragDelta(note, dx, dy) },
+                onResizeHandle = { handle, dx, dy -> onResizeHandle(note.id, handle, dx, dy) },
+                onRotate = { degrees -> onRotate(note.id, degrees) }
             )
         }
     }
