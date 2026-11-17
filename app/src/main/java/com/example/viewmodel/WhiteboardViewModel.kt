@@ -448,47 +448,6 @@ class WhiteboardViewModel(
     }
 
     /**
-     * Converts a freehand stroke directly into clean geometry when the user holds still
-     * at the end of a stroke (Snap-to-shape on long hold).
-     */
-    fun commitSnapToShapeFromPoints(points: List<StrokePoint>): Boolean {
-        if (points.size < 4) return false
-        val state = _uiState.value
-        val brushType = brushTypeForTool(state.currentTool)
-        val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER || brushType == StrokeBrushType.SOFT_BRUSH
-        val tempStroke = WhiteboardStroke(
-            points = points,
-            colorHex = effectiveColorForBrush(brushType, state.penColorHex),
-            width = effectiveStrokeWidthForBrush(brushType, state.penWidth),
-            isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
-            isRainbow = state.isRainbowPen && !isTranslucentEmphasis,
-            strokeStyle = state.penStyle,
-            capStyle = state.penCapStyle,
-            brushType = brushType,
-            opacity = brushType.defaultOpacity
-        )
-        val recognized = ShapeRecognizer.recognizeStroke(tempStroke) ?: return false
-        if (recognized.shapeType == ShapeType.LINE || recognized.confidence < 0.72f) return false
-
-        saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(shapes = b.shapes + recognized.shapeItem)
-            }.copy(
-                activeStroke = null,
-                shapeRecognitionProposal = null,
-                selectedShapeId = recognized.shapeItem.id,
-                selectedShapeIds = setOf(recognized.shapeItem.id),
-                selectedStrokeId = null,
-                selectedStrokeIds = emptySet(),
-                selectedNoteId = null,
-                selectedNoteIds = emptySet()
-            )
-        }
-        return true
-    }
-
-    /**
      * Object Eraser: deletes an entire vector stroke or shape on a single touch or drag.
      */
     fun eraseObjectAt(
