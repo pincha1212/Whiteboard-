@@ -147,7 +147,11 @@ class PathHumanizer(
                     val progress = if (isClosed) {
                         (distance / len).coerceIn(0f, 1f)
                     } else {
-                        (1f - ((len - distance) / 48f).coerceIn(0f, 1f)).coerceIn(0f, 1f)
+                        // Open strokes use a fixed endpoint profile: only the first and
+                        // last 48px can change as the active path grows.
+                        val startEnvelope = (distance / 48f).coerceIn(0f, 1f)
+                        val endEnvelope = ((len - distance) / 48f).coerceIn(0f, 1f)
+                        0.5f * min(startEnvelope, endEnvelope)
                     }
                     progresses[i] = progress
 
@@ -183,13 +187,16 @@ class PathHumanizer(
                         } else {
                             // Open strokes taper smoothly near endpoints so anchor vertices & arrowheads stay aligned.
                             val dScaled = distance
-                            normalWave =
+                            val endpointEnvelope = sin(progress * PI.toFloat()).coerceIn(0f, 1f)
+                            normalWave = (
                                 0.54f * sin(dScaled * 0.042f + phaseA + contourShift) +
                                     0.31f * cos(dScaled * 0.105f + phaseB + contourShift) +
                                     0.15f * sin(dScaled * 0.225f - phaseC)
-                            tangentWave =
+                                ) * endpointEnvelope
+                            tangentWave = (
                                 0.62f * cos(dScaled * 0.036f + phaseB) +
                                     0.38f * sin(dScaled * 0.088f + phaseA)
+                                ) * endpointEnvelope
                         }
 
                         rawX[i] = pos[0] + nx * (normalWave * maxNormalAmp) + tx * (tangentWave * maxTangentAmp)
@@ -279,7 +286,8 @@ class PathHumanizer(
                 .coerceIn(0.05f, 1f)
 
             if (timestampsMs != null && timestampsMs.size >= 2 && avgTimestampDtMs != null) {
-                val mappedIdx = ((progress * (timestampsMs.lastIndex)).toInt()).coerceIn(1, timestampsMs.lastIndex)
+                val mappedProgress = (index.toFloat() / totalCount.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+                val mappedIdx = (mappedProgress * timestampsMs.lastIndex).toInt().coerceIn(1, timestampsMs.lastIndex)
                 val dt = (timestampsMs[mappedIdx] - timestampsMs[mappedIdx - 1]).coerceAtLeast(1L).toFloat()
                 val speedRatio = (avgTimestampDtMs / dt).coerceIn(0.2f, 2.5f)
                 val pxPerMsFactor = (hypot(dx, dy) / dt).coerceIn(0f, 3.5f) / 3.5f
