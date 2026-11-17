@@ -90,6 +90,7 @@ import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
+import com.example.viewmodel.WhiteboardUiState
 import com.example.ink.ViewportTransform
 import kotlin.math.PI
 import kotlin.math.cos
@@ -1007,38 +1008,21 @@ fun WhiteboardCanvasScreen(
             onRotate = { da -> viewModel.rotateRuler(da) }
         )
 
-        // Top Bar
-        if (!state.isZenMode) {
-            WhiteboardTopBar(
-                boardTitle = state.board.title,
-                scale = camera.scale,
-                canUndo = state.canUndo,
-                canRedo = state.canRedo,
-                isSnapToGrid = state.isSnapToGrid,
-                onUndo = { viewModel.undo() },
-                onRedo = { viewModel.redo() },
-                onZoomIn = { viewModel.zoomIn() },
-                onZoomOut = { viewModel.zoomOut() },
-                onResetZoom = { viewModel.resetZoom() },
-                onFitToContent = { viewModel.fitToContent(screenWidthPx, screenHeightPx) },
-                onSetZoomPreset = { viewModel.setZoomPreset(it) },
-                onToggleSnapToGrid = { viewModel.toggleSnapToGrid() },
-                onEnterZenMode = { viewModel.toggleZenMode() },
-                onOpenBoardsManager = { showBoardsManager = true },
-                onOpenBackgroundSettings = { showBackgroundSettings = true },
-                onClearBoard = { viewModel.clearBoard() },
-                onExportBoard = { showExportModal = true },
-                onRenameBoard = {
-                    newTitleInput = state.board.title
-                    showRenameDialog = true
-                },
-                onBackToHome = { viewModel.closeBoardToHome() },
-                onSwitchToNotes = onSwitchToNotes,
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
-        }
-
-        }
+        CameraAwareWhiteboardTopBar(
+            viewModel = viewModel,
+            state = state,
+            screenWidthPx = screenWidthPx,
+            onOpenBoardsManager = { showBoardsManager = true },
+            onOpenBackgroundSettings = { showBackgroundSettings = true },
+            onClearBoard = { viewModel.clearBoard() },
+            onExportBoard = { showExportModal = true },
+            onRenameBoard = {
+                newTitleInput = state.board.title
+                showRenameDialog = true
+            },
+            onSwitchToNotes = onSwitchToNotes,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
 
         // Bottom Dock: Versatile Precision Editor when an item is selected, otherwise Pen Dock
         if (!state.isZenMode) {
@@ -1425,6 +1409,50 @@ private fun CameraStateHost(
     val camera by viewModel.cameraState.collectAsState()
     CanvasPerformanceProbe("camera-viewport")
     content(camera)
+}
+
+@Composable
+private fun CameraAwareWhiteboardTopBar(
+    viewModel: WhiteboardViewModel,
+    state: WhiteboardUiState,
+    screenWidthPx: Float,
+    onOpenBoardsManager: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
+    onClearBoard: () -> Unit,
+    onExportBoard: () -> Unit,
+    onRenameBoard: () -> Unit,
+    onSwitchToNotes: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    // The zoom read is isolated to this small component; the screen and tool docks
+    // do not subscribe to camera changes.
+    val camera by viewModel.cameraState.collectAsState()
+    if (!state.isZenMode) {
+        WhiteboardTopBar(
+            boardTitle = state.board.title,
+            scale = camera.scale,
+            canUndo = state.canUndo,
+            canRedo = state.canRedo,
+            isSnapToGrid = state.isSnapToGrid,
+            onUndo = { viewModel.undo() },
+            onRedo = { viewModel.redo() },
+            onZoomIn = { viewModel.zoomIn() },
+            onZoomOut = { viewModel.zoomOut() },
+            onResetZoom = { viewModel.resetZoom() },
+            onFitToContent = { viewModel.fitToContent(screenWidthPx, state.board.let { 1920f }) },
+            onSetZoomPreset = { viewModel.setZoomPreset(it) },
+            onToggleSnapToGrid = { viewModel.toggleSnapToGrid() },
+            onEnterZenMode = { viewModel.toggleZenMode() },
+            onOpenBoardsManager = onOpenBoardsManager,
+            onOpenBackgroundSettings = onOpenBackgroundSettings,
+            onClearBoard = onClearBoard,
+            onExportBoard = onExportBoard,
+            onRenameBoard = onRenameBoard,
+            onBackToHome = { viewModel.closeBoardToHome() },
+            onSwitchToNotes = onSwitchToNotes,
+            modifier = modifier
+        )
+    }
 }
 
 private data class CachedShapeBounds(
