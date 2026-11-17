@@ -18,7 +18,7 @@ import kotlin.math.sin
  * @property y Final vertical coordinate in Canvas space.
  * @property angle Direction tangent angle in radians (`-PI..PI`).
  * @property velocity Normalized movement speed in `0f..1f` (`0f` = slow/heavy ink, `1f` = fast/dry stroke).
- * @property progress Normalized contour progress from `0f` (start) to `1f` (end).
+ * @property progress Brush profile value: closed contours use a `0f..1f` phase; open committed strokes use a stable endpoint profile, while live previews pin it to `0.5f`.
  * @property contourIndex Zero-based index identifying contiguous contour segments in multi-contour [Path]s.
  * @property isClosed True if this contour originated from a closed geometric loop.
  */
@@ -145,8 +145,7 @@ class PathHumanizer(
 
                 for (i in 0..endIndex) {
                     val distance = if (i == endIndex) len else (i * safeStep).coerceAtMost(len)
-                    // Open-stroke progress is local to the trailing tip, not normalized by
-                    // total path length. Existing nodes therefore keep their style values.
+                    // Keep the live brush profile constant while its open path is growing.
                     val progress = when {
                         isClosed -> (distance / len).coerceIn(0f, 1f)
                         stableOpenContours -> 0.5f
