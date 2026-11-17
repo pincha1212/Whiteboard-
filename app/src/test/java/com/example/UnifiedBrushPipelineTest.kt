@@ -44,7 +44,7 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class UnifiedBrushPipelineTest {
 
