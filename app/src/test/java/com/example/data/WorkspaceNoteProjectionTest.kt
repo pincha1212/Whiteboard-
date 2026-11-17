@@ -8,10 +8,13 @@ import com.example.notes.model.NoteItem
 import com.example.notes.model.NoteTag
 import com.example.notes.model.NoteVersion
 import java.io.File
+import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.json.JSONObject
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -313,4 +316,44 @@ class WorkspaceNoteProjectionTest {
         val detachedNote = notesVm.uiState.value.notes.single { it.id == stickyId }
         assertNull(detachedNote.canvasData)
     }
+
+    @Test
+    fun debouncedPersistenceWritesTheLatestWorkspaceSnapshot() {
+        val tempDir = Files.createTempDirectory("whiteboard-store-test").toFile()
+        try {
+            val storageFile = File(tempDir, "workspace_ssot_db.json")
+            val store = LocalFirstWorkspaceStore(storageFile)
+            val initialBoard = WhiteboardBoard(
+                id = "persist-test-board",
+                title = "Initial title"
+            )
+
+            store.ensureBoardRegistered(initialBoard)
+            store.syncBoardFromWhiteboard(
+                board = initialBoard.copy(title = "Latest title"),
+                softDeleteMissingNotes = false,
+                persist = true
+            )
+
+            val deadline = System.currentTimeMillis() + 4_000L
+            while (!storageFile.isFile && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20L)
+            }
+            assertTrue("The IO persistence queue did not create the workspace file", storageFile.isFile)
+
+            val boards = JSONObject(storageFile.readText()).getJSONArray("boards")
+            var savedTitle: String? = null
+            for (index in 0 until boards.length()) {
+                val item = boards.getJSONObject(index)
+                if (item.optString("boardId") == "persist-test-board") {
+                    savedTitle = item.optString("title")
+                    break
+                }
+            }
+            assertEquals("Latest title", savedTitle)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
 }

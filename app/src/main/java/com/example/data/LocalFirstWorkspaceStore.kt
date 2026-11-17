@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.util.Log
 import com.example.model.StickyNote
 import com.example.model.WhiteboardBoard
 import com.example.notes.data.NoteExportImportService
@@ -10,17 +11,18 @@ import com.example.notes.model.NoteItem
 import com.example.notes.model.NoteTag
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -31,6 +33,12 @@ data class WorkspaceDbState(
     val notes: List<NoteItem> = emptyList(),
     val folders: List<NoteFolder> = emptyList(),
     val boards: List<WhiteboardBoard> = emptyList()
+)
+
+private data class PersistRequest(
+    val revision: Long,
+    val state: WorkspaceDbState,
+    val immediate: Boolean = false
 )
 
 /**
@@ -45,9 +53,12 @@ class LocalFirstWorkspaceStore(
 ) {
     private val lock = Any()
     private val listeners = CopyOnWriteArrayList<(WorkspaceDbState) -> Unit>()
+    private val persistMutex = Mutex()
+    private var stateRevision = 0L
+    private var persistedRevision = 0L
 
     private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val persistRequestFlow = MutableSharedFlow<WorkspaceDbState>(
+    private val persistRequestFlow = MutableSharedFlow<PersistRequest>(
         replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
@@ -59,13 +70,13 @@ class LocalFirstWorkspaceStore(
         get() = _dbState.value
 
     init {
+        // All serialization and file writes are performed by this single IO worker.
+        // Normal edits are coalesced; lifecycle flushes bypass the debounce.
         storeScope.launch {
-            @OptIn(FlowPreview::class)
-            persistRequestFlow
-                .debounce(250L)
-                .collectLatest { stateToSave ->
-                    persistToDisk(stateToSave)
-                }
+            persistRequestFlow.collectLatest { request ->
+                if (!request.immediate) delay(250L)
+                persistSnapshot(request)
+            }
         }
     }
 
@@ -85,8 +96,10 @@ class LocalFirstWorkspaceStore(
         synchronized(lock) {
             next = projectBoardsFromNotes(transform(_dbState.value))
             _dbState.value = next
+            stateRevision += 1L
             if (persist) {
-                persistToDisk(next)
+                // tryEmit is non-blocking; the IO worker performs JSON serialization and disk I/O.
+                persistRequestFlow.tryEmit(PersistRequest(stateRevision, next))
             }
         }
         listeners.forEach { it(next) }
@@ -94,18 +107,34 @@ class LocalFirstWorkspaceStore(
     }
 
     fun flushToDisk() {
-        val current = _dbState.value
-        storeScope.launch {
-            synchronized(lock) {
-                persistToDisk(current)
-            }
+        synchronized(lock) {
+            persistRequestFlow.tryEmit(
+                PersistRequest(stateRevision, _dbState.value, immediate = true)
+            )
         }
     }
 
+    /**
+     * Explicit blocking fallback for callers that truly require a completed disk write.
+     * Never call this method from the UI thread.
+     */
     fun flushToDiskBlocking() {
-        val current = _dbState.value
-        synchronized(lock) {
-            persistToDisk(current)
+        val request = synchronized(lock) {
+            PersistRequest(stateRevision, _dbState.value, immediate = true)
+        }
+        runBlocking(Dispatchers.IO) {
+            persistSnapshot(request)
+        }
+    }
+
+    private suspend fun persistSnapshot(request: PersistRequest) {
+        persistMutex.withLock {
+            // A newer lifecycle flush may overtake a delayed request. Never let an older
+            // snapshot overwrite a newer one after it has already been persisted.
+            if (request.revision <= persistedRevision) return@withLock
+            if (persistToDisk(request.state)) {
+                persistedRevision = request.revision
+            }
         }
     }
 
@@ -477,9 +506,9 @@ class LocalFirstWorkspaceStore(
         return state.copy(boards = syncedBoards)
     }
 
-    private fun persistToDisk(state: WorkspaceDbState) {
-        val targetFile = storageFile ?: return
-        try {
+    private fun persistToDisk(state: WorkspaceDbState): Boolean {
+        val targetFile = storageFile ?: return true
+        return try {
             targetFile.parentFile?.mkdirs()
             val root = JSONObject()
             root.put("schemaVersion", 1)
@@ -510,7 +539,10 @@ class LocalFirstWorkspaceStore(
                 targetFile.writeText(root.toString())
                 tempFile.delete()
             }
-        } catch (_: Exception) {
+            true
+        } catch (error: Exception) {
+            Log.e("LocalFirstWorkspaceStore", "Failed to persist workspace snapshot", error)
+            false
         }
     }
 
