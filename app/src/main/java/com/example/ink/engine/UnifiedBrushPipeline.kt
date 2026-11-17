@@ -170,10 +170,10 @@ object UnifiedBrushPipeline {
         if (viewportW > 0f && viewportH > 0f) {
             val bounds = stroke.geometryMetrics
             if (bounds.hasPoints) {
-                val sMinX = bounds.minX * scale + panX
-                val sMaxX = bounds.maxX * scale + panX
-                val sMinY = bounds.minY * scale + panY
-                val sMaxY = bounds.maxY * scale + panY
+                val sMinX = bounds.minX * safeScale + panX
+                val sMaxX = bounds.maxX * safeScale + panX
+                val sMinY = bounds.minY * safeScale + panY
+                val sMaxY = bounds.maxY * safeScale + panY
                 val margin = worldWidth * safeScale * 3.5f + 64f
                 if (sMaxX < -margin || sMinX > viewportW + margin || sMaxY < -margin || sMinY > viewportH + margin) {
                     return
