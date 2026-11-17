@@ -55,6 +55,23 @@ object UnifiedBrushPipeline {
     }
     private val fillPaintCache = LruCache<Int, Paint>(32)
 
+    // Reuse short-lived effect paints per rendering thread. The pipeline is also
+    // used by export paths, so a process-wide mutable Paint would be unsafe.
+    private val neonCorePaint = ThreadLocal.withInitial {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = Color.WHITE
+            alpha = 240
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+    }
+    private val chalkSpecklePaint = ThreadLocal.withInitial {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+        }
+    }
+
     fun clearNodeCache() {
         nodeCache.evictAll()
         fillPathCache.evictAll()
@@ -375,14 +392,8 @@ object UnifiedBrushPipeline {
                 brushEngine.render(canvas, nodes, midHalo)
                 brushEngine.render(canvas, nodes, config.copy(alpha = (config.alpha * 0.92f).coerceIn(0.4f, 1f)))
 
-                val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    style = Paint.Style.STROKE
-                    color = Color.WHITE
-                    alpha = 240
-                    strokeWidth = (config.strokeWidth * 0.30f).coerceAtLeast(1.2f)
-                    strokeCap = Paint.Cap.ROUND
-                    strokeJoin = Paint.Join.ROUND
-                }
+                val corePaint = neonCorePaint.get()!!
+                corePaint.strokeWidth = (config.strokeWidth * 0.30f).coerceAtLeast(1.2f)
                 drawNodeSpine(canvas, nodes, corePaint)
             }
             StrokeStyle.CHALK_TEXTURE -> {
@@ -419,10 +430,10 @@ object UnifiedBrushPipeline {
     }
 
     private fun renderChalkSpeckles(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
-        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = config.color
-        }
+        val dotPaint = chalkSpecklePaint.get()!!
+        dotPaint.color = config.color
+        dotPaint.alpha = 255
+        dotPaint.shader = null
         val spread = (config.strokeWidth * 0.48f).coerceAtLeast(2f)
         val dotR = (config.strokeWidth * 0.20f).coerceIn(0.9f, 2.8f)
         for (i in nodes.indices step 3) {
