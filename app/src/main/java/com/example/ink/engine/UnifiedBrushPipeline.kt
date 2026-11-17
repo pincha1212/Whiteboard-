@@ -207,7 +207,7 @@ object UnifiedBrushPipeline {
         val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
             val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = !preserveInputPoints)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
-            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
+            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed, stableOpenContours = preserveInputPoints)
             if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
             built
         }
