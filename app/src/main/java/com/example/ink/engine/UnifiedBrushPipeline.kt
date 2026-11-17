@@ -172,26 +172,26 @@ object UnifiedBrushPipeline {
                 val sMaxX = bounds.maxX * scale + panX
                 val sMinY = bounds.minY * scale + panY
                 val sMaxY = bounds.maxY * scale + panY
-                val margin = stroke.width * scale * 2f + 40f
+                val margin = worldWidth * safeScale * 3.5f + 64f
                 if (sMaxX < -margin || sMinX > viewportW + margin || sMaxY < -margin || sMinY > viewportH + margin) {
                     return
                 }
             }
         }
-        val scaledWidth = (stroke.width * scale).coerceAtLeast(1.5f)
+        val safeScale = scale.coerceAtLeast(0.05f)
+        val worldWidth = stroke.width.coerceAtLeast(1.5f)
         val effectiveBrushType = if (stroke.isHighlighter) StrokeBrushType.HIGHLIGHTER else stroke.brushType
         val engine = BrushEngineRegistry.forBrushType(effectiveBrushType, stroke.strokeStyle)
         val colorInt = safeParseColor(stroke.colorHex, Color.BLACK)
 
         val effectiveHandDrawn = when {
-            stroke.strokeStyle == StrokeStyle.SKETCH -> max(handDrawnFactor, 0.48f)
             effectiveBrushType == StrokeBrushType.FINE_MARKER -> min(handDrawnFactor, 0.16f)
             else -> handDrawnFactor
         }
 
         val config = BrushConfig(
             color = colorInt,
-            strokeWidth = scaledWidth,
+            strokeWidth = worldWidth,
             alpha = stroke.opacity.coerceIn(0.15f, 1.0f),
             handDrawnFactor = effectiveHandDrawn,
             isDarkBackground = isDarkBoard,
@@ -202,10 +202,9 @@ object UnifiedBrushPipeline {
             seed = stroke.id.hashCode()
         )
 
-        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${(scale * 1000).roundToInt()}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
         val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
-            val worldScaledPts = stroke.points.map { StrokePoint(it.x * scale, it.y * scale) }
-            val rawPath = ShapeGenerator.fromStrokePoints(worldScaledPts)
+            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
             val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
             if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
@@ -215,11 +214,12 @@ object UnifiedBrushPipeline {
 
         canvas.save()
         canvas.translate(panX, panY)
+        canvas.scale(safeScale, safeScale)
         try {
             if (isSelected) {
                 val haloConfig = BrushConfig(
                     color = Color.parseColor("#2563EB"),
-                    strokeWidth = scaledWidth + 6f,
+                    strokeWidth = worldWidth + 6f,
                     alpha = 0.32f,
                     handDrawnFactor = 0f,
                     isDarkBackground = isDarkBoard,
