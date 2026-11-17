@@ -235,6 +235,16 @@ fun WhiteboardCanvasScreen(
         }
     }
 
+    // Resolve selected objects only when content or selection changes, not on every camera frame.
+    val selectedShapeForLabel = remember(state.board.shapes, state.selectedShapeId) {
+        state.board.shapes.firstOrNull {
+            it.id == state.selectedShapeId && !it.isHiddenByCollapse && !it.shapeType.isLineLike
+        }
+    }
+    val selectedStrokeForHandles = remember(state.board.strokes, state.selectedStrokeId) {
+        state.board.strokes.firstOrNull { it.id == state.selectedStrokeId }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -807,8 +817,7 @@ fun WhiteboardCanvasScreen(
             }
 
             if (state.selectedStrokeId != null && state.selectedStrokeIds.size <= 1) {
-                val selStroke = state.board.strokes.find { it.id == state.selectedStrokeId }
-                if (selStroke != null) {
+                selectedStrokeForHandles?.let { selStroke ->
                     drawStrokeSelectionHandles(
                         stroke = selStroke,
                         panX = state.panX,
@@ -904,9 +913,8 @@ fun WhiteboardCanvasScreen(
         }
 
         // Edit label button for the currently selected non-line shape (single global affordance)
-        state.selectedShapeId?.let { selId ->
-            val shape = state.board.shapes.find { it.id == selId && !it.isHiddenByCollapse && !it.shapeType.isLineLike }
-            if (shape != null && !isPanOnlyMode) {
+        selectedShapeForLabel?.let { shape ->
+            if (!isPanOnlyMode) {
                 val shapeScreenCenterX = ((shape.x + shape.width / 2f) * state.scale + state.panX).roundToInt()
                 val shapeScreenTop = (shape.y * state.scale + state.panY).roundToInt()
                 val editHalfW = with(density) { 18.dp.roundToPx() }
