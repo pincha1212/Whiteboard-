@@ -27,6 +27,8 @@ import com.example.ui.canvas.BoardsHomeScreen
 import com.example.ui.canvas.WhiteboardCanvasScreen
 import com.example.ui.theme.WhiteboardTheme
 import com.example.viewmodel.WhiteboardViewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 class MainActivity : ComponentActivity() {
 
@@ -75,31 +77,50 @@ class MainActivity : ComponentActivity() {
                         CircularProgressIndicator()
                     }
                 } else {
-                    // ViewModels are created only after the persisted workspace has been restored.
-                    val whiteboardState by whiteboardViewModel.uiState.collectAsStateWithLifecycle()
-                    val notesState by notesViewModel.uiState.collectAsStateWithLifecycle()
+                    // Observe only navigation flags here. Collecting the complete UI states at
+                    // this root caused camera/selection updates to recompose the workspace host.
+                    val isViewingBoardsHome by whiteboardViewModel.uiState
+                        .map { it.isViewingBoardsHome }
+                        .distinctUntilChanged()
+                        .collectAsStateWithLifecycle(
+                            initialValue = whiteboardViewModel.uiState.value.isViewingBoardsHome
+                        )
+                    val isEditingNote by notesViewModel.uiState
+                        .map { it.isEditingNote }
+                        .distinctUntilChanged()
+                        .collectAsStateWithLifecycle(
+                            initialValue = notesViewModel.uiState.value.isEditingNote
+                        )
                     var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
 
                     BackHandler(
-                        enabled = notesState.isEditingNote ||
+                        enabled = isEditingNote ||
                             currentWorkspace == AppActiveWorkspace.NOTES ||
-                            !whiteboardState.isViewingBoardsHome
+                            !isViewingBoardsHome
                     ) {
-                        if (notesState.isEditingNote) {
+                        if (isEditingNote) {
                             notesViewModel.closeActiveNote()
                         } else if (currentWorkspace == AppActiveWorkspace.NOTES) {
                             currentWorkspace = AppActiveWorkspace.WHITEBOARD
-                        } else if (!whiteboardState.isViewingBoardsHome) {
+                        } else if (!isViewingBoardsHome) {
                             whiteboardViewModel.closeBoardToHome()
                         }
                     }
 
                     when (currentWorkspace) {
                         AppActiveWorkspace.WHITEBOARD -> {
-                            if (whiteboardState.isViewingBoardsHome) {
+                            if (isViewingBoardsHome) {
+                                val homeData by whiteboardViewModel.uiState
+                                    .map { it.allBoards to it.board.id }
+                                    .distinctUntilChanged()
+                                    .collectAsStateWithLifecycle(
+                                        initialValue = whiteboardViewModel.uiState.value.let {
+                                            it.allBoards to it.board.id
+                                        }
+                                    )
                                 BoardsHomeScreen(
-                                    boards = whiteboardState.allBoards,
-                                    currentBoardId = whiteboardState.board.id,
+                                    boards = homeData.first,
+                                    currentBoardId = homeData.second,
                                     onOpenBoard = { whiteboardViewModel.openBoard(it) },
                                     onCreateBoard = { title, grid, theme ->
                                         whiteboardViewModel.createNewBoard(
