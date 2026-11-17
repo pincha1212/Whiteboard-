@@ -1435,6 +1435,7 @@ private fun CameraAwareWhiteboardTopBar(
     // The zoom read is isolated to this small component; the screen and tool docks
     // do not subscribe to camera changes.
     val camera by viewModel.cameraState.collectAsState()
+    CanvasPerformanceProbe("topbar")
     if (!state.isZenMode) {
         WhiteboardTopBar(
             boardTitle = state.board.title,
