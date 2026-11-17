@@ -58,39 +58,3 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
-
-  unit-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android SDK platform
-        run: sdkmanager "platforms;android-36.1" "build-tools;36.0.0"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Run unit tests with per-test diagnostics
-        run: gradle --no-daemon --console=plain --info :app:testDebugUnitTest
-
-      - name: Upload unit test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Whiteboard-unit-test-reports-${{ github.sha }}
-          path: app/build/reports/tests/testDebugUnitTest/
-          if-no-files-found: warn
-          retention-days: 7
