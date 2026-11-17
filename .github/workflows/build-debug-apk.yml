@@ -38,14 +38,14 @@ jobs:
 
       - name: Generate local debug signing key
         run: |
-          keytool -genkeypair -v \\
-            -keystore debug.keystore \\
-            -storepass android \\
-            -keypass android \\
-            -alias androiddebugkey \\
-            -keyalg RSA \\
-            -keysize 2048 \\
-            -validity 10000 \\
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
       - name: Build debug APK
