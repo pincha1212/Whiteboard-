@@ -131,7 +131,7 @@ class PathHumanizer(
 
                 // Sample from the contour origin at a fixed interval. Extending an open
                 // stroke must not redistribute nodes that were already rendered.
-                val rawSampleCount = ceil((len / safeStep).toDouble()).toInt().coerceIn(2, 800)
+                val rawSampleCount = ceil((len / safeStep).toDouble()).toInt().coerceAtLeast(2)
                 val endIndex = rawSampleCount
 
                 // Fixed amplitudes prevent earlier points from changing as total length grows.
