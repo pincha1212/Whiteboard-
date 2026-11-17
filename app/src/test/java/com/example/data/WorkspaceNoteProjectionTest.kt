@@ -527,6 +527,7 @@ class WorkspaceNoteProjectionTest {
         val boardId = "board-transform-deferral"
         val sticky = StickyNote(
             id = "sticky-transform-deferral",
+            text = "Nota de prueba",
             x = 40f,
             y = 80f
         )
