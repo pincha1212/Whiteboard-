@@ -237,23 +237,22 @@ fun StickyNoteView(
     val camera = ViewportTransform(scale = scale, panX = panX, panY = panY)
     val screenXPx = camera.worldToScreenX(note.x)
     val screenYPx = camera.worldToScreenY(note.y)
-    val cardWidthPx = camera.worldLengthToScreenPx(note.width).coerceAtLeast(16f)
-    val cardHeightPx = camera.worldLengthToScreenPx(note.height).coerceAtLeast(16f)
-
+    // Keep the note's internal layout in board-space units. Camera zoom is applied
+    // once to the outer layer, so text and child layouts are not resized/re-measured.
+    val cardWidthPx = note.width.coerceAtLeast(16f)
+    val cardHeightPx = note.height.coerceAtLeast(16f)
     val cardWidthDp = with(density) { cardWidthPx.toDp() }
     val cardHeightDp = with(density) { cardHeightPx.toDp() }
 
-    val cornerRadiusDp = with(density) { (8f * scale).coerceIn(3f, 18f).toDp() }
+    val cornerRadiusDp = 8.dp
     val headerHeightWorld = StickyNoteGeometry.headerHeightWorld(note.height)
-    val headerHeightPx = camera.worldLengthToScreenPx(headerHeightWorld)
-    val headerHeightDp = with(density) { headerHeightPx.toDp() }
+    val headerHeightDp = with(density) { headerHeightWorld.toDp() }
 
     val innerPadWorld = StickyNoteGeometry.innerPaddingWorld(note.width, note.height)
-    val innerPadPx = camera.worldLengthToScreenPx(innerPadWorld)
-    val innerPadDp = with(density) { innerPadPx.toDp() }
+    val innerPadDp = with(density) { innerPadWorld.toDp() }
 
     val (innerWidthWorld, innerHeightWorld) = StickyNoteGeometry.innerTextBoxWorld(note.width, note.height)
-    val innerHeightPx = camera.worldLengthToScreenPx(innerHeightWorld).coerceAtLeast(16f)
+    val innerHeightPx = innerHeightWorld.coerceAtLeast(16f)
 
     // Compute auto-fit font size once in world dimensions (keyed on text/size, NOT camera scale)
     // so pinch-to-zoom and pan incur zero TextMeasurer binary-search recomputations.
@@ -267,7 +266,8 @@ fun StickyNoteView(
             title = note.title
         )
     }
-    val autoFitFontSp = (baseWorldFontSp.value * scale).coerceIn(4f, 64f).sp
+    // Font size remains constant in board space; outer camera transform scales it visually.
+    val autoFitFontSp = baseWorldFontSp
 
     // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
     // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
@@ -287,11 +287,18 @@ fun StickyNoteView(
             .zIndex(if (isSelected) 10f else 0f)
             .offset {
                 IntOffset(
-                    (screenXPx - sideGutterPx).roundToInt(),
-                    (screenYPx - verticalGutterPx).roundToInt()
+                    (screenXPx - sideGutterPx * scale).roundToInt(),
+                    (screenYPx - verticalGutterPx * scale).roundToInt()
                 )
             }
             .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + verticalGutterDp * 2)
+            // Scale the completed note as a single layer instead of changing every
+            // child's dp/sp dimensions on each zoom update.
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin.TopLeft
+            }
             .graphicsLayer {
                 rotationZ = note.rotation
                 transformOrigin = TransformOrigin.Center
