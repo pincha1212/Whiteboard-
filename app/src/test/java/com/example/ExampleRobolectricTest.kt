@@ -1069,7 +1069,7 @@ class ExampleRobolectricTest {
 
     // Zoom to 2.0x -> a +100px screen drag must resize world width/height by exactly +50 world units
     vm.onPanZoom(0f, 0f, zoomChange = 2.0f)
-    assertEquals(2.0f, vm.uiState.value.scale, 0.001f)
+    assertEquals(2.0f, vm.cameraState.value.scale, 0.001f)
 
     vm.beginTransformSnapshot()
     vm.resizeStickyNoteHandle(note.id, StickyNoteResizeHandle.BOTTOM_RIGHT, deltaScreenX = 100f, deltaScreenY = 60f)
@@ -1215,7 +1215,7 @@ class ExampleRobolectricTest {
     // Pan-only shield must be active
     composeTestRule.onNodeWithTag("pan_only_overlay").assertIsDisplayed()
 
-    val initialPanX = vm.uiState.value.panX
+    val initialPanX = vm.cameraState.value.panX
     val initialNoteX = vm.uiState.value.board.stickyNotes.first().x
 
     // Dragging directly across the screen (including over note bounds) only pans the board, never selects or moves the note
@@ -1228,7 +1228,7 @@ class ExampleRobolectricTest {
     assertNull("Hand pan tool must never select shapes", vm.uiState.value.selectedShapeId)
     assertNull("Hand pan tool must never select strokes", vm.uiState.value.selectedStrokeId)
     assertEquals("Note world X must stay untouched while panning", initialNoteX, vm.uiState.value.board.stickyNotes.first().x, 0.01f)
-    assertTrue("Viewport panX must advance when dragging in Hand mode", vm.uiState.value.panX > initialPanX + 50f)
+    assertTrue("Viewport panX must advance when dragging in Hand mode", vm.cameraState.value.panX > initialPanX + 50f)
   }
 
   @Test
