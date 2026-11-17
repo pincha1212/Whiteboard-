@@ -521,4 +521,25 @@ class WorkspaceNoteProjectionTest {
         assertTrue(viewModel.erasePixelAt(500f, 301f, radius = 8f, saveSnapshot = false))
     }
 
+
+    @Test
+    fun unreadableWorkspaceSnapshotIsPreservedBeforeStartingEmpty() {
+        val tempDir = Files.createTempDirectory("whiteboard-corrupt-store-test").toFile()
+        try {
+            val storageFile = File(tempDir, "workspace_ssot_db.json")
+            val malformedJson = """{"notes": ["""
+            storageFile.writeText(malformedJson)
+
+            val store = LocalFirstWorkspaceStore(storageFile)
+
+            assertTrue(store.currentState.boards.isEmpty())
+            assertTrue(store.currentState.notes.isEmpty())
+            val recoveryCopy = File(tempDir, "workspace_ssot_db.json.corrupt")
+            assertTrue("The unreadable workspace snapshot must be preserved", recoveryCopy.isFile)
+            assertEquals(malformedJson, recoveryCopy.readText())
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
 }

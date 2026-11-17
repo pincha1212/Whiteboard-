@@ -596,9 +596,38 @@ class LocalFirstWorkspaceStore(
                 }
             }
             projectBoardsFromNotes(WorkspaceDbState(notes = notes, folders = folders, boards = boards))
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            val recoveryCopy = try {
+                preserveUnreadableSnapshot(targetFile)
+            } catch (copyError: Exception) {
+                error.addSuppressed(copyError)
+                null
+            }
+            val detail = recoveryCopy?.absolutePath ?: "no recovery copy could be created"
+            Log.e(
+                "LocalFirstWorkspaceStore",
+                "Failed to load workspace snapshot; starting with empty state ($detail)",
+                error
+            )
             WorkspaceDbState()
         }
+    }
+
+    /**
+     * Keeps the original bytes before the next successful write can replace a malformed snapshot.
+     * The file is only created on a load/parse error and never changes the persisted schema.
+     */
+    private fun preserveUnreadableSnapshot(targetFile: File): File? {
+        if (!targetFile.isFile) return null
+        val parent = targetFile.parentFile ?: return null
+        var suffix = 0
+        var recoveryFile = File(parent, "${targetFile.name}.corrupt")
+        while (recoveryFile.exists()) {
+            suffix += 1
+            recoveryFile = File(parent, "${targetFile.name}.corrupt-$suffix")
+        }
+        targetFile.copyTo(recoveryFile, overwrite = false)
+        return recoveryFile
     }
 
     companion object {
