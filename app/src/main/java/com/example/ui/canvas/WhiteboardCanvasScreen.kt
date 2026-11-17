@@ -214,7 +214,7 @@ fun WhiteboardCanvasScreen(
         val screenWidthPx = canvasSizePx.width.toFloat().coerceAtLeast(1f)
         val screenHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f)
 
-        CameraStateHost(viewModel) { camera, cameraState ->
+        CameraStateHost(viewModel) { cameraState ->
         // Global Camera / Viewport Transform Layer (handles 2-finger pinch-to-zoom & pan over both canvas and sticky notes)
         Box(
             modifier = Modifier
@@ -620,6 +620,8 @@ fun WhiteboardCanvasScreen(
                     }
                 }
         ) {
+            // Camera state is read in the draw phase: pan/zoom invalidates drawing, not composition.
+            val camera = cameraState.value
             val rotStemPx = ShapeCanvasCoordinates.rotationStemScreenPx(density)
             drawCanvasBackgroundAndGrid(
                 gridType = state.board.gridType,
@@ -830,8 +832,6 @@ fun WhiteboardCanvasScreen(
         CanvasPerformanceProbe("text-label-layer")
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
-            val sx = (tItem.x * camera.scale + camera.panX).roundToInt()
-            val sy = (tItem.y * camera.scale + camera.panY).roundToInt()
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
             // Keep the text item's measured layout in board-space units. The camera
             // scales the completed item, avoiding font/width changes and remeasurement
@@ -839,8 +839,15 @@ fun WhiteboardCanvasScreen(
             val widthDp = with(density) { tItem.width.coerceAtLeast(80f).toDp() }
             val fontSizeSp = tItem.fontSize.coerceIn(10f, 28f).sp
             val cameraLayer = Modifier
-                .offset { IntOffset(sx, sy) }
+                .offset {
+                    val camera = cameraState.value
+                    IntOffset(
+                        (tItem.x * camera.scale + camera.panX).roundToInt(),
+                        (tItem.y * camera.scale + camera.panY).roundToInt()
+                    )
+                }
                 .graphicsLayer {
+                    val camera = cameraState.value
                     scaleX = camera.scale
                     scaleY = camera.scale
                     transformOrigin = TransformOrigin(0f, 0f)
@@ -894,8 +901,6 @@ fun WhiteboardCanvasScreen(
         // Edit label button for the currently selected non-line shape (single global affordance)
         selectedShapeForLabel?.let { shape ->
             if (!isPanOnlyMode) {
-                val shapeScreenCenterX = ((shape.x + shape.width / 2f) * camera.scale + camera.panX).roundToInt()
-                val shapeScreenTop = (shape.y * camera.scale + camera.panY).roundToInt()
                 val editHalfW = with(density) { 18.dp.roundToPx() }
                 val editTop = with(density) { 32.dp.roundToPx() }
                 Surface(
@@ -904,7 +909,12 @@ fun WhiteboardCanvasScreen(
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     shadowElevation = 2.dp,
                     modifier = Modifier
-                        .offset { IntOffset(shapeScreenCenterX - editHalfW, shapeScreenTop - editTop) }
+                        .offset {
+                        val camera = cameraState.value
+                        val shapeScreenCenterX = ((shape.x + shape.width / 2f) * camera.scale + camera.panX).roundToInt()
+                        val shapeScreenTop = (shape.y * camera.scale + camera.panY).roundToInt()
+                        IntOffset(shapeScreenCenterX - editHalfW, shapeScreenTop - editTop)
+                    }
                         .size(32.dp)
                         .clip(CircleShape)
                         .clickable {
@@ -925,13 +935,7 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Sticky Notes (viewport-culled for unselected notes; selected rendered last for handle z-order)
-        val safeScaleForNotes = if (camera.scale > 0.001f) camera.scale else 1.0f
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
-        val noteCullMarginWorld = 180f / safeScaleForNotes
-        val visLeftW = -camera.panX / safeScaleForNotes - noteCullMarginWorld
-        val visTopW = -camera.panY / safeScaleForNotes - noteCullMarginWorld
-        val visRightW = (screenWidthPx - camera.panX) / safeScaleForNotes + noteCullMarginWorld
-        val visBottomW = (screenHeightPx - camera.panY) / safeScaleForNotes + noteCullMarginWorld
 
         StickyNoteLayer(
             notes = state.board.stickyNotes,
@@ -942,10 +946,8 @@ fun WhiteboardCanvasScreen(
             cameraState = cameraState,
             isPanOnlyMode = isPanOnlyMode,
             hasViewport = hasViewport,
-            visibleLeft = visLeftW,
-            visibleTop = visTopW,
-            visibleRight = visRightW,
-            visibleBottom = visBottomW,
+            viewportWidthPx = screenWidthPx,
+            viewportHeightPx = screenHeightPx,
             onSelect = viewModel::selectNote,
             onBeginTransform = viewModel::beginStickyNoteTransformSnapshot,
             onEndTransform = viewModel::commitWorkspaceSync,
@@ -964,7 +966,10 @@ fun WhiteboardCanvasScreen(
                 if (state.selectedNoteIds.contains(note.id) &&
                     (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
                 ) {
-                    viewModel.moveSelectedObjects(dx / camera.scale, dy / camera.scale)
+                    viewModel.moveSelectedObjects(
+                        dx / viewModel.cameraState.value.scale,
+                        dy / viewModel.cameraState.value.scale
+                    )
                 } else {
                     viewModel.moveStickyNote(note.id, dx, dy)
                 }
@@ -1004,9 +1009,7 @@ fun WhiteboardCanvasScreen(
         CanvasPerformanceProbe("interactive-ruler")
         InteractiveRulerView(
             rulerState = state.rulerState,
-            scale = camera.scale,
-            panX = camera.panX,
-            panY = camera.panY,
+            cameraState = cameraState,
             onMove = { dx, dy -> viewModel.moveRuler(dx, dy) },
             onRotate = { da -> viewModel.rotateRuler(da) }
         )
@@ -1410,12 +1413,11 @@ fun WhiteboardCanvasScreen(
 @Composable
 private fun CameraStateHost(
     viewModel: WhiteboardViewModel,
-    content: @Composable (ViewportTransform, State<ViewportTransform>) -> Unit
+    content: @Composable (State<ViewportTransform>) -> Unit
 ) {
     val cameraState = viewModel.cameraState.collectAsState()
-    val camera = cameraState.value
     CanvasPerformanceProbe("camera-viewport")
-    content(camera, cameraState)
+    content(cameraState)
 }
 
 @Composable
@@ -1481,10 +1483,8 @@ private fun StickyNoteLayer(
     cameraState: State<ViewportTransform>,
     isPanOnlyMode: Boolean,
     hasViewport: Boolean,
-    visibleLeft: Float,
-    visibleTop: Float,
-    visibleRight: Float,
-    visibleBottom: Float,
+    viewportWidthPx: Float,
+    viewportHeightPx: Float,
     onSelect: (String) -> Unit,
     onBeginTransform: () -> Unit,
     onEndTransform: () -> Unit,
@@ -1498,6 +1498,15 @@ private fun StickyNoteLayer(
     onRotate: (String, Float) -> Unit
 ) {
     CanvasPerformanceProbe("sticky-note-layer")
+    // This layer alone observes camera changes for viewport culling. The screen,
+    // Canvas composition, labels and docks remain independent of camera updates.
+    val camera = cameraState.value
+    val safeScale = if (camera.scale > 0.001f) camera.scale else 1f
+    val margin = 180f / safeScale
+    val visibleLeft = -camera.panX / safeScale - margin
+    val visibleTop = -camera.panY / safeScale - margin
+    val visibleRight = (viewportWidthPx - camera.panX) / safeScale + margin
+    val visibleBottom = (viewportHeightPx - camera.panY) / safeScale + margin
     // Two stable passes preserve z-order (unselected first, selected last) without
     // allocating and sorting a temporary list on every camera frame.
     for (selectedPass in 0..1) {
