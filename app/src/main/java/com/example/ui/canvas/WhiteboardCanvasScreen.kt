@@ -238,6 +238,7 @@ fun WhiteboardCanvasScreen(
                 }
         ) {
             // Main Drawing Canvas
+            CanvasPerformanceProbe("canvas-layer")
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -825,6 +826,7 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
+        CanvasPerformanceProbe("text-label-layer")
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val sx = (tItem.x * camera.scale + camera.panX).roundToInt()
@@ -1000,6 +1002,7 @@ fun WhiteboardCanvasScreen(
         } // End Global Viewport Box
 
         // Interactive Ruler
+        CanvasPerformanceProbe("interactive-ruler")
         InteractiveRulerView(
             rulerState = state.rulerState,
             scale = camera.scale,
