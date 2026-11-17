@@ -411,11 +411,12 @@ fun WhiteboardCanvasScreen(
                             } else if (activePointers.size == 1 && !isMultiTouch) {
                                 val change = activePointers.first()
                                 val liveState = viewModel.uiState.value
+                                val liveCamera = viewModel.cameraState.value
 
                                 when (gestureMode) {
                                     CanvasGestureMode.PLACE_SHAPE -> {
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         pendingDragEnd = StrokePoint(nwX, nwY)
                                         change.consume()
                                     }
@@ -424,8 +425,8 @@ fun WhiteboardCanvasScreen(
                                             viewModel.beginTransformSnapshot()
                                             hasTransformed = true
                                         }
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         viewModel.resizeSelectedShapeHandle(activeHandleIndex, nwX, nwY)
                                         if (activeHandleIndex == 2 || activeHandleIndex == 3) {
                                             val updatedShape = viewModel.uiState.value.board.shapes.find { it.id == liveState.selectedShapeId }
@@ -433,8 +434,8 @@ fun WhiteboardCanvasScreen(
                                                 val p0 = updatedShape.vertices.first()
                                                 val p1 = updatedShape.vertices.last()
                                                 val deg = ((kotlin.math.atan2((p1.y - p0.y).toDouble(), (p1.x - p0.x).toDouble()) * 180.0 / PI).toFloat() % 360f + 360f) % 360f
-                                                val midX = ((p0.x + p1.x) * 0.5f) * liveState.scale + liveState.panX
-                                                val midY = ((p0.y + p1.y) * 0.5f) * liveState.scale + liveState.panY - with(density) { 48.dp.toPx() }
+                                                val midX = ((p0.x + p1.x) * 0.5f) * liveCamera.scale + liveCamera.panX
+                                                val midY = ((p0.y + p1.y) * 0.5f) * liveCamera.scale + liveCamera.panY - with(density) { 48.dp.toPx() }
                                                 activeRotationHud = Offset(midX, midY) to "${deg.roundToInt()}°"
                                             }
                                         }
@@ -445,13 +446,13 @@ fun WhiteboardCanvasScreen(
                                             viewModel.beginTransformSnapshot()
                                             hasTransformed = true
                                         }
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         viewModel.rotateSelectedShapeToPoint(nwX, nwY)
                                         val updatedShape = viewModel.uiState.value.board.shapes.find { it.id == liveState.selectedShapeId }
                                         if (updatedShape != null) {
-                                            val screenX = (updatedShape.x + updatedShape.width / 2f) * liveState.scale + liveState.panX
-                                            val screenY = updatedShape.y * liveState.scale + liveState.panY - with(density) { 64.dp.toPx() }
+                                            val screenX = (updatedShape.x + updatedShape.width / 2f) * liveCamera.scale + liveCamera.panX
+                                            val screenY = updatedShape.y * liveCamera.scale + liveCamera.panY - with(density) { 64.dp.toPx() }
                                             activeRotationHud = Offset(screenX, screenY) to "${updatedShape.rotation.roundToInt()}°"
                                         }
                                         change.consume()
@@ -463,7 +464,7 @@ fun WhiteboardCanvasScreen(
                                                 viewModel.beginTransformSnapshot()
                                                 hasTransformed = true
                                             }
-                                            viewModel.moveSelectedShape(pan.x / liveState.scale, pan.y / liveState.scale)
+                                            viewModel.moveSelectedShape(pan.x / liveCamera.scale, pan.y / liveCamera.scale)
                                         }
                                         change.consume()
                                     }
@@ -472,8 +473,8 @@ fun WhiteboardCanvasScreen(
                                             viewModel.beginTransformSnapshot()
                                             hasTransformed = true
                                         }
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         viewModel.resizeSelectedStrokeBounds(activeHandleIndex, nwX, nwY)
                                         change.consume()
                                     }
@@ -482,16 +483,16 @@ fun WhiteboardCanvasScreen(
                                             viewModel.beginTransformSnapshot()
                                             hasTransformed = true
                                         }
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         viewModel.rotateSelectedStrokeToPoint(nwX, nwY)
                                         strokeRotCenterWorld?.let { c ->
                                             val curDeg = (kotlin.math.atan2((nwY - c.y).toDouble(), (nwX - c.x).toDouble()) * 180.0 / PI).toFloat()
                                             var delta = (curDeg - strokeRotStartDeg) % 360f
                                             if (delta > 180f) delta -= 360f
                                             if (delta < -180f) delta += 360f
-                                            val hudX = c.x * liveState.scale + liveState.panX
-                                            val hudY = (activeStroke?.points?.minOfOrNull { it.y } ?: c.y) * liveState.scale + liveState.panY - with(density) { 64.dp.toPx() }
+                                            val hudX = c.x * liveCamera.scale + liveCamera.panX
+                                            val hudY = (activeStroke?.points?.minOfOrNull { it.y } ?: c.y) * liveCamera.scale + liveCamera.panY - with(density) { 64.dp.toPx() }
                                             activeRotationHud = Offset(hudX, hudY) to "${delta.roundToInt()}°"
                                         }
                                         change.consume()
@@ -503,15 +504,15 @@ fun WhiteboardCanvasScreen(
                                                 viewModel.beginTransformSnapshot()
                                                 hasTransformed = true
                                             }
-                                            viewModel.moveSelectedStroke(pan.x / liveState.scale, pan.y / liveState.scale)
+                                            viewModel.moveSelectedStroke(pan.x / liveCamera.scale, pan.y / liveCamera.scale)
                                         }
                                         change.consume()
                                     }
                                     CanvasGestureMode.LASSO_SELECT -> {
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         val last = localLassoPoints.lastOrNull()
-                                        if (last == null || hypot(nwX - last.x, nwY - last.y) >= 4f / liveState.scale) {
+                                        if (last == null || hypot(nwX - last.x, nwY - last.y) >= 4f / liveCamera.scale) {
                                             localLassoPoints.add(StrokePoint(nwX, nwY))
                                         }
                                         change.consume()
@@ -522,8 +523,8 @@ fun WhiteboardCanvasScreen(
                                         change.consume()
                                     }
                                     CanvasGestureMode.DRAW_STROKE -> {
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
                                         val rawPt = StrokePoint(nwX, nwY)
                                         val pt = if (liveState.isRulerActive) {
                                             StrokeStabilizer.projectPointToRulerIfNear(rawPt, liveState.rulerState)
@@ -531,7 +532,7 @@ fun WhiteboardCanvasScreen(
                                             rawPt
                                         }
                                         val prevPt = localActivePoints.lastOrNull()
-                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 2.2f / liveState.scale) {
+                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 2.2f / liveCamera.scale) {
                                             localActivePoints.add(pt)
                                             lastDrawMoveMs = System.currentTimeMillis()
                                         }
@@ -542,16 +543,16 @@ fun WhiteboardCanvasScreen(
                                         change.consume()
                                     }
                                     CanvasGestureMode.ERASE_OBJECT -> {
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
-                                        val eraseTolerance = 24f / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
+                                        val eraseTolerance = 24f / liveCamera.scale
                                         viewModel.eraseObjectAt(nwX, nwY, eraseTolerance, saveSnapshot = true)
                                         change.consume()
                                     }
                                     CanvasGestureMode.ERASE_PIXEL -> {
-                                        val nwX = (change.position.x - liveState.panX) / liveState.scale
-                                        val nwY = (change.position.y - liveState.panY) / liveState.scale
-                                        val eraseRadius = (liveState.penWidth * 2.2f).coerceIn(14f, 36f) / liveState.scale
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
+                                        val eraseRadius = (liveState.penWidth * 2.2f).coerceIn(14f, 36f) / liveCamera.scale
                                         val prevCursor = pixelEraserCursorWorld ?: StrokePoint(nwX, nwY)
                                         val nextCursor = StrokePoint(nwX, nwY)
                                         pixelEraserCursorWorld = nextCursor
