@@ -59,11 +59,6 @@ data class WhiteboardUiState(
     val rulerState: RulerState = RulerState(),
     val isSnapToGrid: Boolean = false,
     val isZenMode: Boolean = false,
-    val panX: Float = 0f,
-    val panY: Float = 0f,
-    val scale: Float = 1.0f,
-    val viewportWidthPx: Float = 1080f,
-    val viewportHeightPx: Float = 1920f,
     val activeStroke: List<StrokePoint>? = null,
     val laserTrail: List<LaserPoint> = emptyList(),
     val selectedStrokeId: String? = null,
@@ -109,6 +104,11 @@ class WhiteboardViewModel(
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
+
+    // Camera updates are deliberately isolated from content state so pan/zoom never
+    // publishes a new WhiteboardUiState or invalidates toolbars and editor panels.
+    private val _cameraState = MutableStateFlow(ViewportTransform())
+    val cameraState: StateFlow<ViewportTransform> = _cameraState.asStateFlow()
 
     private val storeListener: (WorkspaceDbState) -> Unit = { db ->
         if (!isCommittingToStore && db.boards.isNotEmpty()) {
@@ -273,22 +273,7 @@ class WhiteboardViewModel(
 
     fun onViewportSizeChanged(newWidthPx: Float, newHeightPx: Float) {
         if (newWidthPx <= 0f || newHeightPx <= 0f) return
-        _uiState.update { state ->
-            val currentCam = ViewportTransform(
-                scale = state.scale,
-                panX = state.panX,
-                panY = state.panY,
-                viewportWidthPx = state.viewportWidthPx,
-                viewportHeightPx = state.viewportHeightPx
-            )
-            val adapted = currentCam.adaptToViewportResize(newWidthPx, newHeightPx)
-            state.copy(
-                panX = adapted.panX,
-                panY = adapted.panY,
-                viewportWidthPx = adapted.viewportWidthPx,
-                viewportHeightPx = adapted.viewportHeightPx
-            )
-        }
+        _cameraState.update { it.adaptToViewportResize(newWidthPx, newHeightPx) }
     }
 
     fun onPanZoom(
@@ -298,38 +283,27 @@ class WhiteboardViewModel(
         focalX: Float? = null,
         focalY: Float? = null
     ) {
-        _uiState.update { state ->
-            val cam = ViewportTransform(
-                scale = state.scale,
-                panX = state.panX,
-                panY = state.panY,
-                viewportWidthPx = state.viewportWidthPx,
-                viewportHeightPx = state.viewportHeightPx
-            ).panAndZoom(
+        _cameraState.update {
+            it.panAndZoom(
                 deltaPanX = panX,
                 deltaPanY = panY,
                 zoomChange = zoomChange,
                 focalX = focalX,
                 focalY = focalY
             )
-            state.copy(
-                scale = cam.scale,
-                panX = cam.panX,
-                panY = cam.panY
-            )
         }
     }
 
     fun zoomIn() {
-        _uiState.update { it.copy(scale = (it.scale * 1.2f).coerceAtMost(5.0f)) }
+        _cameraState.update { it.copy(scale = (it.scale * 1.2f).coerceAtMost(ViewportTransform.MAX_SCALE)) }
     }
 
     fun zoomOut() {
-        _uiState.update { it.copy(scale = (it.scale / 1.2f).coerceAtLeast(0.20f)) }
+        _cameraState.update { it.copy(scale = (it.scale / 1.2f).coerceAtLeast(ViewportTransform.MIN_SCALE)) }
     }
 
     fun setZoomPreset(targetScale: Float) {
-        _uiState.update { it.copy(scale = targetScale.coerceIn(0.20f, 5.0f)) }
+        _cameraState.update { it.copy(scale = targetScale.coerceIn(ViewportTransform.MIN_SCALE, ViewportTransform.MAX_SCALE)) }
     }
 
     fun fitToContent(screenWidth: Float, screenHeight: Float) {
@@ -380,18 +354,22 @@ class WhiteboardViewModel(
         val scaleY = (screenHeight * 0.75f) / contentH
         val optimalScale = minOf(scaleX, scaleY).coerceIn(0.25f, 2.5f)
 
-        _uiState.update {
+        _cameraState.update {
             val newPanX = (screenWidth / 2f) - (centerX * optimalScale)
             val newPanY = (screenHeight / 2f) - (centerY * optimalScale)
             it.copy(scale = optimalScale, panX = newPanX, panY = newPanY)
         }
+        if (wasEmpty) {
+            _cameraState.update { it.copy(scale = fitScale, panX = fitPanX, panY = fitPanY) }
+        }
     }
 
     fun navigateToWorld(worldX: Float, worldY: Float, screenW: Float = 1080f, screenH: Float = 1920f) {
-        _uiState.update {
-            val newPanX = (screenW / 2f) - (worldX * it.scale)
-            val newPanY = (screenH / 2f) - (worldY * it.scale)
-            it.copy(panX = newPanX, panY = newPanY)
+        _cameraState.update {
+            it.copy(
+                panX = (screenW / 2f) - (worldX * it.scale),
+                panY = (screenH / 2f) - (worldY * it.scale)
+            )
         }
     }
 
@@ -813,8 +791,9 @@ class WhiteboardViewModel(
     fun addStickyNote(screenW: Float = 1080f, screenH: Float = 1920f, colorHex: String = "#FFF275") {
         saveUndoSnapshot()
         val state = _uiState.value
-        val worldCenterX = (screenW / 2f - state.panX) / state.scale
-        val worldCenterY = (screenH / 2f - state.panY) / state.scale
+        val camera = _cameraState.value
+        val worldCenterX = (screenW / 2f - camera.panX) / camera.scale
+        val worldCenterY = (screenH / 2f - camera.panY) / camera.scale
         val worldX = worldCenterX - 110f
         val worldY = worldCenterY - 100f
 
@@ -906,10 +885,11 @@ class WhiteboardViewModel(
 
     fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
         val state = _uiState.value
+        val camera = _cameraState.value
         val updated = state.board.stickyNotes.map { note ->
             if (note.id == id && !note.isLocked) {
-                var nextX = note.x + (deltaX / state.scale)
-                var nextY = note.y + (deltaY / state.scale)
+                var nextX = note.x + (deltaX / camera.scale)
+                var nextY = note.y + (deltaY / camera.scale)
                 if (state.isSnapToGrid) {
                     nextX = kotlin.math.round(nextX / 40f) * 40f
                     nextY = kotlin.math.round(nextY / 40f) * 40f
@@ -934,6 +914,7 @@ class WhiteboardViewModel(
         deltaScreenY: Float
     ) {
         val state = _uiState.value
+        val camera = _cameraState.value
         var modified = false
         val updated = state.board.stickyNotes.map { note ->
             if (note.id == id && !note.isLocked) {
@@ -943,7 +924,7 @@ class WhiteboardViewModel(
                     handle = handle,
                     deltaScreenX = deltaScreenX,
                     deltaScreenY = deltaScreenY,
-                    scale = state.scale,
+                    scale = camera.scale,
                     lockAspectRatio = note.isAspectRatioLocked,
                     targetAspectRatio = 1.0f
                 )
@@ -2227,8 +2208,9 @@ class WhiteboardViewModel(
     fun applyTemplate(type: TemplateType, screenW: Float = 1080f, screenH: Float = 1920f) {
         saveUndoSnapshot()
         val state = _uiState.value
-        val worldCenterX = (screenW / 2f - state.panX) / state.scale
-        val worldCenterY = (screenH / 2f - state.panY) / state.scale
+        val camera = _cameraState.value
+        val worldCenterX = (screenW / 2f - camera.panX) / camera.scale
+        val worldCenterY = (screenH / 2f - camera.panY) / camera.scale
         val generated = IdeationTemplateFactory.createTemplate(type, worldCenterX, worldCenterY)
 
         val wasEmpty = state.board.strokes.isEmpty() &&
@@ -2239,17 +2221,17 @@ class WhiteboardViewModel(
         val fitScale = if (wasEmpty && screenW < 980f) {
             (screenW * 0.90f / 980f).coerceIn(0.45f, 1.0f)
         } else {
-            state.scale
+            camera.scale
         }
-        val fitPanX = if (wasEmpty && fitScale != state.scale) {
+        val fitPanX = if (wasEmpty && fitScale != camera.scale) {
             screenW / 2f - worldCenterX * fitScale
         } else {
-            state.panX
+            camera.panX
         }
-        val fitPanY = if (wasEmpty && fitScale != state.scale) {
+        val fitPanY = if (wasEmpty && fitScale != camera.scale) {
             screenH / 2f - worldCenterY * fitScale
         } else {
-            state.panY
+            camera.panY
         }
 
         _uiState.update {
@@ -2260,9 +2242,6 @@ class WhiteboardViewModel(
                     textItems = b.textItems + generated.textItems
                 )
             }.copy(
-                scale = fitScale,
-                panX = fitPanX,
-                panY = fitPanY,
                 pendingStickyNoteColor = null,
                 pendingShapeType = null,
                 shouldAutoOpenTemplatePicker = false
@@ -2420,12 +2399,10 @@ class WhiteboardViewModel(
                 pendingShapeType = null,
                 pendingStickyNoteColor = null,
                 canUndo = false,
-                canRedo = false,
-                panX = 0f,
-                panY = 0f,
-                scale = 1.0f
+                canRedo = false
             )
         }
+        resetZoom()
     }
 
     fun openBoardAndFocusNote(boardId: String, noteId: String) {
@@ -2435,19 +2412,20 @@ class WhiteboardViewModel(
         val targetNote = targetBoard.stickyNotes.find { it.id == noteId }
         undoStack.clear()
         redoStack.clear()
+        val currentCamera = _cameraState.value
+        val focusScale = 1.0f
+        val nextPanX: Float
+        val nextPanY: Float
+        if (targetNote != null) {
+            val centerX = targetNote.x + targetNote.width * 0.5f
+            val centerY = targetNote.y + targetNote.height * 0.5f
+            nextPanX = currentCamera.viewportWidthPx * 0.5f - centerX * focusScale
+            nextPanY = currentCamera.viewportHeightPx * 0.5f - centerY * focusScale
+        } else {
+            nextPanX = 0f
+            nextPanY = 0f
+        }
         _uiState.update { state ->
-            val focusScale = 1.0f
-            val nextPanX: Float
-            val nextPanY: Float
-            if (targetNote != null) {
-                val centerX = targetNote.x + targetNote.width * 0.5f
-                val centerY = targetNote.y + targetNote.height * 0.5f
-                nextPanX = state.viewportWidthPx * 0.5f - centerX * focusScale
-                nextPanY = state.viewportHeightPx * 0.5f - centerY * focusScale
-            } else {
-                nextPanX = 0f
-                nextPanY = 0f
-            }
             state.copy(
                 board = targetBoard,
                 isViewingBoardsHome = false,
@@ -2462,12 +2440,10 @@ class WhiteboardViewModel(
                 pendingShapeType = null,
                 pendingStickyNoteColor = null,
                 canUndo = false,
-                canRedo = false,
-                panX = nextPanX,
-                panY = nextPanY,
-                scale = focusScale
+                canRedo = false
             )
         }
+        _cameraState.update { it.copy(scale = focusScale, panX = nextPanX, panY = nextPanY) }
     }
 
     fun closeBoardToHome() {
@@ -2526,12 +2502,10 @@ class WhiteboardViewModel(
                 pendingStickyNoteColor = if (openImmediately) null else it.pendingStickyNoteColor,
                 canUndo = if (openImmediately) false else it.canUndo,
                 canRedo = if (openImmediately) false else it.canRedo,
-                panX = if (openImmediately) 0f else it.panX,
-                panY = if (openImmediately) 0f else it.panY,
-                scale = if (openImmediately) 1.0f else it.scale,
                 shouldAutoOpenTemplatePicker = if (openImmediately) it.showTemplatesOnNewBoard else it.shouldAutoOpenTemplatePicker
             )
         }
+        if (openImmediately) resetZoom()
     }
 
     fun switchBoard(boardId: String) {
@@ -2630,7 +2604,7 @@ class WhiteboardViewModel(
     }
 
     fun resetZoom() {
-        _uiState.update { it.copy(scale = 1.0f, panX = 0f, panY = 0f) }
+        _cameraState.value = _cameraState.value.copy(scale = 1.0f, panX = 0f, panY = 0f)
     }
 
     fun setGridType(grid: CanvasGridType) {
