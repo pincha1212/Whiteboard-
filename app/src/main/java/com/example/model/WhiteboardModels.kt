@@ -67,8 +67,7 @@ enum class StrokeStyle(
 
     NEON_GLOW("Neón / Resplandor", StrokeCategory.TEXTURE_LIGHT),
     DYNAMIC_GRADIENT("Degradado dinámico", StrokeCategory.TEXTURE_LIGHT),
-    CHALK_TEXTURE("Tiza / Acuarela", StrokeCategory.TEXTURE_LIGHT),
-    ANIMATED_PULSE("Línea animada", StrokeCategory.TEXTURE_LIGHT)
+    CHALK_TEXTURE("Tiza / Acuarela", StrokeCategory.TEXTURE_LIGHT)
 }
 
 enum class CanvasGridType(val title: String) {
