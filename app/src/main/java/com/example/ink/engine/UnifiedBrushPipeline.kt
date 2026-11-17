@@ -165,6 +165,8 @@ object UnifiedBrushPipeline {
         viewportH: Float = 0f
     ) {
         if (stroke.points.size < 2) return
+        val safeScale = scale.coerceAtLeast(0.05f)
+        val worldWidth = stroke.width.coerceAtLeast(1.5f)
         if (viewportW > 0f && viewportH > 0f) {
             val bounds = stroke.geometryMetrics
             if (bounds.hasPoints) {
@@ -178,8 +180,6 @@ object UnifiedBrushPipeline {
                 }
             }
         }
-        val safeScale = scale.coerceAtLeast(0.05f)
-        val worldWidth = stroke.width.coerceAtLeast(1.5f)
         val effectiveBrushType = if (stroke.isHighlighter) StrokeBrushType.HIGHLIGHTER else stroke.brushType
         val engine = BrushEngineRegistry.forBrushType(effectiveBrushType, stroke.strokeStyle)
         val colorInt = safeParseColor(stroke.colorHex, Color.BLACK)
