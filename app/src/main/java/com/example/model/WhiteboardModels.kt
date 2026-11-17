@@ -127,60 +127,59 @@ enum class TemplateType(
     val badgeText: String? = null
 ) {
     BRAINSTORM_CLUSTER(
-        title = "Lluvia de Ideas Libre (Cluster)",
+        title = "Lluvia de Ideas (Cluster)",
         iconName = "lightbulb",
-        description = "Nodo central + 6 notas satélite radiales con botón '+' rápido",
+        description = "Nodo central editable, conectores y 5 notas radiales independientes",
         category = TemplateCategory.BRAINSTORMING,
         isRecommended = true,
-        badgeText = "Nueva"
+        badgeText = "Ligera"
     ),
     IMPACT_EFFORT(
         title = "Matriz Impacto / Esfuerzo",
         iconName = "grid_view",
-        description = "Plano 2×2 (Hacer ya, Planificar, Delegar, Descartar) con ejes fijos",
+        description = "Ejes vectoriales 2×2, encabezados y 4 notas editables",
         category = TemplateCategory.STRATEGY,
         isRecommended = true
     ),
     CONCEPT_MAP(
-        title = "Mapa Conceptual / Jerárquico",
+        title = "Mapa Mental / Conceptual",
         iconName = "account_tree",
-        description = "Árbol de 3 niveles con conectores ortogonales y ramas colapsables",
+        description = "Nodos jerárquicos, flechas conectoras y notas editables",
         category = TemplateCategory.LEARNING,
         isRecommended = true
     ),
     USER_FLOW(
-        title = "Flujo de Usuario / Proceso",
+        title = "Flujo de Proceso",
         iconName = "schema",
-        description = "Carriles horizontales (Swimlanes) con inicio, pasos y decisión",
+        description = "Nodos de inicio, acción, decisión y conectores editables",
         category = TemplateCategory.PROCESS,
         isRecommended = true
     ),
     RETROSPECTIVE(
-        title = "Retrospectiva / Kanban Rápido",
+        title = "Retrospectiva de Equipo",
         iconName = "history_edu",
-        description = "3 columnas auto-expansibles: Qué funcionó, Qué mejorar, Próximos pasos",
+        description = "3 columnas con divisores y notas adhesivas independientes",
         category = TemplateCategory.PLANNING,
         isRecommended = true
     ),
     KANBAN(
-        title = "Kanban Rápido",
+        title = "Tablero Kanban",
         iconName = "view_kanban",
-        description = "3 columnas auto-expansibles: Por hacer, Haciendo, Hecho",
+        description = "Columnas Por hacer, Haciendo y Hecho con tarjetas movibles",
         category = TemplateCategory.PLANNING,
         isRecommended = true
     ),
     ISHIKAWA(
-        title = "Diagrama de Ishikawa (Causa-Efecto)",
+        title = "Diagrama de Ishikawa",
         iconName = "polyline",
-        description = "Espina central al Problema con 6 espinas fijas y cajas editables",
+        description = "Espina central, ramas de causa y notas editables",
         category = TemplateCategory.PROBLEM_SOLVING,
-        isRecommended = true,
-        badgeText = "Nueva"
+        isRecommended = true
     ),
     SWOT(
         title = "Análisis DAFO / FODA",
         iconName = "grid_view",
-        description = "Fortalezas, Oportunidades, Debilidades y Amenazas",
+        description = "Cuadrantes de Fortalezas, Oportunidades, Debilidades y Amenazas",
         category = TemplateCategory.STRATEGY,
         isRecommended = false
     )

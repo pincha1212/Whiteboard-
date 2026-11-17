@@ -8,7 +8,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.LocalFirstWorkspaceStore
 import com.example.notes.ui.NotesMasterDetailScreen
 import com.example.notes.viewmodel.AppActiveWorkspace
@@ -46,13 +46,18 @@ class MainActivity : ComponentActivity() {
     private val whiteboardViewModel: WhiteboardViewModel by viewModels { workspaceFactory }
     private val notesViewModel: NotesViewModel by viewModels { workspaceFactory }
 
+    override fun onPause() {
+        super.onPause()
+        whiteboardViewModel.commitWorkspaceSync()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             WhiteboardTheme {
-                val whiteboardState by whiteboardViewModel.uiState.collectAsState()
-                val notesState by notesViewModel.uiState.collectAsState()
+                val whiteboardState by whiteboardViewModel.uiState.collectAsStateWithLifecycle()
+                val notesState by notesViewModel.uiState.collectAsStateWithLifecycle()
                 var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
 
                 BackHandler(

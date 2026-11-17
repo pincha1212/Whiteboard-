@@ -30,7 +30,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FullscreenExit
@@ -75,7 +74,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ink.IdeationTemplateFactory
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StrokeStabilizer
 import com.example.model.LineCapStyle
@@ -626,8 +624,31 @@ fun WhiteboardCanvasScreen(
             )
 
             val isDarkBoard = state.board.colorTheme.isDark
+            val safeScale = if (state.scale > 0.001f) state.scale else 1.0f
+            val visibleWorldLeft = -state.panX / safeScale
+            val visibleWorldTop = -state.panY / safeScale
+            val visibleWorldRight = (size.width - state.panX) / safeScale
+            val visibleWorldBottom = (size.height - state.panY) / safeScale
+
             state.board.strokes.forEach { stroke ->
                 val isSelected = stroke.id == state.selectedStrokeId || state.selectedStrokeIds.contains(stroke.id)
+                if (stroke.points.isNotEmpty()) {
+                    var minX = Float.MAX_VALUE
+                    var maxX = -Float.MAX_VALUE
+                    var minY = Float.MAX_VALUE
+                    var maxY = -Float.MAX_VALUE
+                    for (p in stroke.points) {
+                        if (p.x < minX) minX = p.x
+                        if (p.x > maxX) maxX = p.x
+                        if (p.y < minY) minY = p.y
+                        if (p.y > maxY) maxY = p.y
+                    }
+                    val pad = stroke.width * 1.5f + 16f
+                    if (maxX + pad < visibleWorldLeft || minX - pad > visibleWorldRight ||
+                        maxY + pad < visibleWorldTop || minY - pad > visibleWorldBottom) {
+                        return@forEach
+                    }
+                }
                 drawStrokeVector(
                     stroke = stroke,
                     panX = state.panX,
@@ -823,11 +844,11 @@ fun WhiteboardCanvasScreen(
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = cardBg,
-                    shadowElevation = 2.dp,
+                    shadowElevation = 0.dp,
                     modifier = Modifier
                         .offset { IntOffset(sx, sy) }
                         .width(widthDp)
-                        .border(1.5.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
+                        .border(1.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
                         .testTag("editable_text_item_${tItem.id}")
                 ) {
                     BasicTextField(
@@ -850,102 +871,19 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Render Interactive Template Overlays (+ branch on cluster center, collapse chip on concept nodes, + note in columns, edit label)
-        state.board.shapes.forEach { shape ->
-            if (shape.isHiddenByCollapse) return@forEach
-            val shapeScreenRight = ((shape.x + shape.width) * state.scale + state.panX).roundToInt()
-            val shapeScreenCenterX = ((shape.x + shape.width / 2f) * state.scale + state.panX).roundToInt()
-            val shapeScreenTop = (shape.y * state.scale + state.panY).roundToInt()
-            val shapeScreenBottom = ((shape.y + shape.height) * state.scale + state.panY).roundToInt()
-
-            if (shape.templateRole == "CLUSTER_CENTER") {
-                val offsetPx = with(density) { 18.dp.roundToPx() }
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    shadowElevation = 4.dp,
-                    modifier = Modifier
-                        .offset { IntOffset(shapeScreenRight - offsetPx, shapeScreenBottom - offsetPx * 2) }
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable { viewModel.addClusterBranch(shape.id) }
-                        .testTag("cluster_add_branch_${shape.id}")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Agregar rama al cluster",
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-            }
-
-            if (shape.templateRole == "CONCEPT_NODE") {
-                val hasChildren = state.board.shapes.any { it.parentId == shape.id && it.templateRole != "CONCEPT_CONNECTOR" } ||
-                    state.board.stickyNotes.any { it.parentId == shape.id }
-                if (hasChildren) {
-                    val hiddenCount = if (shape.isCollapsed) IdeationTemplateFactory.countHiddenDescendants(state.board, shape.id) else 0
-                    val badgeHalfW = with(density) { 18.dp.roundToPx() }
-                    val badgeHalfH = with(density) { 12.dp.roundToPx() }
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (shape.isCollapsed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                        contentColor = if (shape.isCollapsed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                        shadowElevation = 3.dp,
-                        modifier = Modifier
-                            .offset { IntOffset(shapeScreenCenterX - badgeHalfW, shapeScreenBottom - badgeHalfH) }
-                            .heightIn(min = 24.dp)
-                            .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { viewModel.toggleConceptBranchCollapse(shape.id) }
-                            .testTag("concept_toggle_collapse_${shape.id}")
-                    ) {
-                        Text(
-                            text = if (shape.isCollapsed) "+$hiddenCount" else "−",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            if (shape.templateRole == "COLUMN_CONTAINER") {
-                val btnMargin = with(density) { 38.dp.roundToPx() }
-                val topPad = with(density) { 8.dp.roundToPx() }
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.primary,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier
-                        .offset { IntOffset(shapeScreenRight - btnMargin, shapeScreenTop + topPad) }
-                        .size(28.dp)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                        .clip(CircleShape)
-                        .clickable { viewModel.addNoteToColumn(shape.id) }
-                        .testTag("column_add_note_${shape.id}")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Agregar nota a columna",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
-            if (shape.id == state.selectedShapeId && shape.label.isNotBlank() && !shape.shapeType.isLineLike) {
+        // Edit label button for the currently selected non-line shape (single global affordance)
+        state.selectedShapeId?.let { selId ->
+            val shape = state.board.shapes.find { it.id == selId && !it.isHiddenByCollapse && !it.shapeType.isLineLike }
+            if (shape != null && !isPanOnlyMode) {
+                val shapeScreenCenterX = ((shape.x + shape.width / 2f) * state.scale + state.panX).roundToInt()
+                val shapeScreenTop = (shape.y * state.scale + state.panY).roundToInt()
                 val editHalfW = with(density) { 18.dp.roundToPx() }
                 val editTop = with(density) { 32.dp.roundToPx() }
                 Surface(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shadowElevation = 3.dp,
+                    shadowElevation = 2.dp,
                     modifier = Modifier
                         .offset { IntOffset(shapeScreenCenterX - editHalfW, shapeScreenTop - editTop) }
                         .size(32.dp)
@@ -967,9 +905,26 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Render Sticky Notes (unselected first, selected last so resize handles sit cleanly on top)
+        // Render Sticky Notes (viewport-culled for unselected notes; selected rendered last for handle z-order)
+        val safeScaleForNotes = if (state.scale > 0.001f) state.scale else 1.0f
+        val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
+        val noteCullMarginWorld = 180f / safeScaleForNotes
+        val visLeftW = -state.panX / safeScaleForNotes - noteCullMarginWorld
+        val visTopW = -state.panY / safeScaleForNotes - noteCullMarginWorld
+        val visRightW = (screenWidthPx - state.panX) / safeScaleForNotes + noteCullMarginWorld
+        val visBottomW = (screenHeightPx - state.panY) / safeScaleForNotes + noteCullMarginWorld
+
         val orderedNotes = state.board.stickyNotes
-            .filter { !it.isHiddenByCollapse }
+            .filter { note ->
+                if (note.isHiddenByCollapse) return@filter false
+                val isSelected = note.id == state.selectedNoteId || state.selectedNoteIds.contains(note.id)
+                if (isSelected || !hasViewport) return@filter true
+                val pad = kotlin.math.max(note.width, note.height) * 0.35f
+                (note.x + note.width + pad) >= visLeftW &&
+                    (note.x - pad) <= visRightW &&
+                    (note.y + note.height + pad) >= visTopW &&
+                    (note.y - pad) <= visBottomW
+            }
             .sortedBy { n ->
                 if (n.id == state.selectedNoteId || state.selectedNoteIds.contains(n.id)) 1 else 0
             }

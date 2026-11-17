@@ -828,88 +828,60 @@ class ExampleRobolectricTest {
   }
 
   @Test
-  fun `test all six ideation templates generate interactive structures and export cleanly`() {
+  fun `test all ideation templates generate 8 to 12 unlocked native elements and export cleanly`() {
     val viewModel = WhiteboardViewModel()
 
-    // 1. Lluvia de Ideas Libre (Cluster): central node + 6 satellite notes + quick '+' branch expansion
-    viewModel.applyTemplate(TemplateType.BRAINSTORM_CLUSTER, 1080f, 1920f)
-    val clusterCenter = viewModel.uiState.value.board.shapes.find { it.templateRole == "CLUSTER_CENTER" }
-    assertNotNull(clusterCenter)
-    assertEquals(6, viewModel.uiState.value.board.stickyNotes.size)
-    assertEquals(6, viewModel.uiState.value.board.shapes.count { it.templateRole == "CLUSTER_SPOKE" })
+    // Every built-in template must create strictly 8..12 independent unlocked native elements
+    TemplateType.values().forEach { tmpl ->
+      viewModel.clearBoard()
+      viewModel.applyTemplate(tmpl, 1080f, 1920f)
+      val board = viewModel.uiState.value.board
+      val totalElements = board.shapes.size + board.stickyNotes.size + board.textItems.size
+      assertTrue(
+        "Template $tmpl must generate 8..12 native elements, got $totalElements",
+        totalElements in 8..12
+      )
+      assertTrue("Template $tmpl must not create TextItem overlays", board.textItems.isEmpty())
+      assertTrue("All shapes in $tmpl must be unlocked", board.shapes.none { it.isLocked })
+      assertTrue("All sticky notes in $tmpl must be unlocked", board.stickyNotes.none { it.isLocked })
+      assertTrue("No rigid templateRole should remain in $tmpl", board.shapes.all { it.templateRole == null })
+    }
 
-    viewModel.addClusterBranch(clusterCenter!!.id)
-    assertEquals(7, viewModel.uiState.value.board.stickyNotes.size)
-    assertEquals(7, viewModel.uiState.value.board.shapes.count { it.templateRole == "CLUSTER_SPOKE" })
-
-    // 2. Matriz Impacto / Esfuerzo: 4 locked quadrants + 2 locked axes + locked axis labels + 4 priority notes
+    // Verify full 100% editability and erasability on an applied template (e.g. IMPACT_EFFORT)
     viewModel.clearBoard()
     viewModel.applyTemplate(TemplateType.IMPACT_EFFORT, 1080f, 1920f)
     val matrixBoard = viewModel.uiState.value.board
-    assertEquals(4, matrixBoard.shapes.count { it.templateRole == "MATRIX_QUADRANT" && it.isLocked })
-    assertEquals(2, matrixBoard.shapes.count { it.templateRole == "MATRIX_AXIS" && it.isLocked })
-    assertTrue(matrixBoard.textItems.count { it.isLocked } >= 8)
+    assertEquals(2, matrixBoard.shapes.count { it.shapeType == ShapeType.LINE })
+    assertEquals(4, matrixBoard.shapes.count { it.shapeType == ShapeType.ROUNDED_RECT })
     assertEquals(4, matrixBoard.stickyNotes.size)
-    // Locked axes/quadrants must survive object eraser hits
-    val firstQuad = matrixBoard.shapes.first { it.templateRole == "MATRIX_QUADRANT" }
-    assertFalse(viewModel.eraseObjectAt(firstQuad.x + 20f, firstQuad.y + 20f, 30f))
 
-    // 3. Mapa Conceptual / Jerárquico: 3-level tree, 90-degree orthogonal connectors, branch collapsing
-    viewModel.clearBoard()
-    viewModel.applyTemplate(TemplateType.CONCEPT_MAP, 1080f, 1920f)
-    val conceptNodes = viewModel.uiState.value.board.shapes.filter { it.templateRole == "CONCEPT_NODE" }
-    assertEquals(4, conceptNodes.size) // 1 root + 3 subtopics
-    assertEquals(6, viewModel.uiState.value.board.stickyNotes.size) // 6 level-3 details
-    val connectors = viewModel.uiState.value.board.shapes.filter { it.templateRole == "CONCEPT_CONNECTOR" }
-    assertEquals(9, connectors.size)
-    assertTrue(connectors.all { it.vertices.size == 4 }) // orthogonal right-angle 4-point elbows
+    // Individual node label editing, color change, move, and object-eraser deletion must work cleanly
+    val headerShape = matrixBoard.shapes.first { it.shapeType == ShapeType.ROUNDED_RECT }
+    viewModel.updateShapeLabel(headerShape.id, "Prioridad Alta")
+    assertEquals("Prioridad Alta", viewModel.uiState.value.board.shapes.first { it.id == headerShape.id }.label)
 
-    val rootNode = conceptNodes.first { it.parentId == null }
-    viewModel.toggleConceptBranchCollapse(rootNode.id)
-    assertTrue(viewModel.uiState.value.board.stickyNotes.all { it.isHiddenByCollapse })
-    assertTrue(viewModel.uiState.value.board.shapes.filter { it.id != rootNode.id }.all { it.isHiddenByCollapse })
+    viewModel.selectShape(headerShape.id)
+    viewModel.updateSelectedShape(strokeColor = "#DC2626")
+    assertEquals("#DC2626", viewModel.uiState.value.board.shapes.first { it.id == headerShape.id }.strokeColorHex)
 
-    viewModel.toggleConceptBranchCollapse(rootNode.id)
-    assertTrue(viewModel.uiState.value.board.stickyNotes.none { it.isHiddenByCollapse })
+    assertTrue(
+      "Unlocked template shapes must be erasable via normal object eraser",
+      viewModel.eraseObjectAt(headerShape.x + 20f, headerShape.y + 20f, 30f)
+    )
+    assertFalse(viewModel.uiState.value.board.shapes.any { it.id == headerShape.id })
 
-    // 4. Flujo de Usuario / Proceso: 3 locked swimlanes + connected Start/Process/Decision shapes
-    viewModel.clearBoard()
-    viewModel.applyTemplate(TemplateType.USER_FLOW, 1080f, 1920f)
-    val flowBoard = viewModel.uiState.value.board
-    assertEquals(3, flowBoard.shapes.count { it.templateRole == "SWIMLANE" && it.isLocked })
-    assertTrue(flowBoard.shapes.any { it.shapeType == ShapeType.DIAMOND && it.label == "¿Válido?" })
-    assertTrue(flowBoard.shapes.count { it.shapeType == ShapeType.LINE } >= 5)
-
-    // 5. Retrospectiva / Kanban Rápido: 3 vertical columns that grow downward as notes stack
-    viewModel.clearBoard()
-    viewModel.applyTemplate(TemplateType.RETROSPECTIVE, 1080f, 1920f)
-    val col0 = viewModel.uiState.value.board.shapes.first { it.templateRole == "COLUMN_CONTAINER" }
-    val initialHeight = col0.height
-    repeat(3) { viewModel.addNoteToColumn(col0.id) }
-    val expandedCol0 = viewModel.uiState.value.board.shapes.first { it.id == col0.id }
-    assertTrue("Column height should grow downward as notes stack", expandedCol0.height > initialHeight)
-
-    // 6. Diagrama de Ishikawa (Causa-Efecto): locked horizontal spine + 6 locked bones + editable cause boxes
+    // Verify sticky note editing and snapshot serialization + PNG bitmap export on ISHIKAWA
     viewModel.clearBoard()
     viewModel.applyTemplate(TemplateType.ISHIKAWA, 1080f, 1920f)
-    val ishikawaBoard = viewModel.uiState.value.board
-    assertEquals(1, ishikawaBoard.shapes.count { it.templateRole == "ISHIKAWA_SPINE" && it.isLocked })
-    assertEquals(6, ishikawaBoard.shapes.count { it.templateRole == "ISHIKAWA_BONE" && it.isLocked })
-    val causeBoxes = ishikawaBoard.textItems.filter { it.isEditableCard && !it.isLocked }
-    assertEquals(6, causeBoxes.size)
-    assertTrue(causeBoxes.any { it.text == "Método" })
-    assertTrue(causeBoxes.any { it.text == "Herramientas" })
-    assertTrue(causeBoxes.any { it.text == "Tiempo" })
-    assertTrue(causeBoxes.any { it.text == "Entorno" })
+    val firstNote = viewModel.uiState.value.board.stickyNotes.first()
+    viewModel.updateStickyNoteTitle(firstNote.id, "Método actualizado")
+    assertEquals("Método actualizado", viewModel.uiState.value.board.stickyNotes.first { it.id == firstNote.id }.title)
 
-    viewModel.updateTextItem(causeBoxes.first().id, "Método actualizado")
-    assertEquals("Método actualizado", viewModel.uiState.value.board.textItems.first { it.id == causeBoxes.first().id }.text)
-
-    // Verify Snapshot serialization round-trip and PNG bitmap export
     val json = BoardSnapshotSerializer.serializeBoard(viewModel.uiState.value.board)
     val restored = BoardSnapshotSerializer.deserializeIntoBoard(json, viewModel.uiState.value.board)
     assertNotNull(restored)
-    assertEquals(6, restored!!.textItems.count { it.isEditableCard && !it.isLocked })
+    assertEquals(4, restored!!.stickyNotes.size)
+    assertEquals(6, restored.shapes.size)
     val bmp = BoardExportService.renderBoardToBitmap(restored, includeBackground = true, includeGrid = false, maxDimensionPx = 900)
     assertTrue(bmp.width > 0 && bmp.height > 0)
   }

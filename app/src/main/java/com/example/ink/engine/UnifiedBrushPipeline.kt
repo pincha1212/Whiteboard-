@@ -188,6 +188,11 @@ object UnifiedBrushPipeline {
         }
     }
 
+    private val cachedLabelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+
     fun renderShape(
         canvas: Canvas,
         shape: ShapeItem,
@@ -204,6 +209,7 @@ object UnifiedBrushPipeline {
     ) {
         if (shape.isHiddenByCollapse) return
 
+        val safeScale = scale.coerceAtLeast(0.05f)
         val x = shape.x * scale + panX
         val y = shape.y * scale + panY
         val w = shape.width * scale
@@ -229,7 +235,7 @@ object UnifiedBrushPipeline {
 
         val strokeColorInt = safeParseColor(shape.strokeColorHex, Color.parseColor("#2563EB"))
         val fillColorInt = safeParseColor(shape.fillColorHex, Color.parseColor("#DBEAFE"))
-        val scaledWidth = (shape.strokeWidth * scale).coerceAtLeast(1.5f)
+        val localStrokeWidth = max(shape.strokeWidth, 1.5f / safeScale)
         val effectiveCap = when (shape.shapeType) {
             ShapeType.ARROW -> LineCapStyle.END_ARROW
             ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
@@ -245,7 +251,8 @@ object UnifiedBrushPipeline {
             canvas.drawPath(fillPath, fillPaint)
         }
 
-        // Route shape outline through unified Stage 1 -> Stage 2 -> Stage 3 pipeline (with 60fps node cache)
+        // Route shape outline through unified Stage 1 -> Stage 2 -> Stage 3 pipeline
+        // Cached in shape-local world coordinates (0f, 0f at scale = 1f) so pan, zoom, and move keep 100% cache hits
         val engine = BrushEngineRegistry.forBrushType(shape.brushType, shape.strokeStyle)
         val effectiveHandDrawn = when {
             shape.strokeStyle == StrokeStyle.SKETCH -> max(handDrawnFactor, 0.48f)
@@ -253,9 +260,9 @@ object UnifiedBrushPipeline {
             else -> handDrawnFactor
         }
 
-        val config = BrushConfig(
+        val localConfig = BrushConfig(
             color = strokeColorInt,
-            strokeWidth = scaledWidth,
+            strokeWidth = localStrokeWidth,
             alpha = shape.opacity.coerceIn(0.15f, 1.0f),
             handDrawnFactor = effectiveHandDrawn,
             isDarkBackground = isDarkBoard,
@@ -266,44 +273,53 @@ object UnifiedBrushPipeline {
             seed = shape.id.hashCode()
         )
 
-        val nodes: List<BrushNode> = if (shape.strokeStyle == StrokeStyle.ANIMATED_PULSE) {
-            val outlinePath = ShapeGenerator.fromShapeItem(shape, 0f, 0f, scale)
-            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, config.strokeStyle, config.strokeWidth, effectiveCap, animPhase)
-            PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
+        val worldNodes: List<BrushNode> = if (shape.strokeStyle == StrokeStyle.ANIMATED_PULSE) {
+            val outlinePath = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
+            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, animPhase)
+            PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
         } else {
-            val cacheKey = "SH:${shape.id}:${shape.x}:${shape.y}:${shape.width}:${shape.height}:${shape.vertices.hashCode()}:${(scale * 1000).roundToInt()}:${shape.strokeWidth}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            var relVertHash = 1
+            for (v in shape.vertices) {
+                relVertHash = 31 * relVertHash + (v.x - shape.x).toBits()
+                relVertHash = 31 * relVertHash + (v.y - shape.y).toBits()
+            }
+            val cacheKey = "SHW:${shape.id}:${shape.shapeType.name}:${shape.width.toBits()}:${shape.height.toBits()}:$relVertHash:${shape.strokeWidth.toBits()}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
             nodeCache.get(cacheKey) ?: run {
-                val outlinePath = ShapeGenerator.fromShapeItem(shape, 0f, 0f, scale)
-                val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, config.strokeStyle, config.strokeWidth, effectiveCap, 0f)
-                val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
+                val outlinePath = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
+                val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, 0f)
+                val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
                 if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
                 built
             }
         }
-        if (nodes.isNotEmpty()) {
+        if (worldNodes.isNotEmpty()) {
             canvas.save()
-            canvas.translate(panX, panY)
+            canvas.translate(x, y)
+            canvas.scale(scale, scale)
             try {
-                renderNodesWithDecorators(canvas, nodes, engine, config)
+                renderNodesWithDecorators(canvas, worldNodes, engine, localConfig)
             } finally {
                 canvas.restore()
             }
         }
 
         if (drawLabel && shape.label.isNotBlank() && !shape.shapeType.isLineLike) {
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = when {
-                    shape.isFilled -> Color.parseColor("#0F172A")
-                    isDarkBoard -> Color.WHITE
-                    else -> strokeColorInt
-                }
-                textSize = (15.5f * scale).coerceIn(10f, 34f)
-                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                textAlign = Paint.Align.CENTER
+            cachedLabelPaint.color = when {
+                shape.isFilled -> Color.parseColor("#0F172A")
+                isDarkBoard -> Color.WHITE
+                else -> strokeColorInt
             }
-            val fm = textPaint.fontMetrics
+            var targetSize = (15.5f * scale).coerceIn(9f, 34f)
+            cachedLabelPaint.textSize = targetSize
+            val maxLabelWidth = (w * 0.88f).coerceAtLeast(24f)
+            val measuredW = cachedLabelPaint.measureText(shape.label)
+            if (measuredW > maxLabelWidth && measuredW > 1f) {
+                targetSize = (targetSize * (maxLabelWidth / measuredW)).coerceAtLeast(7f)
+                cachedLabelPaint.textSize = targetSize
+            }
+            val fm = cachedLabelPaint.fontMetrics
             val textY = cy - (fm.ascent + fm.descent) / 2f
-            canvas.drawText(shape.label, cx, textY, textPaint)
+            canvas.drawText(shape.label, cx, textY, cachedLabelPaint)
         }
 
         canvas.restore()

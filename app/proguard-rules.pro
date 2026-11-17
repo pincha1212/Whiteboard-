@@ -19,3 +19,18 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Compose runtime rules
+-keepattributes *Annotation*
+-keepclassmembers class * {
+    @androidx.compose.runtime.Composable *;
+}
+
+# Local-First Workspace and Notes model classes (prevent JSON field mangling)
+-keepclassmembers class com.example.model.** { *; }
+-keepclassmembers class com.example.notes.model.** { *; }
+-keepclassmembers class com.example.data.** { *; }
+
+# Coroutines and StateFlow
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}

@@ -902,7 +902,7 @@ class WhiteboardViewModel(
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                b.copy(stickyNotes = updated)
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
@@ -939,7 +939,7 @@ class WhiteboardViewModel(
         if (!modified) return
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                b.copy(stickyNotes = updated)
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
@@ -964,7 +964,7 @@ class WhiteboardViewModel(
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                b.copy(stickyNotes = updated)
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = saveSnapshot)
@@ -991,7 +991,7 @@ class WhiteboardViewModel(
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(b.copy(stickyNotes = updated))
+                b.copy(stickyNotes = updated)
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
@@ -1020,9 +1020,7 @@ class WhiteboardViewModel(
         _uiState.update { state ->
             val remainingNoteIds = state.selectedNoteIds - id
             state.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                    b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
-                )
+                b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
             }.copy(
                 selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
                 selectedNoteIds = remainingNoteIds
@@ -1036,9 +1034,7 @@ class WhiteboardViewModel(
         _uiState.update { state ->
             val remainingNoteIds = state.selectedNoteIds - id
             state.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                    b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
-                )
+                b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
             }.copy(
                 selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
                 selectedNoteIds = remainingNoteIds
@@ -1069,12 +1065,10 @@ class WhiteboardViewModel(
 
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                    b.copy(
-                        strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
-                        shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
-                        stickyNotes = b.stickyNotes.filter { n -> !noteIds.contains(n.id) }
-                    )
+                b.copy(
+                    strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
+                    shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
+                    stickyNotes = b.stickyNotes.filter { n -> !noteIds.contains(n.id) }
                 )
             }.copy(
                 selectedStrokeId = null,
@@ -1142,9 +1136,7 @@ class WhiteboardViewModel(
             )
             _uiState.update {
                 it.withUpdatedBoard { b ->
-                    IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                        b.copy(stickyNotes = b.stickyNotes + newNote)
-                    )
+                    b.copy(stickyNotes = b.stickyNotes + newNote)
                 }.copy(
                     pendingStickyNoteColor = null,
                     selectedNoteId = newNote.id
@@ -1539,9 +1531,7 @@ class WhiteboardViewModel(
         }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                    b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
-                )
+                b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
             }
         }
         if (noteIds.isNotEmpty()) {
@@ -2230,12 +2220,10 @@ class WhiteboardViewModel(
 
         _uiState.update {
             it.withUpdatedBoard { b ->
-                IdeationTemplateFactory.recalculateAutoExpandingColumns(
-                    b.copy(
-                        shapes = b.shapes + generated.shapes,
-                        stickyNotes = b.stickyNotes + generated.stickyNotes,
-                        textItems = b.textItems + generated.textItems
-                    )
+                b.copy(
+                    shapes = b.shapes + generated.shapes,
+                    stickyNotes = b.stickyNotes + generated.stickyNotes,
+                    textItems = b.textItems + generated.textItems
                 )
             }.copy(
                 scale = fitScale,
@@ -2245,30 +2233,6 @@ class WhiteboardViewModel(
                 pendingShapeType = null,
                 shouldAutoOpenTemplatePicker = false
             )
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-    }
-
-    fun addClusterBranch(clusterShapeId: String) {
-        saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b -> IdeationTemplateFactory.addClusterBranch(b, clusterShapeId) }
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-    }
-
-    fun toggleConceptBranchCollapse(nodeId: String) {
-        saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b -> IdeationTemplateFactory.toggleConceptBranchCollapse(b, nodeId) }
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-    }
-
-    fun addNoteToColumn(columnShapeId: String) {
-        saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b -> IdeationTemplateFactory.addNoteToColumn(b, columnShapeId) }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
@@ -2339,22 +2303,30 @@ class WhiteboardViewModel(
         val freshShapes = restored.shapes.map { sh ->
             sh.copy(
                 id = remap(sh.id)!!,
-                groupId = remap(sh.groupId),
-                parentId = remap(sh.parentId)
+                groupId = null,
+                parentId = null,
+                templateRole = null,
+                isLocked = false,
+                isCollapsed = false,
+                isHiddenByCollapse = false
             )
         }
         val freshNotes = restored.stickyNotes.map { n ->
             n.copy(
                 id = remap(n.id)!!,
-                groupId = remap(n.groupId),
-                parentId = remap(n.parentId)
+                groupId = null,
+                parentId = null,
+                isLocked = false,
+                isHiddenByCollapse = false
             )
         }
         val freshTexts = restored.textItems.map { t ->
             t.copy(
                 id = remap(t.id)!!,
-                groupId = remap(t.groupId),
-                parentId = remap(t.parentId)
+                groupId = null,
+                parentId = null,
+                isLocked = false,
+                isHiddenByCollapse = false
             )
         }
         val freshStrokes = restored.strokes.map { s ->
@@ -2714,6 +2686,9 @@ class WhiteboardViewModel(
 
     private fun saveUndoSnapshot() {
         val b = _uiState.value.board
+        if (undoStack.size >= 30) {
+            undoStack.removeAt(0)
+        }
         undoStack.add(BoardSnapshot(b.strokes, b.stickyNotes, b.shapes, b.textItems))
         redoStack.clear()
         _uiState.update { it.copy(canUndo = true, canRedo = false) }

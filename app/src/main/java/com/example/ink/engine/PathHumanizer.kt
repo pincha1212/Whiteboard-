@@ -59,7 +59,7 @@ class PathHumanizer(
     ): List<List<BrushNode>> = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs)
 
     companion object {
-        const val DEFAULT_STEP_PX = 4f
+        const val DEFAULT_STEP_PX = 2f
         const val DEFAULT_HAND_DRAWN_FACTOR = 0.25f
 
         /**
@@ -97,7 +97,7 @@ class PathHumanizer(
             timestampsMs: List<Long>? = null
         ): List<List<BrushNode>> {
             val clampedFactor = handDrawnFactor.coerceIn(0f, 1f)
-            val safeStep = stepPx.coerceAtLeast(1f)
+            val safeStep = stepPx.coerceIn(1f, 32f)
             val pm = PathMeasure(path, false)
             val pos = FloatArray(2)
             val tan = FloatArray(2)
@@ -126,14 +126,7 @@ class PathHumanizer(
                     hypot(startPos[0] - endPos[0], startPos[1] - endPos[1]) < 0.75f
                 val isClosed = pm.isClosed || hasLoopEndpoints
 
-                // Adaptive sampling step based on handDrawnFactor and length to avoid high-density oversampling on low-end hardware
-                val adaptiveStep = when {
-                    clampedFactor <= 0.05f -> (safeStep * 2.2f).coerceIn(8f, 18f)
-                    len > 800f -> (safeStep * 1.75f).coerceIn(6f, 14f)
-                    len > 300f -> (safeStep * 1.4f).coerceIn(5f, 10f)
-                    else -> safeStep.coerceIn(4f, 8f)
-                }
-                val rawSampleCount = ceil((len / adaptiveStep).toDouble()).toInt().coerceIn(2, 600)
+                val rawSampleCount = ceil((len / safeStep).toDouble()).toInt().coerceIn(2, 800)
                 val endIndex = rawSampleCount
 
                 // Keep wobble proportional on tiny detail fragments (dots/arrow wings) while expressive on real shapes.

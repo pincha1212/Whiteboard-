@@ -8,9 +8,19 @@ import com.example.notes.model.CanvasNoteData
 import com.example.notes.model.NoteFolder
 import com.example.notes.model.NoteItem
 import com.example.notes.model.NoteTag
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -26,6 +36,9 @@ data class WorkspaceDbState(
 /**
  * Single Source of Truth (local-first) store synchronizing Whiteboard boards/stickyNotes
  * and Notes notes/folders with zero data duplication and atomic local persistence.
+ *
+ * Optimized (v2.2.0): All flash storage I/O runs asynchronously on Dispatchers.IO with
+ * debouncing so that interactive drawing, note dragging, and edits never block the Main/UI thread.
  */
 class LocalFirstWorkspaceStore(
     private val storageFile: File? = null
@@ -33,11 +46,28 @@ class LocalFirstWorkspaceStore(
     private val lock = Any()
     private val listeners = CopyOnWriteArrayList<(WorkspaceDbState) -> Unit>()
 
+    private val storeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val persistRequestFlow = MutableSharedFlow<WorkspaceDbState>(
+        replay = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+
     private val _dbState = MutableStateFlow(loadFromDiskOrEmpty())
     val dbState: StateFlow<WorkspaceDbState> = _dbState.asStateFlow()
 
     val currentState: WorkspaceDbState
         get() = _dbState.value
+
+    init {
+        storeScope.launch {
+            @OptIn(FlowPreview::class)
+            persistRequestFlow
+                .debounce(250L)
+                .collectLatest { stateToSave ->
+                    persistToDisk(stateToSave)
+                }
+        }
+    }
 
     fun addListener(listener: (WorkspaceDbState) -> Unit) {
         listeners.add(listener)
@@ -64,8 +94,18 @@ class LocalFirstWorkspaceStore(
     }
 
     fun flushToDisk() {
+        val current = _dbState.value
+        storeScope.launch {
+            synchronized(lock) {
+                persistToDisk(current)
+            }
+        }
+    }
+
+    fun flushToDiskBlocking() {
+        val current = _dbState.value
         synchronized(lock) {
-            persistToDisk(_dbState.value)
+            persistToDisk(current)
         }
     }
 
@@ -460,7 +500,11 @@ class LocalFirstWorkspaceStore(
             }
             root.put("boards", boardsArr)
 
-            val tempFile = File(targetFile.parentFile, "${targetFile.name}.tmp")
+            val parentDir = targetFile.canonicalFile.parentFile
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs()
+            }
+            val tempFile = File(parentDir ?: targetFile.parentFile, "${targetFile.name}.tmp")
             tempFile.writeText(root.toString())
             if (!tempFile.renameTo(targetFile)) {
                 targetFile.writeText(root.toString())

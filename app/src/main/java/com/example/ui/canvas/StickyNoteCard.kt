@@ -253,19 +253,21 @@ fun StickyNoteView(
     val innerPadDp = with(density) { innerPadPx.toDp() }
 
     val (innerWidthWorld, innerHeightWorld) = StickyNoteGeometry.innerTextBoxWorld(note.width, note.height)
-    val innerWidthPx = camera.worldLengthToScreenPx(innerWidthWorld).coerceAtLeast(16f)
     val innerHeightPx = camera.worldLengthToScreenPx(innerHeightWorld).coerceAtLeast(16f)
 
-    val autoFitFontSp = remember(note.title, note.text, innerWidthPx, innerHeightPx, density.density, density.fontScale) {
+    // Compute auto-fit font size once in world dimensions (keyed on text/size, NOT camera scale)
+    // so pinch-to-zoom and pan incur zero TextMeasurer binary-search recomputations.
+    val baseWorldFontSp = remember(note.title, note.text, innerWidthWorld, innerHeightWorld, density.density, density.fontScale) {
         computeAutoFitStickyFontSizeSp(
             text = note.text,
-            innerWidthPx = innerWidthPx,
-            innerHeightPx = innerHeightPx,
+            innerWidthPx = innerWidthWorld.coerceAtLeast(16f),
+            innerHeightPx = innerHeightWorld.coerceAtLeast(16f),
             textMeasurer = textMeasurer,
             density = density,
             title = note.title
         )
     }
+    val autoFitFontSp = (baseWorldFontSp.value * scale).coerceIn(4f, 64f).sp
 
     // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
     // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
@@ -354,26 +356,28 @@ fun StickyNoteView(
                 .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + sideGutterDp * 2)
                 .align(Alignment.Center)
         ) {
-            // Actual Sticky Note Card (exact world-projected bounds inside gutter)
+            // Actual Sticky Note Card (exact world-projected bounds inside gutter; zero heavy shadow overdraw)
             Box(
                 modifier = Modifier
                     .padding(sideGutterDp)
                     .fillMaxSize()
-                    .onGloballyPositioned { coords ->
-                        cardCenterRoot = coords.boundsInRoot().center
-                    }
-                    .shadow(
-                        elevation = if (isSelected && !isPanOnlyMode) 12.dp else 5.dp,
-                        shape = RoundedCornerShape(cornerRadiusDp)
+                    .then(
+                        if (activeSelectionHandles) {
+                            Modifier.onGloballyPositioned { coords ->
+                                cardCenterRoot = coords.boundsInRoot().center
+                            }
+                        } else {
+                            Modifier
+                        }
                     )
                     .clip(RoundedCornerShape(cornerRadiusDp))
                     .background(noteBg)
                     .border(
-                        width = if (isSelected && !isPanOnlyMode) 2.dp else 0.5.dp,
+                        width = if (isSelected && !isPanOnlyMode) 2.dp else 1.dp,
                         color = if (isSelected && !isPanOnlyMode) {
                             MaterialTheme.colorScheme.primary
                         } else {
-                            Color.Black.copy(alpha = 0.14f)
+                            Color.Black.copy(alpha = 0.16f)
                         },
                         shape = RoundedCornerShape(cornerRadiusDp)
                     )
