@@ -103,6 +103,9 @@ class WhiteboardViewModel(
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
     private var isCommittingToStore = false
+    // Sticky-note transforms update the canvas every pointer event but project to the
+    // shared Notes/Whiteboard store only once, when the gesture finishes.
+    private var isStickyNoteTransformInProgress = false
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
@@ -163,6 +166,14 @@ class WhiteboardViewModel(
     }
 
     fun commitWorkspaceSync() {
+        if (isStickyNoteTransformInProgress) {
+            isStickyNoteTransformInProgress = false
+            commitBoardMutationToStore(
+                _uiState.value.board,
+                softDeleteMissingNotes = false,
+                persist = false
+            )
+        }
         store.flushToDisk()
     }
 
@@ -911,7 +922,9 @@ class WhiteboardViewModel(
                 b.copy(stickyNotes = updated)
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        if (!isStickyNoteTransformInProgress) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        }
     }
 
     fun resizeStickyNoteHandle(
@@ -948,7 +961,9 @@ class WhiteboardViewModel(
                 b.copy(stickyNotes = updated)
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        if (!isStickyNoteTransformInProgress) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        }
     }
 
     fun resizeStickyNoteBounds(
@@ -1018,7 +1033,13 @@ class WhiteboardViewModel(
             }
             state.withUpdatedBoard { b -> b.copy(stickyNotes = updated) }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = saveSnapshot)
+        if (!isStickyNoteTransformInProgress) {
+            commitBoardMutationToStore(
+                _uiState.value.board,
+                softDeleteMissingNotes = false,
+                persist = saveSnapshot
+            )
+        }
     }
 
     fun deleteStickyNote(id: String) {
@@ -1478,6 +1499,13 @@ class WhiteboardViewModel(
         saveUndoSnapshot()
     }
 
+    fun beginStickyNoteTransformSnapshot() {
+        // Recover a cancelled previous gesture before starting a new undo transaction.
+        if (isStickyNoteTransformInProgress) commitWorkspaceSync()
+        saveUndoSnapshot()
+        isStickyNoteTransformInProgress = true
+    }
+
     fun updateSelectedShape(
         strokeColor: String? = null,
         fillColor: String? = null,
@@ -1540,7 +1568,7 @@ class WhiteboardViewModel(
                 b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
             }
         }
-        if (noteIds.isNotEmpty()) {
+        if (noteIds.isNotEmpty() && !isStickyNoteTransformInProgress) {
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
         }
     }
