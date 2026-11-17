@@ -205,6 +205,15 @@ data class RulerState(
     val width: Float = 84f
 )
 
+internal data class StrokeGeometryMetrics(
+    val pointsHash: Int,
+    val minX: Float,
+    val minY: Float,
+    val maxX: Float,
+    val maxY: Float,
+    val hasPoints: Boolean
+)
+
 data class WhiteboardStroke(
     val id: String = UUID.randomUUID().toString(),
     val points: List<StrokePoint>,
@@ -217,7 +226,34 @@ data class WhiteboardStroke(
     val zIndex: Int = 0,
     val brushType: StrokeBrushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN,
     val opacity: Float = if (isHighlighter) StrokeBrushType.HIGHLIGHTER.defaultOpacity else 1.0f
-)
+) {
+    /**
+     * Lazily computed once per immutable stroke instance. New geometry must be created with copy(),
+     * which naturally receives a fresh summary instead of reusing stale bounds or hashes.
+     */
+    internal val geometryMetrics: StrokeGeometryMetrics by lazy {
+        var hash = 1
+        var minX = Float.POSITIVE_INFINITY
+        var minY = Float.POSITIVE_INFINITY
+        var maxX = Float.NEGATIVE_INFINITY
+        var maxY = Float.NEGATIVE_INFINITY
+        for (point in points) {
+            hash = 31 * hash + point.hashCode()
+            if (point.x < minX) minX = point.x
+            if (point.x > maxX) maxX = point.x
+            if (point.y < minY) minY = point.y
+            if (point.y > maxY) maxY = point.y
+        }
+        StrokeGeometryMetrics(
+            pointsHash = hash,
+            minX = minX,
+            minY = minY,
+            maxX = maxX,
+            maxY = maxY,
+            hasPoints = points.isNotEmpty()
+        )
+    }
+}
 
 data class StickyNote(
     val id: String = UUID.randomUUID().toString(),

@@ -632,20 +632,11 @@ fun WhiteboardCanvasScreen(
 
             state.board.strokes.forEach { stroke ->
                 val isSelected = stroke.id == state.selectedStrokeId || state.selectedStrokeIds.contains(stroke.id)
-                if (stroke.points.isNotEmpty()) {
-                    var minX = Float.MAX_VALUE
-                    var maxX = -Float.MAX_VALUE
-                    var minY = Float.MAX_VALUE
-                    var maxY = -Float.MAX_VALUE
-                    for (p in stroke.points) {
-                        if (p.x < minX) minX = p.x
-                        if (p.x > maxX) maxX = p.x
-                        if (p.y < minY) minY = p.y
-                        if (p.y > maxY) maxY = p.y
-                    }
+                val bounds = stroke.geometryMetrics
+                if (bounds.hasPoints) {
                     val pad = stroke.width * 1.5f + 16f
-                    if (maxX + pad < visibleWorldLeft || minX - pad > visibleWorldRight ||
-                        maxY + pad < visibleWorldTop || minY - pad > visibleWorldBottom) {
+                    if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
+                        bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom) {
                         return@forEach
                     }
                 }

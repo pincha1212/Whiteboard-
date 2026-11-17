@@ -34,7 +34,16 @@ import kotlin.math.sin
 object UnifiedBrushPipeline {
 
     const val DEFAULT_HAND_DRAWN_FACTOR = 0.24f
-    private val nodeCache = LruCache<String, List<BrushNode>>(256)
+    // Bound retained node data by an estimated byte budget instead of an entry count.
+    // A few very long strokes can otherwise consume much more memory than hundreds of small ones.
+    private val nodeCache = object : LruCache<String, List<BrushNode>>(4 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: List<BrushNode>): Int {
+            return (value.size.toLong() * 48L)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
+                .coerceAtLeast(1)
+        }
+    }
 
     fun clearNodeCache() {
         nodeCache.evictAll()
@@ -105,23 +114,16 @@ object UnifiedBrushPipeline {
     ) {
         if (stroke.points.size < 2) return
         if (viewportW > 0f && viewportH > 0f) {
-            var minX = Float.MAX_VALUE
-            var maxX = -Float.MAX_VALUE
-            var minY = Float.MAX_VALUE
-            var maxY = -Float.MAX_VALUE
-            for (pt in stroke.points) {
-                if (pt.x < minX) minX = pt.x
-                if (pt.x > maxX) maxX = pt.x
-                if (pt.y < minY) minY = pt.y
-                if (pt.y > maxY) maxY = pt.y
-            }
-            val sMinX = minX * scale + panX
-            val sMaxX = maxX * scale + panX
-            val sMinY = minY * scale + panY
-            val sMaxY = maxY * scale + panY
-            val margin = stroke.width * scale * 2f + 40f
-            if (sMaxX < -margin || sMinX > viewportW + margin || sMaxY < -margin || sMinY > viewportH + margin) {
-                return
+            val bounds = stroke.geometryMetrics
+            if (bounds.hasPoints) {
+                val sMinX = bounds.minX * scale + panX
+                val sMaxX = bounds.maxX * scale + panX
+                val sMinY = bounds.minY * scale + panY
+                val sMaxY = bounds.maxY * scale + panY
+                val margin = stroke.width * scale * 2f + 40f
+                if (sMaxX < -margin || sMinX > viewportW + margin || sMaxY < -margin || sMinY > viewportH + margin) {
+                    return
+                }
             }
         }
         val scaledWidth = (stroke.width * scale).coerceAtLeast(1.5f)
@@ -154,7 +156,7 @@ object UnifiedBrushPipeline {
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle, animPhase)
             PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
         } else {
-            val cacheKey = "S:${stroke.id}:${stroke.points.hashCode()}:${(scale * 1000).roundToInt()}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${(scale * 1000).roundToInt()}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
             nodeCache.get(cacheKey) ?: run {
                 val worldScaledPts = stroke.points.map { StrokePoint(it.x * scale, it.y * scale) }
                 val rawPath = ShapeGenerator.fromStrokePoints(worldScaledPts)

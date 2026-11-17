@@ -2,6 +2,8 @@ package com.example.data
 
 import com.example.model.StickyNote
 import com.example.model.WhiteboardBoard
+import com.example.model.WhiteboardStroke
+import com.example.model.StrokePoint
 import com.example.notes.model.CanvasNoteData
 import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteItem
@@ -387,6 +389,40 @@ class WorkspaceNoteProjectionTest {
         } finally {
             tempDir.deleteRecursively()
         }
+    }
+
+
+    @Test
+    fun strokeGeometryMetricsCacheBoundsAndHashForEachImmutableGeometry() {
+        val originalPoints = listOf(
+            StrokePoint(12f, -4f),
+            StrokePoint(38f, 20f),
+            StrokePoint(-8f, 7f)
+        )
+        val stroke = WhiteboardStroke(
+            id = "geometry-metrics",
+            points = originalPoints,
+            colorHex = "#111111",
+            width = 4f
+        )
+
+        val metrics = stroke.geometryMetrics
+        assertEquals(originalPoints.hashCode(), metrics.pointsHash)
+        assertEquals(-8f, metrics.minX, 0.001f)
+        assertEquals(-4f, metrics.minY, 0.001f)
+        assertEquals(38f, metrics.maxX, 0.001f)
+        assertEquals(20f, metrics.maxY, 0.001f)
+        assertTrue(metrics.hasPoints)
+
+        val moved = stroke.copy(
+            points = originalPoints.map { StrokePoint(it.x + 100f, it.y + 50f) }
+        )
+        val movedMetrics = moved.geometryMetrics
+        assertEquals(moved.points.hashCode(), movedMetrics.pointsHash)
+        assertEquals(92f, movedMetrics.minX, 0.001f)
+        assertEquals(46f, movedMetrics.minY, 0.001f)
+        assertEquals(138f, movedMetrics.maxX, 0.001f)
+        assertEquals(70f, movedMetrics.maxY, 0.001f)
     }
 
 }
