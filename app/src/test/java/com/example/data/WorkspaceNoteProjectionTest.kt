@@ -26,9 +26,11 @@ import org.json.JSONObject
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class WorkspaceNoteProjectionTest {
 
     @Test
@@ -469,7 +471,12 @@ class WorkspaceNoteProjectionTest {
 
                 val centerX = ((shape.x + shape.width / 2f) * scale + panX).toInt()
                 val centerY = ((shape.y + shape.height / 2f) * scale + panY).toInt()
-                assertEquals(Color.parseColor("#22C55E"), bitmap.getPixel(centerX, centerY))
+                val actualColor = bitmap.getPixel(centerX, centerY)
+                assertEquals(
+                    "Filled shape center mismatch at camera pan=($panX,$panY), scale=$scale",
+                    Color.parseColor("#22C55E"),
+                    actualColor
+                )
             } finally {
                 bitmap.recycle()
             }
