@@ -822,13 +822,22 @@ fun WhiteboardCanvasScreen(
             val sx = (tItem.x * state.scale + state.panX).roundToInt()
             val sy = (tItem.y * state.scale + state.panY).roundToInt()
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
-            val widthDp = with(density) { (tItem.width * state.scale).coerceAtLeast(80f).toDp() }
-            val fontSizeSp = (tItem.fontSize * state.scale).coerceIn(10f, 28f).sp
+            // Keep the text item's measured layout in board-space units. The camera
+            // scales the completed item, avoiding font/width changes and remeasurement
+            // as zoom changes.
+            val widthDp = with(density) { tItem.width.coerceAtLeast(80f).toDp() }
+            val fontSizeSp = tItem.fontSize.coerceIn(10f, 28f).sp
+            val cameraLayer = Modifier
+                .offset { IntOffset(sx, sy) }
+                .graphicsLayer {
+                    scaleX = state.scale
+                    scaleY = state.scale
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
 
             if (tItem.isLocked) {
                 Box(
-                    modifier = Modifier
-                        .offset { IntOffset(sx, sy) }
+                    modifier = cameraLayer
                         .widthIn(min = widthDp, max = widthDp)
                         .testTag("locked_text_item_${tItem.id}")
                 ) {
@@ -846,8 +855,7 @@ fun WhiteboardCanvasScreen(
                     shape = RoundedCornerShape(8.dp),
                     color = cardBg,
                     shadowElevation = 0.dp,
-                    modifier = Modifier
-                        .offset { IntOffset(sx, sy) }
+                    modifier = cameraLayer
                         .width(widthDp)
                         .border(1.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
                         .testTag("editable_text_item_${tItem.id}")
