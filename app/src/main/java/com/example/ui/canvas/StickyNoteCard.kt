@@ -280,11 +280,13 @@ fun StickyNoteView(
         modifier = modifier
             .zIndex(if (isSelected) 10f else 0f)
             .offset {
-                // Keep placement in board coordinates. Camera values are read only
-                // in the graphics-layer phase, avoiding composition/layout work on pan and zoom.
+                // The layout position is outside the graphics layer, so graphicsLayer.scale
+                // cannot scale note.x/note.y. Project the world-space origin into screen space
+                // here; the layer below scales only the note's internal content and size.
+                val camera = cameraState.value
                 IntOffset(
-                    (note.x - sideGutterPx).roundToInt(),
-                    (note.y - verticalGutterPx).roundToInt()
+                    ((note.x - sideGutterPx) * camera.scale).roundToInt(),
+                    ((note.y - verticalGutterPx) * camera.scale).roundToInt()
                 )
             }
             .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + verticalGutterDp * 2)
