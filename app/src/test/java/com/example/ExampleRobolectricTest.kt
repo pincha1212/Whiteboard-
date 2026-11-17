@@ -1060,6 +1060,18 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `camera pan and zoom do not mutate whiteboard content state`() {
+    val vm = WhiteboardViewModel()
+    val contentBefore = vm.uiState.value
+    val cameraBefore = vm.cameraState.value
+
+    vm.onPanZoom(42f, 18f, zoomChange = 1.25f)
+
+    assertEquals("Pan/zoom must not publish a new content state", contentBefore, vm.uiState.value)
+    assertTrue("Camera flow must publish the updated transform", cameraBefore != vm.cameraState.value)
+  }
+
+  @Test
   fun `test sticky note scale compensated handle resizing free and square aspect lock`() {
     val vm = WhiteboardViewModel()
     vm.openBoard(vm.uiState.value.allBoards.first().id)
