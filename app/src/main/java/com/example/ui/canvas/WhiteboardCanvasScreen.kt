@@ -59,6 +59,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -117,6 +119,7 @@ fun WhiteboardCanvasScreen(
     onSwitchToNotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    CanvasPerformanceProbe("screen")
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
@@ -1444,6 +1447,7 @@ private fun StickyNoteLayer(
     onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
     onRotate: (String, Float) -> Unit
 ) {
+    CanvasPerformanceProbe("sticky-note-layer")
     // Two stable passes preserve z-order (unselected first, selected last) without
     // allocating and sorting a temporary list on every camera frame.
     for (selectedPass in 0..1) {
