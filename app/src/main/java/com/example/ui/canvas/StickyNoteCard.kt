@@ -718,8 +718,9 @@ fun StickyNoteView(
                             currentOnSelect()
                             var beganRotation = false
 
-                            val fallbackCenterX = camera.worldToScreenX(note.x + note.width / 2f)
-                            val fallbackCenterY = camera.worldToScreenY(note.y + note.height / 2f)
+                            val currentCamera = cameraState.value
+                            val fallbackCenterX = currentCamera.worldToScreenX(note.x + note.width / 2f)
+                            val fallbackCenterY = currentCamera.worldToScreenY(note.y + note.height / 2f)
 
                             do {
                                 val event = awaitPointerEvent()
