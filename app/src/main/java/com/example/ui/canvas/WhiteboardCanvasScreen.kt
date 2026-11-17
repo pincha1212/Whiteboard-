@@ -156,7 +156,6 @@ fun WhiteboardCanvasScreen(
     val localLassoPoints = remember { mutableStateListOf<StrokePoint>() }
 
     var isDrawingGestureActive by remember { mutableStateOf(false) }
-    var lastDrawMoveMs by remember { mutableLongStateOf(0L) }
 
     val canvasBg = try {
         Color(android.graphics.Color.parseColor(state.board.colorTheme.hex))
@@ -348,7 +347,6 @@ fun WhiteboardCanvasScreen(
                             }
                             localActivePoints.add(startPt)
                             isDrawingGestureActive = true
-                            lastDrawMoveMs = System.currentTimeMillis()
                             gestureMode = CanvasGestureMode.DRAW_STROKE
                         } else if (curState.currentTool == ToolType.LASER_POINTER) {
                             viewModel.addLaserPoint(down.position.x, down.position.y)
@@ -407,11 +405,6 @@ fun WhiteboardCanvasScreen(
                             val drawPointerChange = event.changes.firstOrNull { it.id == down.id }
                             if (gestureMode == CanvasGestureMode.DRAW_STROKE && drawPointerChange != null) {
                                 lastDrawPointerPosition = drawPointerChange.position
-                                val pointerDelta = drawPointerChange.position - drawPointerChange.previousPosition
-                                // Track real pointer motion even when it is below the point-sampling threshold.
-                                if (pointerDelta.getDistance() >= 0.1f) {
-                                    lastDrawMoveMs = System.currentTimeMillis()
-                                }
                             }
                             val activePointers = event.changes.filter { it.pressed }
 
