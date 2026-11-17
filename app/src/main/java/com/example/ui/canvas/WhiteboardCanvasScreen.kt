@@ -43,6 +43,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -213,7 +214,7 @@ fun WhiteboardCanvasScreen(
         val screenWidthPx = canvasSizePx.width.toFloat().coerceAtLeast(1f)
         val screenHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f)
 
-        CameraStateHost(viewModel) { camera ->
+        CameraStateHost(viewModel) { camera, cameraState ->
         // Global Camera / Viewport Transform Layer (handles 2-finger pinch-to-zoom & pan over both canvas and sticky notes)
         Box(
             modifier = Modifier
@@ -938,9 +939,7 @@ fun WhiteboardCanvasScreen(
             selectedNoteIds = state.selectedNoteIds,
             selectedStrokeIds = state.selectedStrokeIds,
             selectedShapeIds = state.selectedShapeIds,
-            scale = camera.scale,
-            panX = camera.panX,
-            panY = camera.panY,
+            cameraState = cameraState,
             isPanOnlyMode = isPanOnlyMode,
             hasViewport = hasViewport,
             visibleLeft = visLeftW,
@@ -1411,11 +1410,12 @@ fun WhiteboardCanvasScreen(
 @Composable
 private fun CameraStateHost(
     viewModel: WhiteboardViewModel,
-    content: @Composable (ViewportTransform) -> Unit
+    content: @Composable (ViewportTransform, State<ViewportTransform>) -> Unit
 ) {
-    val camera by viewModel.cameraState.collectAsState()
+    val cameraState = viewModel.cameraState.collectAsState()
+    val camera = cameraState.value
     CanvasPerformanceProbe("camera-viewport")
-    content(camera)
+    content(camera, cameraState)
 }
 
 @Composable
@@ -1478,9 +1478,7 @@ private fun StickyNoteLayer(
     selectedNoteIds: Set<String>,
     selectedStrokeIds: Set<String>,
     selectedShapeIds: Set<String>,
-    scale: Float,
-    panX: Float,
-    panY: Float,
+    cameraState: State<ViewportTransform>,
     isPanOnlyMode: Boolean,
     hasViewport: Boolean,
     visibleLeft: Float,
@@ -1520,9 +1518,7 @@ private fun StickyNoteLayer(
 
             StickyNoteView(
                 note = note,
-                scale = scale,
-                panX = panX,
-                panY = panY,
+                cameraState = cameraState,
                 isSelected = isSelected,
                 isPanOnlyMode = isPanOnlyMode,
                 onSelect = { onSelect(note.id) },
