@@ -504,31 +504,36 @@ fun StickyNoteView(
                             lineHeight = (autoFitFontSp.value * 1.32f).sp,
                             fontWeight = FontWeight.Bold
                         )
-                        BasicTextField(
-                            value = note.title.orEmpty(),
-                            onValueChange = { currentOnUpdateTitle(it) },
-                            enabled = !note.isLocked && !isPanOnlyMode,
-                            readOnly = note.isLocked || isPanOnlyMode,
-                            textStyle = titleStyle,
-                            cursorBrush = SolidColor(textColor),
-                            decorationBox = { inner ->
-                                if (note.title.isNullOrEmpty()) {
-                                    Text(
-                                        text = "Título...",
-                                        style = titleStyle.copy(color = textColor.copy(alpha = 0.45f))
-                                    )
-                                }
-                                inner()
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused && !isPanOnlyMode) {
-                                        currentOnSelect()
+                        val canEditNote = isSelected && !note.isLocked && !isPanOnlyMode
+                        if (canEditNote) {
+                            BasicTextField(
+                                value = note.title.orEmpty(),
+                                onValueChange = { currentOnUpdateTitle(it) },
+                                textStyle = titleStyle,
+                                cursorBrush = SolidColor(textColor),
+                                decorationBox = { inner ->
+                                    if (note.title.isNullOrEmpty()) {
+                                        Text(
+                                            text = "Título...",
+                                            style = titleStyle.copy(color = textColor.copy(alpha = 0.45f))
+                                        )
                                     }
-                                }
-                                .testTag("sticky_note_title_input_${note.id}")
-                        )
+                                    inner()
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { focusState ->
+                                        if (focusState.isFocused) currentOnSelect()
+                                    }
+                                    .testTag("sticky_note_title_input_${note.id}")
+                            )
+                        } else {
+                            Text(
+                                text = note.title?.takeIf { it.isNotEmpty() } ?: "Título...",
+                                style = if (note.title.isNullOrEmpty()) titleStyle.copy(color = textColor.copy(alpha = 0.45f)) else titleStyle,
+                                modifier = Modifier.fillMaxWidth().testTag("sticky_note_title_input_${note.id}")
+                            )
+                        }
 
                         HorizontalDivider(
                             color = textColor.copy(alpha = 0.16f),
@@ -542,35 +547,39 @@ fun StickyNoteView(
                             lineHeight = (autoFitFontSp.value * 1.18f).sp,
                             fontWeight = FontWeight.Medium
                         )
-                        BasicTextField(
-                            value = note.text,
-                            onValueChange = onUpdateText,
-                            enabled = !note.isLocked && !isPanOnlyMode,
-                            readOnly = note.isLocked || isPanOnlyMode,
-                            textStyle = effectiveStyle,
-                            cursorBrush = SolidColor(textColor),
-                            decorationBox = { inner ->
-                                if (note.text.isEmpty()) {
-                                    Text(
-                                        text = "Escribe el contenido...",
-                                        style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
-                                    )
-                                }
-                                inner()
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = with(density) { (innerHeightPx * 0.55f).toDp() })
-                                .onFocusChanged { focusState ->
-                                    if (focusState.isFocused && !isPanOnlyMode) {
-                                        currentOnSelect()
+                        val bodyModifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = with(density) { (innerHeightPx * 0.55f).toDp() })
+                            .semantics {
+                                set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
+                            }
+                            .testTag("sticky_note_input_${note.id}")
+                        if (canEditNote) {
+                            BasicTextField(
+                                value = note.text,
+                                onValueChange = onUpdateText,
+                                textStyle = effectiveStyle,
+                                cursorBrush = SolidColor(textColor),
+                                decorationBox = { inner ->
+                                    if (note.text.isEmpty()) {
+                                        Text(
+                                            text = "Escribe el contenido...",
+                                            style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
+                                        )
                                     }
+                                    inner()
+                                },
+                                modifier = bodyModifier.onFocusChanged { focusState ->
+                                    if (focusState.isFocused) currentOnSelect()
                                 }
-                                .semantics {
-                                    set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
-                                }
-                                .testTag("sticky_note_input_${note.id}")
-                        )
+                            )
+                        } else {
+                            Text(
+                                text = note.text.ifEmpty { "Escribe el contenido..." },
+                                style = if (note.text.isEmpty()) effectiveStyle.copy(color = textColor.copy(alpha = 0.42f)) else effectiveStyle,
+                                modifier = bodyModifier
+                            )
+                        }
                     }
                 }
             }
