@@ -321,11 +321,9 @@ fun WhiteboardCanvasScreen(
                         } else if (curState.currentTool == ToolType.HAND) {
                             // Standalone Hand button: strictly pan-only, disable any accidental object selection/drag
                             gestureMode = CanvasGestureMode.PAN
-                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density) != -1) {
-                            activeHandleIndex = getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density)
+                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density).also { activeHandleIndex = it } != -1) {
                             gestureMode = if (activeHandleIndex == 4) CanvasGestureMode.ROTATE_SHAPE else CanvasGestureMode.RESIZE_SHAPE
-                        } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density) != -1) {
-                            activeHandleIndex = getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density)
+                        } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density).also { activeHandleIndex = it } != -1) {
                             gestureMode = if (activeHandleIndex == 4) {
                                 viewModel.resetStrokeDragAngle()
                                 strokeRotCenterWorld?.let { c ->
