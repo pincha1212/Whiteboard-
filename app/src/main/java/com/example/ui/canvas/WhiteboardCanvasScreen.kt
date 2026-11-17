@@ -90,6 +90,7 @@ import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
+import com.example.ink.ViewportTransform
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -211,6 +212,7 @@ fun WhiteboardCanvasScreen(
         val screenWidthPx = canvasSizePx.width.toFloat().coerceAtLeast(1f)
         val screenHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f)
 
+        CameraStateHost(viewModel) { camera ->
         // Global Camera / Viewport Transform Layer (handles 2-finger pinch-to-zoom & pan over both canvas and sticky notes)
         Box(
             modifier = Modifier
@@ -250,11 +252,12 @@ fun WhiteboardCanvasScreen(
                         pixelEraserCursorWorld = null
 
                         val curState = viewModel.uiState.value
-                        val wX = (down.position.x - curState.panX) / curState.scale
-                        val wY = (down.position.y - curState.panY) / curState.scale
-                        val handleTolerance = with(density) { 24.dp.toPx() } / curState.scale
-                        val rotHitTolerance = with(density) { 28.dp.toPx() } / curState.scale
-                        val hitTolerance = with(density) { 18.dp.toPx() } / curState.scale
+                        val curCamera = viewModel.cameraState.value
+                        val wX = (down.position.x - curCamera.panX) / curCamera.scale
+                        val wY = (down.position.y - curCamera.panY) / curCamera.scale
+                        val handleTolerance = with(density) { 24.dp.toPx() } / curCamera.scale
+                        val rotHitTolerance = with(density) { 28.dp.toPx() } / curCamera.scale
+                        val hitTolerance = with(density) { 18.dp.toPx() } / curCamera.scale
 
                         val isDrawingTool = curState.currentTool == ToolType.PEN ||
                             curState.currentTool == ToolType.FINE_MARKER ||
@@ -306,9 +309,9 @@ fun WhiteboardCanvasScreen(
                         } else if (curState.currentTool == ToolType.HAND) {
                             // Standalone Hand button: strictly pan-only, disable any accidental object selection/drag
                             gestureMode = CanvasGestureMode.PAN
-                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density).also { activeHandleIndex = it } != -1) {
+                        } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curCamera.scale, density).also { activeHandleIndex = it } != -1) {
                             gestureMode = if (activeHandleIndex == 4) CanvasGestureMode.ROTATE_SHAPE else CanvasGestureMode.RESIZE_SHAPE
-                        } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curState.scale, density).also { activeHandleIndex = it } != -1) {
+                        } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curCamera.scale, density).also { activeHandleIndex = it } != -1) {
                             gestureMode = if (activeHandleIndex == 4) {
                                 viewModel.resetStrokeDragAngle()
                                 strokeRotCenterWorld?.let { c ->
@@ -347,11 +350,11 @@ fun WhiteboardCanvasScreen(
                             viewModel.addLaserPoint(down.position.x, down.position.y)
                             gestureMode = CanvasGestureMode.LASER
                         } else if (curState.currentTool == ToolType.ERASER) {
-                            val eraseTol = 24f / curState.scale
+                            val eraseTol = 24f / curCamera.scale
                             viewModel.eraseObjectAt(wX, wY, eraseTol, saveSnapshot = true)
                             gestureMode = CanvasGestureMode.ERASE_OBJECT
                         } else if (curState.currentTool == ToolType.PIXEL_ERASER) {
-                            val eraseRadius = (curState.penWidth * 2.2f).coerceIn(14f, 36f) / curState.scale
+                            val eraseRadius = (curState.penWidth * 2.2f).coerceIn(14f, 36f) / curCamera.scale
                             pixelEraserCursorWorld = StrokePoint(wX, wY)
                             if (viewModel.erasePixelAt(wX, wY, eraseRadius, saveSnapshot = true)) {
                                 hasTransformed = true
@@ -372,7 +375,7 @@ fun WhiteboardCanvasScreen(
                                 }
                             }
                             val hitStroke = curState.board.strokes.lastOrNull { s ->
-                                isPointHittingStroke(s, wX, wY, (24f / curState.scale))
+                                isPointHittingStroke(s, wX, wY, (24f / curCamera.scale))
                             }
 
                             if (hitShape != null) {
@@ -617,19 +620,19 @@ fun WhiteboardCanvasScreen(
             drawCanvasBackgroundAndGrid(
                 gridType = state.board.gridType,
                 colorTheme = state.board.colorTheme,
-                panX = state.panX,
-                panY = state.panY,
-                scale = state.scale,
+                panX = camera.panX,
+                panY = camera.panY,
+                scale = camera.scale,
                 screenW = size.width,
                 screenH = size.height
             )
 
             val isDarkBoard = state.board.colorTheme.isDark
-            val safeScale = if (state.scale > 0.001f) state.scale else 1.0f
-            val visibleWorldLeft = -state.panX / safeScale
-            val visibleWorldTop = -state.panY / safeScale
-            val visibleWorldRight = (size.width - state.panX) / safeScale
-            val visibleWorldBottom = (size.height - state.panY) / safeScale
+            val safeScale = if (camera.scale > 0.001f) camera.scale else 1.0f
+            val visibleWorldLeft = -camera.panX / safeScale
+            val visibleWorldTop = -camera.panY / safeScale
+            val visibleWorldRight = (size.width - camera.panX) / safeScale
+            val visibleWorldBottom = (size.height - camera.panY) / safeScale
 
             state.board.strokes.forEach { stroke ->
                 val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
@@ -643,9 +646,9 @@ fun WhiteboardCanvasScreen(
                 }
                 drawStrokeVector(
                     stroke = stroke,
-                    panX = state.panX,
-                    panY = state.panY,
-                    scale = state.scale,
+                    panX = camera.panX,
+                    panY = camera.panY,
+                    scale = camera.scale,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard,
                     handDrawnFactor = state.handDrawnFactor
@@ -669,9 +672,9 @@ fun WhiteboardCanvasScreen(
                 )
                 drawStrokeVector(
                     stroke = tempStroke,
-                    panX = state.panX,
-                    panY = state.panY,
-                    scale = state.scale,
+                    panX = camera.panX,
+                    panY = camera.panY,
+                    scale = camera.scale,
                     // Keep the in-progress preview spatially stable while the pointer is held.
                     // Animated stroke effects begin only after the stroke is committed.
                     animPhase = 0f,
@@ -683,10 +686,10 @@ fun WhiteboardCanvasScreen(
             if (localLassoPoints.size >= 2) {
                 val lassoPath = Path().apply {
                     val p0 = localLassoPoints.first()
-                    moveTo(p0.x * state.scale + state.panX, p0.y * state.scale + state.panY)
+                    moveTo(p0.x * camera.scale + camera.panX, p0.y * camera.scale + camera.panY)
                     for (i in 1 until localLassoPoints.size) {
                         val pt = localLassoPoints[i]
-                        lineTo(pt.x * state.scale + state.panX, pt.y * state.scale + state.panY)
+                        lineTo(pt.x * camera.scale + camera.panX, pt.y * camera.scale + camera.panY)
                     }
                 }
                 drawPath(
@@ -701,7 +704,7 @@ fun WhiteboardCanvasScreen(
 
             pixelEraserCursorWorld?.let { cursor ->
                 val screenRadius = (state.penWidth * 2.2f).coerceIn(14f, 36f)
-                val center = Offset(cursor.x * state.scale + state.panX, cursor.y * state.scale + state.panY)
+                val center = Offset(cursor.x * camera.scale + camera.panX, cursor.y * camera.scale + camera.panY)
                 drawCircle(
                     color = Color(0xFFEF4444).copy(alpha = 0.14f),
                     radius = screenRadius,
@@ -733,9 +736,9 @@ fun WhiteboardCanvasScreen(
                 val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
                 drawShapeVector(
                     shape = shape,
-                    panX = state.panX,
-                    panY = state.panY,
-                    scale = state.scale,
+                    panX = camera.panX,
+                    panY = camera.panY,
+                    scale = camera.scale,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard,
                     rotStemPx = rotStemPx,
@@ -769,9 +772,9 @@ fun WhiteboardCanvasScreen(
                 )
                 drawShapeVector(
                     shape = previewShape,
-                    panX = state.panX,
-                    panY = state.panY,
-                    scale = state.scale,
+                    panX = camera.panX,
+                    panY = camera.panY,
+                    scale = camera.scale,
                     isSelected = true,
                     isDarkBoard = isDarkBoard,
                     rotStemPx = rotStemPx,
@@ -783,9 +786,9 @@ fun WhiteboardCanvasScreen(
                 selectedStrokeForHandles?.let { selStroke ->
                     drawStrokeSelectionHandles(
                         stroke = selStroke,
-                        panX = state.panX,
-                        panY = state.panY,
-                        scale = state.scale,
+                        panX = camera.panX,
+                        panY = camera.panY,
+                        scale = camera.scale,
                         rotStemPx = rotStemPx
                     )
                 }
@@ -822,8 +825,8 @@ fun WhiteboardCanvasScreen(
         // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
-            val sx = (tItem.x * state.scale + state.panX).roundToInt()
-            val sy = (tItem.y * state.scale + state.panY).roundToInt()
+            val sx = (tItem.x * camera.scale + camera.panX).roundToInt()
+            val sy = (tItem.y * camera.scale + camera.panY).roundToInt()
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
             // Keep the text item's measured layout in board-space units. The camera
             // scales the completed item, avoiding font/width changes and remeasurement
@@ -833,8 +836,8 @@ fun WhiteboardCanvasScreen(
             val cameraLayer = Modifier
                 .offset { IntOffset(sx, sy) }
                 .graphicsLayer {
-                    scaleX = state.scale
-                    scaleY = state.scale
+                    scaleX = camera.scale
+                    scaleY = camera.scale
                     transformOrigin = TransformOrigin(0f, 0f)
                 }
 
@@ -886,8 +889,8 @@ fun WhiteboardCanvasScreen(
         // Edit label button for the currently selected non-line shape (single global affordance)
         selectedShapeForLabel?.let { shape ->
             if (!isPanOnlyMode) {
-                val shapeScreenCenterX = ((shape.x + shape.width / 2f) * state.scale + state.panX).roundToInt()
-                val shapeScreenTop = (shape.y * state.scale + state.panY).roundToInt()
+                val shapeScreenCenterX = ((shape.x + shape.width / 2f) * camera.scale + camera.panX).roundToInt()
+                val shapeScreenTop = (shape.y * camera.scale + camera.panY).roundToInt()
                 val editHalfW = with(density) { 18.dp.roundToPx() }
                 val editTop = with(density) { 32.dp.roundToPx() }
                 Surface(
@@ -917,13 +920,13 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Sticky Notes (viewport-culled for unselected notes; selected rendered last for handle z-order)
-        val safeScaleForNotes = if (state.scale > 0.001f) state.scale else 1.0f
+        val safeScaleForNotes = if (camera.scale > 0.001f) camera.scale else 1.0f
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
         val noteCullMarginWorld = 180f / safeScaleForNotes
-        val visLeftW = -state.panX / safeScaleForNotes - noteCullMarginWorld
-        val visTopW = -state.panY / safeScaleForNotes - noteCullMarginWorld
-        val visRightW = (screenWidthPx - state.panX) / safeScaleForNotes + noteCullMarginWorld
-        val visBottomW = (screenHeightPx - state.panY) / safeScaleForNotes + noteCullMarginWorld
+        val visLeftW = -camera.panX / safeScaleForNotes - noteCullMarginWorld
+        val visTopW = -camera.panY / safeScaleForNotes - noteCullMarginWorld
+        val visRightW = (screenWidthPx - camera.panX) / safeScaleForNotes + noteCullMarginWorld
+        val visBottomW = (screenHeightPx - camera.panY) / safeScaleForNotes + noteCullMarginWorld
 
         StickyNoteLayer(
             notes = state.board.stickyNotes,
@@ -931,9 +934,9 @@ fun WhiteboardCanvasScreen(
             selectedNoteIds = state.selectedNoteIds,
             selectedStrokeIds = state.selectedStrokeIds,
             selectedShapeIds = state.selectedShapeIds,
-            scale = state.scale,
-            panX = state.panX,
-            panY = state.panY,
+            scale = camera.scale,
+            panX = camera.panX,
+            panY = camera.panY,
             isPanOnlyMode = isPanOnlyMode,
             hasViewport = hasViewport,
             visibleLeft = visLeftW,
@@ -958,7 +961,7 @@ fun WhiteboardCanvasScreen(
                 if (state.selectedNoteIds.contains(note.id) &&
                     (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
                 ) {
-                    viewModel.moveSelectedObjects(dx / state.scale, dy / state.scale)
+                    viewModel.moveSelectedObjects(dx / camera.scale, dy / camera.scale)
                 } else {
                     viewModel.moveStickyNote(note.id, dx, dy)
                 }
@@ -997,9 +1000,9 @@ fun WhiteboardCanvasScreen(
         // Interactive Ruler
         InteractiveRulerView(
             rulerState = state.rulerState,
-            scale = state.scale,
-            panX = state.panX,
-            panY = state.panY,
+            scale = camera.scale,
+            panX = camera.panX,
+            panY = camera.panY,
             onMove = { dx, dy -> viewModel.moveRuler(dx, dy) },
             onRotate = { da -> viewModel.rotateRuler(da) }
         )
@@ -1008,7 +1011,7 @@ fun WhiteboardCanvasScreen(
         if (!state.isZenMode) {
             WhiteboardTopBar(
                 boardTitle = state.board.title,
-                scale = state.scale,
+                scale = camera.scale,
                 canUndo = state.canUndo,
                 canRedo = state.canRedo,
                 isSnapToGrid = state.isSnapToGrid,
@@ -1033,6 +1036,8 @@ fun WhiteboardCanvasScreen(
                 onSwitchToNotes = onSwitchToNotes,
                 modifier = Modifier.align(Alignment.TopCenter)
             )
+        }
+
         }
 
         // Bottom Dock: Versatile Precision Editor when an item is selected, otherwise Pen Dock
@@ -1411,6 +1416,16 @@ fun WhiteboardCanvasScreen(
     }
 }
 
+
+@Composable
+private fun CameraStateHost(
+    viewModel: WhiteboardViewModel,
+    content: @Composable (ViewportTransform) -> Unit
+) {
+    val camera by viewModel.cameraState.collectAsState()
+    CanvasPerformanceProbe("camera-viewport")
+    content(camera)
+}
 
 private data class CachedShapeBounds(
     val shape: ShapeItem,
