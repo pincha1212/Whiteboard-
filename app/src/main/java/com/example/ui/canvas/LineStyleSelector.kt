@@ -1,11 +1,5 @@
 package com.example.ui.canvas
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -181,22 +175,6 @@ private fun LineStylePreviewChip(
         previewColorHex
     }
 
-    val animatedPhase = if (style == StrokeStyle.ANIMATED_PULSE) {
-        val transition = rememberInfiniteTransition(label = "line_style_preview_pulse")
-        val value by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart
-            ),
-            label = "phase"
-        )
-        value
-    } else {
-        0.25f
-    }
-
     Column(
         modifier = modifier
             .heightIn(min = 48.dp)
@@ -232,7 +210,7 @@ private fun LineStylePreviewChip(
                         style = style,
                         capStyle = LineCapStyle.NONE,
                         colorHex = effectivePreviewColorHex,
-                        animPhase = animatedPhase,
+                        animPhase = 0f,
                         isDarkBoard = isNeon
                     )
                 }
