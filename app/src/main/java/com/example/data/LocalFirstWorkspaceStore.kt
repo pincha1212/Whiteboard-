@@ -1,6 +1,7 @@
 package com.example.data
 
 import android.content.Context
+import android.util.AtomicFile
 import android.util.Log
 import com.example.model.StickyNote
 import com.example.model.WhiteboardBoard
@@ -26,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -525,6 +527,8 @@ class LocalFirstWorkspaceStore(
 
     private fun persistToDisk(state: WorkspaceDbState): Boolean {
         val targetFile = storageFile ?: return true
+        val atomicFile = AtomicFile(targetFile)
+        var outputStream: FileOutputStream? = null
         return try {
             targetFile.parentFile?.mkdirs()
             val root = JSONObject()
@@ -546,18 +550,21 @@ class LocalFirstWorkspaceStore(
             }
             root.put("boards", boardsArr)
 
-            val parentDir = targetFile.canonicalFile.parentFile
-            if (parentDir != null && !parentDir.exists()) {
-                parentDir.mkdirs()
-            }
-            val tempFile = File(parentDir ?: targetFile.parentFile, "${targetFile.name}.tmp")
-            tempFile.writeText(root.toString())
-            if (!tempFile.renameTo(targetFile)) {
-                targetFile.writeText(root.toString())
-                tempFile.delete()
-            }
+            // AtomicFile keeps a recoverable backup until the replacement has been synced and committed.
+            val stream = atomicFile.startWrite()
+            outputStream = stream
+            stream.write(root.toString().toByteArray(Charsets.UTF_8))
+            atomicFile.finishWrite(stream)
+            outputStream = null
             true
         } catch (error: Exception) {
+            outputStream?.let { stream ->
+                try {
+                    atomicFile.failWrite(stream)
+                } catch (rollbackError: Exception) {
+                    error.addSuppressed(rollbackError)
+                }
+            }
             Log.e("LocalFirstWorkspaceStore", "Failed to persist workspace snapshot", error)
             false
         }
@@ -565,9 +572,11 @@ class LocalFirstWorkspaceStore(
 
     private fun loadFromDiskOrEmpty(): WorkspaceDbState {
         val targetFile = storageFile ?: return WorkspaceDbState()
-        if (!targetFile.exists()) return WorkspaceDbState()
+        val atomicBackup = File(targetFile.path + ".bak")
+        if (!targetFile.exists() && !atomicBackup.exists()) return WorkspaceDbState()
         return try {
-            val raw = targetFile.readText()
+            // openRead restores a valid backup if the process was interrupted mid-commit.
+            val raw = AtomicFile(targetFile).openRead().bufferedReader(Charsets.UTF_8).use { it.readText() }
             if (raw.isBlank()) return WorkspaceDbState()
             val root = JSONObject(raw)
             val (notes, folders) = NoteExportImportService.importFromJson(raw)

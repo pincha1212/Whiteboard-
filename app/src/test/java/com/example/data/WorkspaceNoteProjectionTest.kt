@@ -211,6 +211,8 @@ class WorkspaceNoteProjectionTest {
 
             // This round-trip validates the on-disk format, so explicitly await persistence.
             store.flushToDiskBlocking()
+            assertTrue("AtomicFile should commit the completed snapshot", file.isFile)
+            assertTrue("AtomicFile backup should be cleared after a successful commit", !File(file.path + ".bak").exists())
 
             val restored = LocalFirstWorkspaceStore(storageFile = file)
             val restoredNote = restored.currentState.notes.single { it.id == note.id }
