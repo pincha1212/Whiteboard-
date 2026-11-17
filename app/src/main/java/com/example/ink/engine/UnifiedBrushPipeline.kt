@@ -117,8 +117,7 @@ object UnifiedBrushPipeline {
             sourcePath = rawPath,
             style = config.strokeStyle,
             strokeWidth = config.strokeWidth,
-            capStyle = capStyle,
-            animPhase = config.animPhase
+            capStyle = capStyle
         )
         if (styledPath.isEmpty) return
 
