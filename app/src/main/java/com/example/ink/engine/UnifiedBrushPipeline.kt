@@ -186,21 +186,14 @@ object UnifiedBrushPipeline {
             seed = stroke.id.hashCode()
         )
 
-        val nodes: List<BrushNode> = if (stroke.strokeStyle == StrokeStyle.ANIMATED_PULSE) {
+        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${(scale * 1000).roundToInt()}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+        val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
             val worldScaledPts = stroke.points.map { StrokePoint(it.x * scale, it.y * scale) }
             val rawPath = ShapeGenerator.fromStrokePoints(worldScaledPts)
-            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle, animPhase)
-            PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
-        } else {
-            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${(scale * 1000).roundToInt()}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
-            nodeCache.get(cacheKey) ?: run {
-                val worldScaledPts = stroke.points.map { StrokePoint(it.x * scale, it.y * scale) }
-                val rawPath = ShapeGenerator.fromStrokePoints(worldScaledPts)
-                val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle, 0f)
-                val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
-                if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
-                built
-            }
+            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
+            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
+            if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
+            built
         }
         if (nodes.isEmpty()) return
 
@@ -316,19 +309,13 @@ object UnifiedBrushPipeline {
             seed = shape.id.hashCode()
         )
 
-        val worldNodes: List<BrushNode> = if (shape.strokeStyle == StrokeStyle.ANIMATED_PULSE) {
+        val cacheKey = "SHW:$geometryKey:${shape.strokeWidth.toBits()}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+        val worldNodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
             val outlinePath = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
-            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, animPhase)
-            PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
-        } else {
-            val cacheKey = "SHW:$geometryKey:${shape.strokeWidth.toBits()}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
-            nodeCache.get(cacheKey) ?: run {
-                val outlinePath = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
-                val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, 0f)
-                val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
-                if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
-                built
-            }
+            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap)
+            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
+            if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
+            built
         }
         if (worldNodes.isNotEmpty()) {
             canvas.save()
@@ -398,18 +385,6 @@ object UnifiedBrushPipeline {
                     strokeJoin = Paint.Join.ROUND
                 }
                 drawNodeSpine(canvas, nodes, corePaint)
-            }
-            StrokeStyle.ANIMATED_PULSE -> {
-                val pulseAlpha = 0.20f + 0.14f * sin(config.animPhase * 2f * PI.toFloat())
-                brushEngine.render(
-                    canvas,
-                    nodes,
-                    config.copy(
-                        strokeWidth = config.strokeWidth * 1.72f,
-                        alpha = (config.alpha * pulseAlpha).coerceIn(0.08f, 0.45f)
-                    )
-                )
-                brushEngine.render(canvas, nodes, config)
             }
             StrokeStyle.CHALK_TEXTURE -> {
                 brushEngine.render(
