@@ -297,7 +297,7 @@ fun StickyNoteView(
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
-                transformOrigin = TransformOrigin.TopLeft
+                transformOrigin = TransformOrigin(0f, 0f)
             }
             .graphicsLayer {
                 rotationZ = note.rotation
