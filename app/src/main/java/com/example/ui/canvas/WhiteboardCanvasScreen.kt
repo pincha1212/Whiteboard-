@@ -401,8 +401,18 @@ fun WhiteboardCanvasScreen(
                             }
                         }
 
+                        var lastDrawPointerPosition = down.position
                         do {
                             val event = awaitPointerEvent()
+                            val drawPointerChange = event.changes.firstOrNull { it.id == down.id }
+                            if (gestureMode == CanvasGestureMode.DRAW_STROKE && drawPointerChange != null) {
+                                lastDrawPointerPosition = drawPointerChange.position
+                                val pointerDelta = drawPointerChange.position - drawPointerChange.previousPosition
+                                // Track real pointer motion even when it is below the point-sampling threshold.
+                                if (pointerDelta.getDistance() >= 0.1f) {
+                                    lastDrawMoveMs = System.currentTimeMillis()
+                                }
+                            }
                             val activePointers = event.changes.filter { it.pressed }
 
                             if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
@@ -535,9 +545,10 @@ fun WhiteboardCanvasScreen(
                                             rawPt
                                         }
                                         val prevPt = localActivePoints.lastOrNull()
-                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 2.2f / liveCamera.scale) {
+                                        // Sample much more closely so slow, curved finger movement is not
+                                        // discarded as a sequence of sub-threshold straight segments.
+                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 0.65f / liveCamera.scale) {
                                             localActivePoints.add(pt)
-                                            lastDrawMoveMs = System.currentTimeMillis()
                                         }
                                         change.consume()
                                     }
@@ -568,6 +579,22 @@ fun WhiteboardCanvasScreen(
                                 }
                             }
                         } while (event.changes.any { it.pressed })
+
+                        if (gestureMode == CanvasGestureMode.DRAW_STROKE && !isMultiTouch) {
+                            // Include the actual pointer-up coordinate; the final event can arrive
+                            // with pressed=false and therefore is not handled by the active-pointer branch.
+                            val releaseCamera = viewModel.cameraState.value
+                            val finalPoint = StrokePoint(
+                                (lastDrawPointerPosition.x - releaseCamera.panX) / releaseCamera.scale,
+                                (lastDrawPointerPosition.y - releaseCamera.panY) / releaseCamera.scale
+                            )
+                            val previousPoint = localActivePoints.lastOrNull()
+                            if (previousPoint == null ||
+                                hypot(finalPoint.x - previousPoint.x, finalPoint.y - previousPoint.y) >= 0.35f / releaseCamera.scale
+                            ) {
+                                localActivePoints.add(finalPoint)
+                            }
+                        }
 
                         isDrawingGestureActive = false
                         pixelEraserCursorWorld = null
