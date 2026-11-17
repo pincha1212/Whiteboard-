@@ -376,8 +376,8 @@ class BristleBrush(
                         } else {
                             1f + 0.28f * (1f - sin(n.progress * PI.toFloat()).coerceIn(0f, 1f))
                         }
-                        val bristleSway = 1f + 0.06f * sin(n.progress * 14f + phase)
-                        val latDist = totalWidth * offsetFrac * widthMod * endSplay * bristleSway
+                        // Keep strand spacing spatially stable; no synthetic lateral wobble.
+                        val latDist = totalWidth * offsetFrac * widthMod * endSplay
                         val px = n.x + nx * latDist
                         val py = n.y + ny * latDist
                         if (!hasMove) {
