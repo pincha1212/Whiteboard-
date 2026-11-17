@@ -162,7 +162,8 @@ object UnifiedBrushPipeline {
         isOpaqueCanvasBackground: Boolean = true,
         handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
         viewportW: Float = 0f,
-        viewportH: Float = 0f
+        viewportH: Float = 0f,
+        preserveInputPoints: Boolean = false
     ) {
         if (stroke.points.size < 2) return
         val safeScale = scale.coerceAtLeast(0.05f)
@@ -202,9 +203,9 @@ object UnifiedBrushPipeline {
             seed = stroke.id.hashCode()
         )
 
-        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}:${if (preserveInputPoints) "RAW" else "SIMPLIFIED"}"
         val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
-            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points)
+            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = !preserveInputPoints)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
             val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed)
             if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
