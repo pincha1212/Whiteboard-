@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StrokeStabilizer
 import com.example.model.LineCapStyle
@@ -1464,7 +1465,7 @@ private fun StickyNoteLayer(
     onTogglePin: (String) -> Unit,
     onDelete: (StickyNote) -> Unit,
     onDragDelta: (StickyNote, Float, Float) -> Unit,
-    onResizeHandle: (String, Int, Float, Float) -> Unit,
+    onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
     onRotate: (String, Float) -> Unit
 ) {
     // Two stable passes preserve z-order (unselected first, selected last) without
