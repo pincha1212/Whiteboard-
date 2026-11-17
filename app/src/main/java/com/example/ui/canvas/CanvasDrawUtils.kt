@@ -34,13 +34,12 @@ fun parseColor(hex: String, default: Color = Color.Black): Color {
     }
 }
 
-fun getPathEffect(style: StrokeStyle, width: Float, animPhase: Float = 0f): PathEffect? {
+fun getPathEffect(style: StrokeStyle, width: Float): PathEffect? {
     return when (style) {
         StrokeStyle.SOLID -> null
         StrokeStyle.DASHED -> PathEffect.dashPathEffect(floatArrayOf(width * 3f, width * 2f), 0f)
         StrokeStyle.DOTTED -> PathEffect.dashPathEffect(floatArrayOf(width, width * 1.5f), 0f)
         StrokeStyle.DASH_DOT -> PathEffect.dashPathEffect(floatArrayOf(width * 4f, width * 1.6f, width * 1.2f, width * 1.6f), 0f)
-        StrokeStyle.ANIMATED_PULSE -> PathEffect.dashPathEffect(floatArrayOf(width * 3.5f, width * 2f), -(animPhase * width * 5.5f))
         else -> null
     }
 }
