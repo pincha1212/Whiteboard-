@@ -31,7 +31,7 @@ internal fun CanvasPerformanceProbe(scope: String) {
 private object CanvasFrameSampler : Choreographer.FrameCallback {
     private const val TAG = "WhiteboardPerf"
     private const val WINDOW_NS = 5_000_000_000L
-    private const val FRAME_CAPACITY = 300
+    private const val FRAME_CAPACITY = 1200
     private const val FRAME_BUDGET_NS = 16_666_667L
     private const val DOUBLE_FRAME_BUDGET_NS = 33_333_334L
 
