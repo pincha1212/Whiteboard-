@@ -645,7 +645,9 @@ fun WhiteboardCanvasScreen(
                 val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
                 val bounds = stroke.geometryMetrics
                 if (bounds.hasPoints) {
-                    val pad = stroke.width * 1.5f + 16f
+                    // Include humanization and the widest procedural brush footprint.
+                    // Convert the screen-space safety margin back into board coordinates.
+                    val pad = (stroke.width * 3.5f + 64f) / safeScale
                     if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
                         bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom) {
                         return@forEach
