@@ -182,7 +182,6 @@ private fun DrawScope.drawGridPointsBatched(points: FloatArray, color: Color, ra
         canvas.nativeCanvas.drawPoints(points, paint)
     }
 }
-}
 
 fun DrawScope.drawStrokeVector(
     stroke: WhiteboardStroke,
