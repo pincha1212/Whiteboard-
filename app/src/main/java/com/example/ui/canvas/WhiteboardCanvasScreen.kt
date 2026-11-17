@@ -687,6 +687,7 @@ fun WhiteboardCanvasScreen(
                     // Keep the in-progress preview spatially stable while the pointer is held.
                     // Animated stroke effects begin only after the stroke is committed.
                     animPhase = 0f,
+                    preserveInputPoints = true,
                     isDarkBoard = isDarkBoard,
                     handDrawnFactor = state.handDrawnFactor
                 )
