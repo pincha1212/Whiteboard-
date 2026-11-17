@@ -27,6 +27,7 @@ data class BrushNode(
     val y: Float,
     val angle: Float,
     val velocity: Float,
+    // Open live previews use a constant mid-stroke value; committed strokes use an endpoint profile.
     val progress: Float,
     val contourIndex: Int = 0,
     val isClosed: Boolean = false
@@ -79,9 +80,10 @@ class PathHumanizer(
             handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
             stepPx: Float = DEFAULT_STEP_PX,
             seed: Int = 1337,
-            timestampsMs: List<Long>? = null
+            timestampsMs: List<Long>? = null,
+            stableOpenContours: Boolean = false
         ): List<BrushNode> {
-            val contours = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs)
+            val contours = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs, stableOpenContours)
             if (contours.isEmpty()) return emptyList()
             val totalSize = contours.sumOf { it.size }
             val flat = ArrayList<BrushNode>(totalSize)
@@ -94,7 +96,8 @@ class PathHumanizer(
             handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
             stepPx: Float = DEFAULT_STEP_PX,
             seed: Int = 1337,
-            timestampsMs: List<Long>? = null
+            timestampsMs: List<Long>? = null,
+            stableOpenContours: Boolean = false
         ): List<List<BrushNode>> {
             val clampedFactor = handDrawnFactor.coerceIn(0f, 1f)
             val safeStep = stepPx.coerceIn(1f, 32f)
@@ -144,14 +147,15 @@ class PathHumanizer(
                     val distance = if (i == endIndex) len else (i * safeStep).coerceAtMost(len)
                     // Open-stroke progress is local to the trailing tip, not normalized by
                     // total path length. Existing nodes therefore keep their style values.
-                    val progress = if (isClosed) {
-                        (distance / len).coerceIn(0f, 1f)
-                    } else {
-                        // Open strokes use a fixed endpoint profile: only the first and
-                        // last 48px can change as the active path grows.
-                        val startEnvelope = (distance / 48f).coerceIn(0f, 1f)
-                        val endEnvelope = ((len - distance) / 48f).coerceIn(0f, 1f)
-                        0.5f * min(startEnvelope, endEnvelope)
+                    val progress = when {
+                        isClosed -> (distance / len).coerceIn(0f, 1f)
+                        stableOpenContours -> 0.5f
+                        else -> {
+                            // Committed open strokes use a fixed endpoint profile.
+                            val startEnvelope = (distance / 48f).coerceIn(0f, 1f)
+                            val endEnvelope = ((len - distance) / 48f).coerceIn(0f, 1f)
+                            0.5f * min(startEnvelope, endEnvelope)
+                        }
                     }
                     progresses[i] = progress
 
@@ -187,7 +191,7 @@ class PathHumanizer(
                         } else {
                             // Open strokes taper smoothly near endpoints so anchor vertices & arrowheads stay aligned.
                             val dScaled = distance
-                            val endpointEnvelope = sin(progress * PI.toFloat()).coerceIn(0f, 1f)
+                            val endpointEnvelope = if (stableOpenContours) 1f else sin(progress * PI.toFloat()).coerceIn(0f, 1f)
                             normalWave = (
                                 0.54f * sin(dScaled * 0.042f + phaseA + contourShift) +
                                     0.31f * cos(dScaled * 0.105f + phaseB + contourShift) +
