@@ -533,14 +533,12 @@ object ShapeGenerator {
             val len = pm.length
             if (len < 1f) continue
             val isClosed = pm.isClosed
-            val count = ceil((len / safeStep).toDouble()).toInt().coerceIn(4, 360)
-            val pts = ArrayList<PointF>(count + 1)
-            val norms = ArrayList<PointF>(count + 1)
-            val tans = ArrayList<PointF>(count + 1)
-            val endIndex = if (isClosed) count - 1 else count
-            for (i in 0..endIndex) {
-                val d = ((i.toFloat() / count.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            val pts = ArrayList<PointF>()
+            val norms = ArrayList<PointF>()
+            val tans = ArrayList<PointF>()
+            var distance = 0f
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val tl = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     val tx = tan[0] / tl
                     val ty = tan[1] / tl
@@ -548,14 +546,22 @@ object ShapeGenerator {
                     tans.add(PointF(tx, ty))
                     norms.add(PointF(-ty, tx))
                 }
+                distance += safeStep
             }
-            if (pts.size >= 2) {
-                result.add(PathContourSample(pts, norms, tans, isClosed, len))
+            if (pm.getPosTan(len, pos, tan)) {
+                val tl = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
+                val tx = tan[0] / tl
+                val ty = tan[1] / tl
+                if (pts.isEmpty() || hypot(pts.last().x - pos[0], pts.last().y - pos[1]) > 0.1f) {
+                    pts.add(PointF(pos[0], pos[1]))
+                    tans.add(PointF(tx, ty))
+                    norms.add(PointF(-ty, tx))
+                }
             }
+            if (pts.size >= 2) result.add(PathContourSample(pts, norms, tans, isClosed, len))
         } while (pm.nextContour())
         return result
     }
-
     private fun buildDoubleParallelPath(source: Path, w: Float): Path {
         val out = Path()
         val offset = (w * 0.62f).coerceAtLeast(2.2f)
@@ -583,27 +589,24 @@ object ShapeGenerator {
         val pm = PathMeasure(source, false)
         val pos = FloatArray(2)
         val tan = FloatArray(2)
+        val tieSpacing = (w * 2.2f).coerceIn(10f, 36f)
         do {
             val len = pm.length
             if (len < 4f) continue
-            val isClosed = pm.isClosed
-            val tieSpacing = min((w * 2.2f).coerceIn(10f, 36f), (len / 7f).coerceAtLeast(5f))
-            val steps = (len / tieSpacing).roundToInt().coerceAtLeast(2)
-            val endI = if (isClosed) steps - 1 else steps
-            for (i in 0..endI) {
-                val d = ((i.toFloat() / steps.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            var distance = tieSpacing
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     val nx = -tan[1] / l
                     val ny = tan[0] / l
                     out.moveTo(pos[0] - nx * tieHalfLen, pos[1] - ny * tieHalfLen)
                     out.lineTo(pos[0] + nx * tieHalfLen, pos[1] + ny * tieHalfLen)
                 }
+                distance += tieSpacing
             }
         } while (pm.nextContour())
         return out
     }
-
     private fun buildZigzagPath(source: Path, w: Float): Path {
         val out = Path()
         val pm = PathMeasure(source, false)
@@ -613,25 +616,27 @@ object ShapeGenerator {
             val len = pm.length
             if (len < 4f) continue
             val isClosed = pm.isClosed
-            val stepLen = min((w * 2.2f).coerceIn(10f, 40f), (len / 8f).coerceAtLeast(4f))
-            val amp = min((w * 0.9f).coerceIn(4f, 28f), (len / 20f).coerceAtLeast(2.2f))
-            val count = ceil((len / (stepLen * 0.5f)).toDouble()).toInt().coerceAtLeast(4)
-            val pts = ArrayList<PointF>(count + 1)
-            for (i in 0..count) {
-                val d = ((i.toFloat() / count.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            val stepLen = (w * 2.2f).coerceIn(10f, 40f) * 0.5f
+            val amp = (w * 0.9f).coerceIn(4f, 28f)
+            val pts = ArrayList<PointF>()
+            var index = 0
+            var distance = 0f
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     val nx = -tan[1] / l
                     val ny = tan[0] / l
-                    val off = if (i == 0 || (i == count && !isClosed)) 0f else if (i % 2 == 1) amp else -amp
+                    val off = if (index == 0) 0f else if (index % 2 == 1) amp else -amp
                     pts.add(PointF(pos[0] + nx * off, pos[1] + ny * off))
                 }
+                index++
+                distance += stepLen
             }
+            if (!isClosed && pm.getPosTan(len, pos, tan)) pts.add(PointF(pos[0], pos[1]))
             appendPolylineToPath(out, pts, isClosed)
         } while (pm.nextContour())
         return out
     }
-
     private fun buildWavyPath(source: Path, w: Float): Path {
         val out = Path()
         val pm = PathMeasure(source, false)
@@ -641,33 +646,27 @@ object ShapeGenerator {
             val len = pm.length
             if (len < 4f) continue
             val isClosed = pm.isClosed
-            val wavelength = min((w * 4.2f).coerceIn(18f, 70f), (len / 5f).coerceAtLeast(8f))
+            val wavelength = (w * 4.2f).coerceIn(18f, 70f)
             val step = (wavelength / 5.2f).coerceIn(3f, 16f)
-            val amp = min((w * 0.85f).coerceIn(4f, 26f), (len / 20f).coerceAtLeast(2.2f))
-            val count = ceil((len / step).toDouble()).toInt().coerceAtLeast(8)
-            val closedCycles = max(2, (len / wavelength).roundToInt())
-            val pts = ArrayList<PointF>(count + 1)
-            val endI = if (isClosed) count - 1 else count
-            for (i in 0..endI) {
-                val d = ((i.toFloat() / count.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            val amp = (w * 0.85f).coerceIn(4f, 26f)
+            val pts = ArrayList<PointF>()
+            var distance = 0f
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     val nx = -tan[1] / l
                     val ny = tan[0] / l
-                    val phase = if (isClosed) {
-                        (d / len) * (closedCycles * 2f * PI.toFloat())
-                    } else {
-                        (d / wavelength) * (2f * PI.toFloat())
-                    }
+                    val phase = (distance / wavelength) * (2f * PI.toFloat())
                     val waveOff = sin(phase) * amp
                     pts.add(PointF(pos[0] + nx * waveOff, pos[1] + ny * waveOff))
                 }
+                distance += step
             }
+            if (!isClosed && pm.getPosTan(len, pos, tan)) pts.add(PointF(pos[0], pos[1]))
             appendPolylineToPath(out, pts, isClosed)
         } while (pm.nextContour())
         return out
     }
-
     private fun buildSquareWavePath(source: Path, w: Float): Path {
         val out = Path()
         val pm = PathMeasure(source, false)
@@ -677,16 +676,20 @@ object ShapeGenerator {
             val len = pm.length
             if (len < 4f) continue
             val isClosed = pm.isClosed
-            val blockLen = min((w * 2.5f).coerceIn(12f, 44f), (len / 6f).coerceAtLeast(5f))
-            val amp = min((w * 0.85f).coerceIn(4f, 26f), (len / 20f).coerceAtLeast(2.2f))
-            val count = ceil((len / blockLen).toDouble()).toInt().coerceAtLeast(4)
-            val anchors = ArrayList<Pair<PointF, PointF>>(count + 1)
-            for (i in 0..count) {
-                val d = ((i.toFloat() / count.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            val blockLen = (w * 2.5f).coerceIn(12f, 44f)
+            val amp = (w * 0.85f).coerceIn(4f, 26f)
+            val anchors = ArrayList<Pair<PointF, PointF>>()
+            var distance = 0f
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     anchors.add(PointF(pos[0], pos[1]) to PointF(-tan[1] / l, tan[0] / l))
                 }
+                distance += blockLen
+            }
+            if (!isClosed && pm.getPosTan(len, pos, tan)) {
+                val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
+                anchors.add(PointF(pos[0], pos[1]) to PointF(-tan[1] / l, tan[0] / l))
             }
             if (anchors.size >= 2) {
                 out.moveTo(anchors[0].first.x, anchors[0].first.y)
@@ -703,7 +706,6 @@ object ShapeGenerator {
         } while (pm.nextContour())
         return out
     }
-
     private fun buildArrowPatternPath(source: Path, w: Float): Path {
         val out = Path(source)
         val pm = PathMeasure(source, false)
@@ -712,12 +714,11 @@ object ShapeGenerator {
         do {
             val len = pm.length
             if (len < 4f) continue
-            val spacing = min((w * 2.6f).coerceIn(14f, 44f), (len / 6f).coerceAtLeast(6f))
-            val wingLen = min((w * 0.95f).coerceIn(6f, 26f), (len / 16f).coerceAtLeast(3.2f))
-            val steps = (len / spacing).roundToInt().coerceAtLeast(2)
-            for (i in 1 until steps) {
-                val d = ((i.toFloat() / steps.toFloat()) * len).coerceIn(0f, len)
-                if (pm.getPosTan(d, pos, tan)) {
+            val spacing = (w * 2.6f).coerceIn(14f, 44f)
+            val wingLen = (w * 0.95f).coerceIn(6f, 26f)
+            var distance = spacing
+            while (distance < len) {
+                if (pm.getPosTan(distance, pos, tan)) {
                     val l = hypot(tan[0], tan[1]).coerceAtLeast(0.001f)
                     val tx = tan[0] / l
                     val ty = tan[1] / l
@@ -727,11 +728,11 @@ object ShapeGenerator {
                     out.lineTo(pos[0], pos[1])
                     out.lineTo(pos[0] - tx * wingLen - nx * wingLen * 0.7f, pos[1] - ty * wingLen - ny * wingLen * 0.7f)
                 }
+                distance += spacing
             }
         } while (pm.nextContour())
         return out
     }
-
     private fun buildSketchMultiPath(source: Path, w: Float): Path {
         val out = Path(source)
         val contours = samplePathContours(source, (w * 0.8f).coerceIn(3f, 8f))
