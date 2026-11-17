@@ -215,6 +215,25 @@ fun WhiteboardCanvasScreen(
         state.pendingStickyNoteColor == null &&
         state.pendingShapeType == null
 
+    // Cache conservative world-space bounds by immutable shape-list identity.
+    // Camera movement can then cull off-screen shapes without rescanning vertices.
+    val cachedShapeBounds = remember(state.board.shapes) {
+        state.board.shapes.map { shape ->
+            val centerX = shape.x + shape.width / 2f
+            val centerY = shape.y + shape.height / 2f
+            val rectRadius = hypot(shape.width, shape.height) / 2f
+            val vertexRadius = shape.vertices.maxOfOrNull { vertex ->
+                hypot(vertex.x - centerX, vertex.y - centerY)
+            } ?: 0f
+            CachedShapeBounds(
+                shape = shape,
+                centerX = centerX,
+                centerY = centerY,
+                radius = maxOf(rectRadius, vertexRadius) + shape.strokeWidth * 2f
+            )
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -720,7 +739,21 @@ fun WhiteboardCanvasScreen(
                 )
             }
 
-            state.board.shapes.forEach { shape ->
+            val viewportCenterX = (visibleWorldLeft + visibleWorldRight) / 2f
+            val viewportCenterY = (visibleWorldTop + visibleWorldBottom) / 2f
+            val viewportRadius = hypot(
+                (visibleWorldRight - visibleWorldLeft) / 2f,
+                (visibleWorldBottom - visibleWorldTop) / 2f
+            ) + 80f / safeScale
+
+            cachedShapeBounds.forEach { cached ->
+                // The enclosing circle remains valid for rotated shapes and custom vertices.
+                if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
+                    cached.radius + viewportRadius
+                ) {
+                    return@forEach
+                }
+                val shape = cached.shape
                 val isSelected = shape.id == state.selectedShapeId || state.selectedShapeIds.contains(shape.id)
                 drawShapeVector(
                     shape = shape,
@@ -1398,6 +1431,13 @@ fun WhiteboardCanvasScreen(
     }
 }
 
+
+private data class CachedShapeBounds(
+    val shape: ShapeItem,
+    val centerX: Float,
+    val centerY: Float,
+    val radius: Float
+)
 
 @Composable
 private fun StickyNoteLayer(
