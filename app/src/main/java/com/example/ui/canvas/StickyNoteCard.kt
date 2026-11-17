@@ -32,6 +32,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +74,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
-import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
 import kotlin.math.PI
 import kotlin.math.cos
@@ -181,9 +181,7 @@ fun computeAutoFitStickyFontSizeSp(
 @Composable
 fun StickyNoteView(
     note: StickyNote,
-    scale: Float,
-    panX: Float,
-    panY: Float,
+    cameraState: State<com.example.ink.ViewportTransform>,
     onUpdateText: (String) -> Unit,
     onUpdateTitle: (String) -> Unit = {},
     onUpdateColor: (String) -> Unit,
@@ -233,10 +231,6 @@ fun StickyNoteView(
 
     var showPalette by remember { mutableStateOf(false) }
 
-    // World Space -> Screen Space projection (isotropic, zero percentage / rigid DP clamping)
-    val camera = ViewportTransform(scale = scale, panX = panX, panY = panY)
-    val screenXPx = camera.worldToScreenX(note.x)
-    val screenYPx = camera.worldToScreenY(note.y)
     // Keep the note's internal layout in board-space units. Camera zoom is applied
     // once to the outer layer, so text and child layouts are not resized/re-measured.
     val cardWidthPx = note.width.coerceAtLeast(16f)
@@ -286,17 +280,20 @@ fun StickyNoteView(
         modifier = modifier
             .zIndex(if (isSelected) 10f else 0f)
             .offset {
+                // Keep placement in board coordinates. Camera values are read only
+                // in the graphics-layer phase, avoiding composition/layout work on pan and zoom.
                 IntOffset(
-                    (screenXPx - sideGutterPx * scale).roundToInt(),
-                    (screenYPx - verticalGutterPx * scale).roundToInt()
+                    (note.x - sideGutterPx).roundToInt(),
+                    (note.y - verticalGutterPx).roundToInt()
                 )
             }
             .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + verticalGutterDp * 2)
-            // Scale the completed note as a single layer instead of changing every
-            // child's dp/sp dimensions on each zoom update.
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val camera = cameraState.value
+                scaleX = camera.scale
+                scaleY = camera.scale
+                translationX = camera.panX
+                translationY = camera.panY
                 transformOrigin = TransformOrigin(0f, 0f)
             }
             .graphicsLayer {
