@@ -523,6 +523,55 @@ class WorkspaceNoteProjectionTest {
 
 
     @Test
+    fun stickyNoteTransformProjectsToWorkspaceOnlyWhenGestureFinishes() {
+        val boardId = "board-transform-deferral"
+        val sticky = StickyNote(
+            id = "sticky-transform-deferral",
+            x = 40f,
+            y = 80f
+        )
+        val store = LocalFirstWorkspaceStore()
+        store.ensureBoardRegistered(
+            WhiteboardBoard(
+                id = boardId,
+                title = "Pizarra de prueba",
+                stickyNotes = listOf(sticky)
+            )
+        )
+        val viewModel = WhiteboardViewModel(store)
+        var storeUpdates = 0
+        val listener: (WorkspaceDbState) -> Unit = { storeUpdates++ }
+        store.addListener(listener)
+
+        viewModel.beginStickyNoteTransformSnapshot()
+        viewModel.moveStickyNote(sticky.id, deltaX = 20f, deltaY = 10f)
+
+        // The displayed object moves immediately, without rebuilding the shared Notes projection.
+        assertEquals(0, storeUpdates)
+        val visibleNote = viewModel.uiState.value.board.stickyNotes.single { it.id == sticky.id }
+        assertEquals(60f, visibleNote.x, 0.001f)
+        assertEquals(90f, visibleNote.y, 0.001f)
+
+        val storedBeforeFinish = store.currentState.boards
+            .single { it.id == boardId }.stickyNotes.single { it.id == sticky.id }
+        assertEquals(40f, storedBeforeFinish.x, 0.001f)
+
+        viewModel.commitWorkspaceSync()
+
+        // One shared-store projection occurs at gesture end and contains the final geometry.
+        assertEquals(1, storeUpdates)
+        val storedAfterFinish = store.currentState.boards
+            .single { it.id == boardId }.stickyNotes.single { it.id == sticky.id }
+        assertEquals(60f, storedAfterFinish.x, 0.001f)
+        assertEquals(90f, storedAfterFinish.y, 0.001f)
+        val noteItem = store.currentState.notes.single { it.id == sticky.id }
+        assertEquals(60f, noteItem.canvasData?.x ?: Float.NaN, 0.001f)
+        assertEquals(90f, noteItem.canvasData?.y ?: Float.NaN, 0.001f)
+
+        store.removeListener(listener)
+    }
+
+    @Test
     fun unreadableWorkspaceSnapshotIsPreservedBeforeStartingEmpty() {
         val tempDir = Files.createTempDirectory("whiteboard-corrupt-store-test").toFile()
         try {
