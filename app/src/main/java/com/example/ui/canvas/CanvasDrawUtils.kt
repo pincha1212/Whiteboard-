@@ -1,5 +1,6 @@
 package com.example.ui.canvas
 
+import android.graphics.Paint
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -11,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.LaserPoint
@@ -22,6 +24,7 @@ import com.example.model.isLineLike
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.ceil
 
 fun parseColor(hex: String, default: Color = Color.Black): Color {
     return try {
@@ -68,48 +71,117 @@ fun DrawScope.drawCanvasBackgroundAndGrid(
 
     when (gridType) {
         CanvasGridType.DOTS -> {
-            var x = startX
-            while (x < screenW) {
-                var y = startY
-                while (y < screenH) {
-                    drawCircle(color = gridColor, radius = (1.5f * scale).coerceIn(1f, 3f), center = Offset(x, y))
-                    y += step
-                }
-                x += step
-            }
+            val points = buildGridPointPositions(startX, startY, step, screenW, screenH)
+            drawGridPointsBatched(points, gridColor, (1.5f * scale).coerceIn(1f, 3f))
         }
-        CanvasGridType.GRID -> {
-            var x = startX
-            while (x < screenW) {
-                drawLine(color = gridColor, start = Offset(x, 0f), end = Offset(x, screenH), strokeWidth = 1f)
-                x += step
-            }
-            var y = startY
-            while (y < screenH) {
-                drawLine(color = gridColor, start = Offset(0f, y), end = Offset(screenW, y), strokeWidth = 1f)
-                y += step
-            }
-        }
-        CanvasGridType.LINES -> {
-            var y = startY
-            while (y < screenH) {
-                drawLine(color = gridColor, start = Offset(0f, y), end = Offset(screenW, y), strokeWidth = 1f)
-                y += step
-            }
+        CanvasGridType.GRID, CanvasGridType.LINES -> {
+            val lines = buildGridLineSegments(
+                startX = startX,
+                startY = startY,
+                step = step,
+                screenW = screenW,
+                screenH = screenH,
+                includeVertical = gridType == CanvasGridType.GRID,
+                includeHorizontal = true
+            )
+            drawGridLinesBatched(lines, gridColor)
         }
         CanvasGridType.DIAMONDS -> {
-            var x = startX
-            while (x < screenW) {
-                var y = startY
-                while (y < screenH) {
-                    drawCircle(color = gridColor.copy(alpha = 0.06f), radius = step * 0.4f, center = Offset(x, y))
-                    y += step
-                }
-                x += step
-            }
+            val points = buildGridPointPositions(startX, startY, step, screenW, screenH)
+            drawGridPointsBatched(points, gridColor.copy(alpha = 0.06f), step * 0.4f)
         }
         else -> {}
     }
+}
+
+/** Returns the number of regular grid coordinates in the half-open interval [start, end). */
+private fun gridAxisCount(start: Float, end: Float, step: Float): Int {
+    if (!start.isFinite() || !end.isFinite() || !step.isFinite() || step <= 0f || end <= start) return 0
+    return ceil((end - start) / step).toInt().coerceAtLeast(0)
+}
+
+/** Builds the same x-major/y-minor point order used by the original grid loops. */
+internal fun buildGridPointPositions(
+    startX: Float,
+    startY: Float,
+    step: Float,
+    screenW: Float,
+    screenH: Float
+): FloatArray {
+    val columns = gridAxisCount(startX, screenW, step)
+    val rows = gridAxisCount(startY, screenH, step)
+    if (columns == 0 || rows == 0) return FloatArray(0)
+
+    val points = FloatArray(columns * rows * 2)
+    var offset = 0
+    for (column in 0 until columns) {
+        val x = startX + column * step
+        for (row in 0 until rows) {
+            points[offset++] = x
+            points[offset++] = startY + row * step
+        }
+    }
+    return points
+}
+
+/** Builds vertical segments first and horizontal segments second, matching the original grid order. */
+internal fun buildGridLineSegments(
+    startX: Float,
+    startY: Float,
+    step: Float,
+    screenW: Float,
+    screenH: Float,
+    includeVertical: Boolean,
+    includeHorizontal: Boolean
+): FloatArray {
+    val verticalCount = if (includeVertical) gridAxisCount(startX, screenW, step) else 0
+    val horizontalCount = if (includeHorizontal) gridAxisCount(startY, screenH, step) else 0
+    if (verticalCount == 0 && horizontalCount == 0) return FloatArray(0)
+
+    val segments = FloatArray((verticalCount + horizontalCount) * 4)
+    var offset = 0
+    for (index in 0 until verticalCount) {
+        val x = startX + index * step
+        segments[offset++] = x
+        segments[offset++] = 0f
+        segments[offset++] = x
+        segments[offset++] = screenH
+    }
+    for (index in 0 until horizontalCount) {
+        val y = startY + index * step
+        segments[offset++] = 0f
+        segments[offset++] = y
+        segments[offset++] = screenW
+        segments[offset++] = y
+    }
+    return segments
+}
+
+private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
+    if (segments.isEmpty()) return
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color.toArgb()
+        strokeWidth = 1f
+        strokeCap = Paint.Cap.BUTT
+        style = Paint.Style.STROKE
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawLines(segments, paint)
+    }
+}
+
+private fun DrawScope.drawGridPointsBatched(points: FloatArray, color: Color, radius: Float) {
+    if (points.isEmpty() || radius <= 0f) return
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color.toArgb()
+        strokeWidth = radius * 2f
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawPoints(points, paint)
+    }
+}
 }
 
 fun DrawScope.drawStrokeVector(
