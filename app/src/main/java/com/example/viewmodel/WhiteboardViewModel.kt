@@ -430,7 +430,7 @@ class WhiteboardViewModel(
             null
         }
 
-        if (recognized != null && recognized.confidence >= 0.80f) {
+        if (recognized != null && recognized.confidence >= 0.80f && recognized.shapeType != ShapeType.LINE) {
             _uiState.update {
                 it.withUpdatedBoard { b -> b.copy(shapes = b.shapes + recognized.shapeItem) }.copy(
                     activeStroke = null,
@@ -468,7 +468,7 @@ class WhiteboardViewModel(
             opacity = brushType.defaultOpacity
         )
         val recognized = ShapeRecognizer.recognizeStroke(tempStroke) ?: return false
-        if (recognized.confidence < 0.72f) return false
+        if (recognized.shapeType == ShapeType.LINE || recognized.confidence < 0.72f) return false
 
         saveUndoSnapshot()
         _uiState.update {
