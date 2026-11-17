@@ -45,8 +45,44 @@ object UnifiedBrushPipeline {
         }
     }
 
+    private data class CachedShapeFillPath(
+        val path: Path,
+        val estimatedBytes: Int
+    )
+
+    private val fillPathCache = object : LruCache<String, CachedShapeFillPath>(1024 * 1024) {
+        override fun sizeOf(key: String, value: CachedShapeFillPath): Int = value.estimatedBytes
+    }
+    private val fillPaintCache = LruCache<Int, Paint>(32)
+
     fun clearNodeCache() {
         nodeCache.evictAll()
+        fillPathCache.evictAll()
+        fillPaintCache.evictAll()
+    }
+
+    private fun cachedFillPath(shape: ShapeItem, geometryKey: String): Path {
+        val key = "FILL:$geometryKey"
+        fillPathCache.get(key)?.let { return it.path }
+
+        // Store shape-local geometry so camera pan and zoom never invalidate the fill Path.
+        val path = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
+        val estimatedBytes = (256L + shape.vertices.size.toLong() * 48L)
+            .coerceAtMost(Int.MAX_VALUE.toLong())
+            .toInt()
+            .coerceAtLeast(256)
+        fillPathCache.put(key, CachedShapeFillPath(path, estimatedBytes))
+        return path
+    }
+
+    private fun cachedFillPaint(color: Int): Paint {
+        fillPaintCache.get(color)?.let { return it }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            this.color = color
+        }
+        fillPaintCache.put(color, paint)
+        return paint
     }
 
     fun renderCommand(
@@ -243,14 +279,19 @@ object UnifiedBrushPipeline {
             ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
             else -> shape.capStyle
         }
+        val geometryKey = "${shape.id}:${shape.shapeType.name}:${shape.width.toBits()}:${shape.height.toBits()}:${shape.relativeVerticesHash}"
 
-        // Fill region underneath if enabled on closed shapes
-        ShapeGenerator.generateFillPath(shape, panX, panY, scale)?.let { fillPath ->
-            val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.FILL
-                color = fillColorInt
+        // Reuse the same closed Path across frames; only the camera matrix changes while panning/zooming.
+        if (shape.isFilled && !shape.shapeType.isLineLike) {
+            val fillPath = cachedFillPath(shape, geometryKey)
+            canvas.save()
+            canvas.translate(x, y)
+            canvas.scale(scale, scale)
+            try {
+                canvas.drawPath(fillPath, cachedFillPaint(fillColorInt))
+            } finally {
+                canvas.restore()
             }
-            canvas.drawPath(fillPath, fillPaint)
         }
 
         // Route shape outline through unified Stage 1 -> Stage 2 -> Stage 3 pipeline
@@ -280,12 +321,7 @@ object UnifiedBrushPipeline {
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, animPhase)
             PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, localConfig.seed)
         } else {
-            var relVertHash = 1
-            for (v in shape.vertices) {
-                relVertHash = 31 * relVertHash + (v.x - shape.x).toBits()
-                relVertHash = 31 * relVertHash + (v.y - shape.y).toBits()
-            }
-            val cacheKey = "SHW:${shape.id}:${shape.shapeType.name}:${shape.width.toBits()}:${shape.height.toBits()}:$relVertHash:${shape.strokeWidth.toBits()}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            val cacheKey = "SHW:$geometryKey:${shape.strokeWidth.toBits()}:${shape.strokeStyle.name}:${effectiveCap.name}:${shape.brushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
             nodeCache.get(cacheKey) ?: run {
                 val outlinePath = ShapeGenerator.fromShapeItem(shape, -shape.x, -shape.y, 1f)
                 val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(outlinePath, shape.strokeStyle, shape.strokeWidth.coerceAtLeast(1.5f), effectiveCap, 0f)

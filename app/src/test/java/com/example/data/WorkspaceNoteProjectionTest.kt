@@ -1,9 +1,15 @@
 package com.example.data
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import com.example.model.StickyNote
 import com.example.model.WhiteboardBoard
 import com.example.model.WhiteboardStroke
 import com.example.model.StrokePoint
+import com.example.model.ShapeItem
+import com.example.model.ShapeType
+import com.example.ink.engine.UnifiedBrushPipeline
 import com.example.notes.model.CanvasNoteData
 import com.example.notes.model.ChecklistItem
 import com.example.notes.model.NoteItem
@@ -423,6 +429,51 @@ class WorkspaceNoteProjectionTest {
         assertEquals(46f, movedMetrics.minY, 0.001f)
         assertEquals(138f, movedMetrics.maxX, 0.001f)
         assertEquals(70f, movedMetrics.maxY, 0.001f)
+    }
+
+
+    @Test
+    fun filledShapeKeepsItsFillWhenCameraPanAndScaleChange() {
+        val shape = ShapeItem(
+            id = "filled-path-cache",
+            shapeType = ShapeType.RECTANGLE,
+            x = 20f,
+            y = 30f,
+            width = 80f,
+            height = 60f,
+            strokeColorHex = "#22C55E",
+            fillColorHex = "#22C55E",
+            strokeWidth = 2f,
+            isFilled = true
+        )
+
+        val cameraCases = listOf(
+            Triple(15f, 10f, 1.25f),
+            Triple(-5f, 20f, 0.8f)
+        )
+        cameraCases.forEach { (panX, panY, scale) ->
+            val bitmap = Bitmap.createBitmap(240, 240, Bitmap.Config.ARGB_8888)
+            try {
+                val canvas = Canvas(bitmap)
+                canvas.drawColor(Color.WHITE)
+                UnifiedBrushPipeline.renderShape(
+                    canvas = canvas,
+                    shape = shape,
+                    panX = panX,
+                    panY = panY,
+                    scale = scale,
+                    handDrawnFactor = 0f,
+                    viewportW = 240f,
+                    viewportH = 240f
+                )
+
+                val centerX = ((shape.x + shape.width / 2f) * scale + panX).toInt()
+                val centerY = ((shape.y + shape.height / 2f) * scale + panY).toInt()
+                assertEquals(Color.parseColor("#22C55E"), bitmap.getPixel(centerX, centerY))
+            } finally {
+                bitmap.recycle()
+            }
+        }
     }
 
 }

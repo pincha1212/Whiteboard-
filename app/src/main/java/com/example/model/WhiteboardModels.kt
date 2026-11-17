@@ -315,7 +315,17 @@ data class ShapeItem(
     val parentId: String? = null,
     val isCollapsed: Boolean = false,
     val isHiddenByCollapse: Boolean = false
-)
+) {
+    /** Relative vertex coordinates are unchanged by pan/move and are reused in render cache keys. */
+    internal val relativeVerticesHash: Int by lazy {
+        var hash = 1
+        for (vertex in vertices) {
+            hash = 31 * hash + (vertex.x - x).toBits()
+            hash = 31 * hash + (vertex.y - y).toBits()
+        }
+        hash
+    }
+}
 
 data class TextItem(
     val id: String = UUID.randomUUID().toString(),
