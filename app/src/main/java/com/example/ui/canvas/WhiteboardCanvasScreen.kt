@@ -643,7 +643,6 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
-                    animPhase = animPhase,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard,
                     handDrawnFactor = state.handDrawnFactor
@@ -734,7 +733,6 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
-                    animPhase = animPhase,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard,
                     rotStemPx = rotStemPx,
@@ -771,7 +769,6 @@ fun WhiteboardCanvasScreen(
                     panX = state.panX,
                     panY = state.panY,
                     scale = state.scale,
-                    animPhase = animPhase,
                     isSelected = true,
                     isDarkBoard = isDarkBoard,
                     rotStemPx = rotStemPx,
