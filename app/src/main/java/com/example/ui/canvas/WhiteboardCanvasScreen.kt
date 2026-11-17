@@ -46,6 +46,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -1498,32 +1499,44 @@ private fun StickyNoteLayer(
     onRotate: (String, Float) -> Unit
 ) {
     CanvasPerformanceProbe("sticky-note-layer")
-    // This layer alone observes camera changes for viewport culling. The screen,
-    // Canvas composition, labels and docks remain independent of camera updates.
-    val camera = cameraState.value
-    val safeScale = if (camera.scale > 0.001f) camera.scale else 1f
-    val margin = 180f / safeScale
-    val visibleLeft = -camera.panX / safeScale - margin
-    val visibleTop = -camera.panY / safeScale - margin
-    val visibleRight = (viewportWidthPx - camera.panX) / safeScale + margin
-    val visibleBottom = (viewportHeightPx - camera.panY) / safeScale + margin
-    // Two stable passes preserve z-order (unselected first, selected last) without
-    // allocating and sorting a temporary list on every camera frame.
+    // Re-evaluate visibility as the camera moves, but only recompose this layer
+    // when the actual set/order of visible notes changes. Note transforms themselves
+    // remain in each note's graphicsLayer phase.
+    val visibleNotes by remember(
+        notes, selectedNoteId, selectedNoteIds, cameraState,
+        hasViewport, viewportWidthPx, viewportHeightPx
+    ) {
+        derivedStateOf {
+            val camera = cameraState.value
+            val safeScale = if (camera.scale > 0.001f) camera.scale else 1f
+            val margin = 180f / safeScale
+            val visibleLeft = -camera.panX / safeScale - margin
+            val visibleTop = -camera.panY / safeScale - margin
+            val visibleRight = (viewportWidthPx - camera.panX) / safeScale + margin
+            val visibleBottom = (viewportHeightPx - camera.panY) / safeScale + margin
+            notes.filter { note ->
+                if (note.isHiddenByCollapse) {
+                    false
+                } else {
+                    val isSelected = note.id == selectedNoteId || selectedNoteIds.contains(note.id)
+                    if (isSelected || !hasViewport) {
+                        true
+                    } else {
+                        val pad = kotlin.math.max(note.width, note.height) * 0.35f
+                        (note.x + note.width + pad) >= visibleLeft &&
+                            (note.x - pad) <= visibleRight &&
+                            (note.y + note.height + pad) >= visibleTop &&
+                            (note.y - pad) <= visibleBottom
+                    }
+                }
+            }
+        }
+    }
+    // Two stable passes preserve z-order (unselected first, selected last).
     for (selectedPass in 0..1) {
-        notes.forEach { note ->
-            if (note.isHiddenByCollapse) return@forEach
+        visibleNotes.forEach { note ->
             val isSelected = note.id == selectedNoteId || selectedNoteIds.contains(note.id)
             if (isSelected != (selectedPass == 1)) return@forEach
-
-            if (!isSelected && hasViewport) {
-                val pad = kotlin.math.max(note.width, note.height) * 0.35f
-                val intersectsViewport =
-                    (note.x + note.width + pad) >= visibleLeft &&
-                    (note.x - pad) <= visibleRight &&
-                    (note.y + note.height + pad) >= visibleTop &&
-                    (note.y - pad) <= visibleBottom
-                if (!intersectsViewport) return@forEach
-            }
 
             StickyNoteView(
                 note = note,
