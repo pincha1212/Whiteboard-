@@ -359,9 +359,6 @@ class WhiteboardViewModel(
             val newPanY = (screenHeight / 2f) - (centerY * optimalScale)
             it.copy(scale = optimalScale, panX = newPanX, panY = newPanY)
         }
-        if (wasEmpty) {
-            _cameraState.update { it.copy(scale = fitScale, panX = fitPanX, panY = fitPanY) }
-        }
     }
 
     fun navigateToWorld(worldX: Float, worldY: Float, screenW: Float = 1080f, screenH: Float = 1920f) {
@@ -2246,6 +2243,9 @@ class WhiteboardViewModel(
                 pendingShapeType = null,
                 shouldAutoOpenTemplatePicker = false
             )
+        }
+        if (wasEmpty) {
+            _cameraState.update { it.copy(scale = fitScale, panX = fitPanX, panY = fitPanY) }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
