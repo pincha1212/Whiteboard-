@@ -319,7 +319,6 @@ class BristleBrush(
         val strandOffsets = FloatArray(count)
         val strandWidths = FloatArray(count)
         val strandAlphas = IntArray(count)
-        val strandSeedPhase = FloatArray(count)
 
         var rng = (config.seed * 747796405 + 2891336453L).toInt()
         for (b in 0 until count) {
@@ -337,8 +336,6 @@ class BristleBrush(
             val alphaJitter = 0.72f + ((rng and 0xFF) / 255f) * 0.28f
             strandAlphas[b] = (242f * radialWeight * alphaJitter).roundToInt().coerceIn(130, 250)
 
-            rng = nextHash(rng)
-            strandSeedPhase[b] = ((rng and 0xFFF) / 4095f) * (2f * PI.toFloat())
         }
 
         val layerBounds = computeNodeBounds(nodes, totalWidth * 0.9f + 6f)
@@ -363,7 +360,6 @@ class BristleBrush(
                 for (b in 0 until count) {
                     strandPath.reset()
                     val offsetFrac = strandOffsets[b]
-                    val phase = strandSeedPhase[b]
                     var hasMove = false
 
                     for (i in contour.indices) {
