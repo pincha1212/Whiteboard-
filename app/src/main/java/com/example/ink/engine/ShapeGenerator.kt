@@ -204,13 +204,10 @@ object ShapeGenerator {
             path.lineTo(simplified[1].x, simplified[1].y)
             return path
         }
-        path.moveTo(simplified[0].x, simplified[0].y)
-        for (i in 1 until simplified.size - 1) {
-            val midX = (simplified[i].x + simplified[i + 1].x) * 0.5f
-            val midY = (simplified[i].y + simplified[i + 1].y) * 0.5f
-            path.quadTo(simplified[i].x, simplified[i].y, midX, midY)
+        path.moveTo(simplified.first().x, simplified.first().y)
+        for (i in 1 until simplified.size) {
+            path.lineTo(simplified[i].x, simplified[i].y)
         }
-        path.lineTo(simplified.last().x, simplified.last().y)
         return path
     }
 
