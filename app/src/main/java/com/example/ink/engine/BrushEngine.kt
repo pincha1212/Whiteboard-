@@ -283,27 +283,14 @@ class HighlighterBrush(
     }
 }
 
-/**
- * 2. Pincel de Cerdas / Óleo ([BristleBrush]):
- * Computes the normal vector perpendicular to each [BrushNode.angle] and distributes a balanced fan
- * of [bristleCount] (default 20) parallel organic micro-strands inside an offscreen layer so
- * overlapping central bristles never create a dark central stripe.
- */
 
 
 
-/**
- * 4. Pluma Caligráfica ([CalligraphyBrush]):
- * Fixed flat chisel nib rotated at 45° (configurable [nibAngleDegrees]) generating closed polygon quads
- * whose cross-sectional thickness varies dramatically with the angle between stroke motion and nib orientation.
- */
 
 
-/**
- * 5. Aerógrafo ([Airbrush]):
- * Sprays radial mist particles around each [BrushNode] with true Box-Muller Gaussian distribution,
- * velocity-modulated density, and deterministic seeded PRNG so redraws never shimmer randomly.
- */
+
+
+
 
 
 /**
