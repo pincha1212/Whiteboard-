@@ -10,6 +10,7 @@ import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.TransformGeometry
 import com.example.ink.TransformState
+import com.example.ink.TransformPoint
 import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
@@ -880,6 +881,49 @@ class WhiteboardViewModel(
                     y = transformed.y,
                     width = transformed.width,
                     height = transformed.height
+                )
+            } else note
+        }
+        _uiState.update {
+            it.withUpdatedBoard { board -> board.copy(stickyNotes = updated) }
+        }
+        if (!isStickyNoteTransformInProgress) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        }
+    }
+
+
+    fun transformStickyNoteGesture(
+        id: String,
+        previousCentroid: TransformPoint,
+        currentCentroid: TransformPoint,
+        zoomChange: Float,
+        rotationDeltaDegrees: Float
+    ) {
+        val state = _uiState.value
+        val target = state.board.stickyNotes.firstOrNull { it.id == id && !it.isLocked } ?: return
+        val transformed = TransformGeometry.transformByGesture(
+            state = TransformState(
+                x = target.x,
+                y = target.y,
+                width = target.width,
+                height = target.height,
+                rotationAngle = target.rotation
+            ),
+            previousCentroidScreen = previousCentroid,
+            currentCentroidScreen = currentCentroid,
+            zoomChange = zoomChange,
+            rotationDeltaDegrees = rotationDeltaDegrees,
+            camera = _cameraState.value
+        )
+        val updated = state.board.stickyNotes.map { note ->
+            if (note.id == id) {
+                note.copy(
+                    x = transformed.x,
+                    y = transformed.y,
+                    width = transformed.width,
+                    height = transformed.height,
+                    rotation = transformed.rotationAngle
                 )
             } else note
         }
