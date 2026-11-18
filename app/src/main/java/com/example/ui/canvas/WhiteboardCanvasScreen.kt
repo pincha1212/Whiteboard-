@@ -1002,7 +1002,10 @@ fun WhiteboardCanvasScreen(
                 }
             },
             onResizeHandle = viewModel::resizeStickyNoteHandle,
-            onRotate = viewModel::rotateStickyNote
+            onRotate = viewModel::rotateStickyNote,
+            onTransformGesture = { noteId, previous, current, zoom, rotation ->
+                viewModel.transformStickyNoteGesture(noteId, previous, current, zoom, rotation)
+            }
         )
 
         // Strict pan-only touch shield when standalone Hand tool is active: prevents any accidental object selection/editing
@@ -1455,7 +1458,8 @@ private fun StickyNoteLayer(
     onDelete: (StickyNote) -> Unit,
     onDragDelta: (StickyNote, Float, Float) -> Unit,
     onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
-    onRotate: (String, Float) -> Unit
+    onRotate: (String, Float) -> Unit,
+    onTransformGesture: (String, com.example.ink.TransformPoint, com.example.ink.TransformPoint, Float, Float) -> Unit
 ) {
     // Re-evaluate visibility as the camera moves, but only recompose this layer
     // when the actual set/order of visible notes changes. Note transforms themselves
@@ -1511,7 +1515,10 @@ private fun StickyNoteLayer(
                 onDelete = { onDelete(note) },
                 onDragDelta = { dx, dy -> onDragDelta(note, dx, dy) },
                 onResizeHandle = { handle, dx, dy -> onResizeHandle(note.id, handle, dx, dy) },
-                onRotate = { degrees -> onRotate(note.id, degrees) }
+                onRotate = { degrees -> onRotate(note.id, degrees) },
+                onTransformGesture = { previous, current, zoom, rotation ->
+                    onTransformGesture(note.id, previous, current, zoom, rotation)
+                }
             )
         }
     }
