@@ -60,12 +60,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StickyNote
 import com.example.model.StrokeStyle
-import com.example.model.StrokeBrushType
 import com.example.model.WhiteboardStroke
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -90,8 +88,6 @@ fun SelectionEditDock(
     onToggleShapeFilled: () -> Unit,
     onUpdateShapeWidth: (Float) -> Unit,
     onUpdateShapeStyle: (StrokeStyle) -> Unit,
-    onUpdateShapeCapStyle: (LineCapStyle) -> Unit = {},
-    onUpdateShapeBrushType: (StrokeBrushType) -> Unit = {},
     onScaleShape: (Float) -> Unit,
     onRotateShape: (Float) -> Unit,
     onResetShapeRotation: () -> Unit,
@@ -102,8 +98,6 @@ fun SelectionEditDock(
     onUpdateStrokeColor: (String) -> Unit,
     onUpdateStrokeWidth: (Float) -> Unit,
     onUpdateStrokeStyle: (StrokeStyle) -> Unit,
-    onUpdateStrokeCapStyle: (LineCapStyle) -> Unit = {},
-    onUpdateStrokeBrushType: (StrokeBrushType) -> Unit = {},
     onScaleStroke: (Float) -> Unit,
     onRotateStroke: (Float) -> Unit = {},
     onConvertStrokeToShape: () -> Unit,
@@ -624,21 +618,7 @@ fun SelectionEditDock(
                                     // Line Style (available across all preset and freeform shapes)
 
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    BrushTypeSelectorRow(
-                                        selectedBrush = selectedShape.brushType,
-                                        onSelectBrush = onUpdateShapeBrushType,
-                                        testTagPrefix = "inspector_shape_brush"
-                                    )
-
-                                    if (selectedShape.shapeType == ShapeType.LINE) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        LineCapSelectorRow(
-                                            selectedCapStyle = selectedShape.capStyle,
-                                            onSelectCapStyle = onUpdateShapeCapStyle
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -998,17 +978,8 @@ fun SelectionEditDock(
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    BrushTypeSelectorRow(
-                                        selectedBrush = selectedStroke.brushType,
-                                        onSelectBrush = onUpdateStrokeBrushType,
-                                        testTagPrefix = "inspector_stroke_brush"
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    LineCapSelectorRow(
-                                        selectedCapStyle = selectedStroke.capStyle,
-                                        onSelectCapStyle = onUpdateStrokeCapStyle
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
