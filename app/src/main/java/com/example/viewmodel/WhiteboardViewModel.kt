@@ -1617,38 +1617,61 @@ class WhiteboardViewModel(
                     )
                 }
             } else {
-                // Corner handles: 0=TL, 1=TR, 2=BL, 3=BR
-                val anchorX = if (handleIndex == 0 || handleIndex == 2) s.x + s.width else s.x
-                val anchorY = if (handleIndex == 0 || handleIndex == 1) s.y + s.height else s.y
-                val minSize = 24f
-
-                val clampedX = when (handleIndex) {
-                    0, 2 -> kotlin.math.min(newWorldX, anchorX - minSize)
-                    else -> kotlin.math.max(newWorldX, anchorX + minSize)
+                if (handleIndex !in 0..3) return@map s
+                val transform = TransformState(
+                    x = s.x,
+                    y = s.y,
+                    width = s.width.coerceAtLeast(1f),
+                    height = s.height.coerceAtLeast(1f),
+                    rotationAngle = s.rotation
+                )
+                val pointerLocal = TransformGeometry.worldToLocal(transform, newWorldX, newWorldY)
+                val horizontal = if (handleIndex == 0 || handleIndex == 2) -1f else 1f
+                val vertical = if (handleIndex == 0 || handleIndex == 1) -1f else 1f
+                val localDeltaX = pointerLocal.x - horizontal * transform.width * 0.5f
+                val localDeltaY = pointerLocal.y - vertical * transform.height * 0.5f
+                val worldDelta = TransformGeometry.localVectorToWorld(
+                    localDeltaX,
+                    localDeltaY,
+                    transform.rotationAngle
+                )
+                val cameraScale = _cameraState.value.scale
+                val handle = when (handleIndex) {
+                    0 -> StickyNoteResizeHandle.TOP_LEFT
+                    1 -> StickyNoteResizeHandle.TOP_RIGHT
+                    2 -> StickyNoteResizeHandle.BOTTOM_LEFT
+                    else -> StickyNoteResizeHandle.BOTTOM_RIGHT
                 }
-                val clampedY = when (handleIndex) {
-                    0, 1 -> kotlin.math.min(newWorldY, anchorY - minSize)
-                    else -> kotlin.math.max(newWorldY, anchorY + minSize)
-                }
-
-                val newX = kotlin.math.min(anchorX, clampedX)
-                val newY = kotlin.math.min(anchorY, clampedY)
-                val newW = kotlin.math.abs(clampedX - anchorX).coerceAtLeast(minSize)
-                val newH = kotlin.math.abs(clampedY - anchorY).coerceAtLeast(minSize)
-
-                val oldW = s.width.coerceAtLeast(1f)
-                val oldH = s.height.coerceAtLeast(1f)
-                val remappedVerts = s.vertices.map { v ->
-                    val rx = (v.x - s.x) / oldW
-                    val ry = (v.y - s.y) / oldH
-                    StrokePoint(newX + rx * newW, newY + ry * newH)
+                val next = TransformGeometry.resize(
+                    state = transform,
+                    handle = handle,
+                    deltaScreenX = worldDelta.x * cameraScale,
+                    deltaScreenY = worldDelta.y * cameraScale,
+                    cameraScale = cameraScale,
+                    minSize = 24f,
+                    maxSize = 3000f
+                )
+                val nextTransform = transform.copy(
+                    x = next.x,
+                    y = next.y,
+                    width = next.width,
+                    height = next.height
+                )
+                val remappedVerts = s.vertices.map { vertex ->
+                    val oldLocal = TransformGeometry.worldToLocal(transform, vertex.x, vertex.y)
+                    val normalizedX = oldLocal.x / transform.width + 0.5f
+                    val normalizedY = oldLocal.y / transform.height + 0.5f
+                    val newLocalX = (normalizedX - 0.5f) * next.width
+                    val newLocalY = (normalizedY - 0.5f) * next.height
+                    val world = TransformGeometry.localToWorld(nextTransform, newLocalX, newLocalY)
+                    StrokePoint(world.x, world.y)
                 }
 
                 s.copy(
-                    x = newX,
-                    y = newY,
-                    width = newW,
-                    height = newH,
+                    x = next.x,
+                    y = next.y,
+                    width = next.width,
+                    height = next.height,
                     vertices = remappedVerts
                 )
             }
