@@ -1651,20 +1651,13 @@ class WhiteboardViewModel(
                     minSize = 24f,
                     maxSize = 3000f
                 )
-                val nextTransform = transform.copy(
-                    x = next.x,
-                    y = next.y,
-                    width = next.width,
-                    height = next.height
-                )
                 val remappedVerts = s.vertices.map { vertex ->
-                    val oldLocal = TransformGeometry.worldToLocal(transform, vertex.x, vertex.y)
-                    val normalizedX = oldLocal.x / transform.width + 0.5f
-                    val normalizedY = oldLocal.y / transform.height + 0.5f
-                    val newLocalX = (normalizedX - 0.5f) * next.width
-                    val newLocalY = (normalizedY - 0.5f) * next.height
-                    val world = TransformGeometry.localToWorld(nextTransform, newLocalX, newLocalY)
-                    StrokePoint(world.x, world.y)
+                    val normalizedX = (vertex.x - s.x) / transform.width
+                    val normalizedY = (vertex.y - s.y) / transform.height
+                    StrokePoint(
+                        next.x + normalizedX * next.width,
+                        next.y + normalizedY * next.height
+                    )
                 }
 
                 s.copy(
