@@ -79,19 +79,27 @@ class MainActivity : ComponentActivity() {
                 } else {
                     // Observe only navigation flags here. Collecting the complete UI states at
                     // this root caused camera/selection updates to recompose the workspace host.
+                    var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
                     val isViewingBoardsHome by whiteboardViewModel.uiState
                         .map { it.isViewingBoardsHome }
                         .distinctUntilChanged()
                         .collectAsStateWithLifecycle(
                             initialValue = whiteboardViewModel.uiState.value.isViewingBoardsHome
                         )
-                    val isEditingNote by notesViewModel.uiState
-                        .map { it.isEditingNote }
-                        .distinctUntilChanged()
-                        .collectAsStateWithLifecycle(
-                            initialValue = notesViewModel.uiState.value.isEditingNote
-                        )
-                    var currentWorkspace by remember { mutableStateOf(AppActiveWorkspace.WHITEBOARD) }
+
+                    // Notes are an optional workspace. Do not create its ViewModel or
+                    // subscribe to its state while the user is working on the whiteboard.
+                    val isEditingNote = if (currentWorkspace == AppActiveWorkspace.NOTES) {
+                        val editing by notesViewModel.uiState
+                            .map { it.isEditingNote }
+                            .distinctUntilChanged()
+                            .collectAsStateWithLifecycle(
+                                initialValue = notesViewModel.uiState.value.isEditingNote
+                            )
+                        editing
+                    } else {
+                        false
+                    }
 
                     BackHandler(
                         enabled = isEditingNote ||
