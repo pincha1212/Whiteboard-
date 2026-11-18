@@ -378,9 +378,6 @@ class WhiteboardViewModel(
             ToolType.PEN -> StrokeBrushType.FOUNTAIN_PEN
             ToolType.FINE_MARKER -> StrokeBrushType.FINE_MARKER
             ToolType.HIGHLIGHTER -> StrokeBrushType.HIGHLIGHTER
-            ToolType.BRUSH -> StrokeBrushType.SOFT_BRUSH
-            ToolType.CALLIGRAPHY -> StrokeBrushType.CALLIGRAPHY
-            ToolType.AIRBRUSH -> StrokeBrushType.AIRBRUSH
             else -> StrokeBrushType.FOUNTAIN_PEN
         }
     }
