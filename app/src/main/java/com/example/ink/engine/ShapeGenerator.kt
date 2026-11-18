@@ -399,30 +399,8 @@ object ShapeGenerator {
         strokeWidth: Float,
         capStyle: LineCapStyle = LineCapStyle.NONE
     ): Path {
-        val w = strokeWidth.coerceAtLeast(1.5f)
-        val styledBody = when (style) {
-            StrokeStyle.DASHED -> sliceDashedPath(sourcePath, floatArrayOf(w * 3f, w * 2f), 0f)
-            StrokeStyle.DOTTED -> sliceDashedPath(sourcePath, floatArrayOf(max(1.5f, w * 0.85f), w * 1.55f), 0f)
-            StrokeStyle.DASH_DOT -> sliceDashedPath(sourcePath, floatArrayOf(w * 4f, w * 1.6f, max(1.5f, w * 1.1f), w * 1.6f), 0f)
-            StrokeStyle.DOUBLE -> buildDoubleParallelPath(sourcePath, w)
-            StrokeStyle.RAILWAY -> buildRailwayPath(sourcePath, w)
-            StrokeStyle.ZIGZAG -> buildZigzagPath(sourcePath, w)
-            StrokeStyle.WAVY -> buildWavyPath(sourcePath, w)
-            StrokeStyle.SQUARE_WAVE -> buildSquareWavePath(sourcePath, w)
-            StrokeStyle.ARROW_PATTERN -> buildArrowPatternPath(sourcePath, w)
-            StrokeStyle.SKETCH -> buildSketchMultiPath(sourcePath, w)
-            StrokeStyle.SOLID,
-            StrokeStyle.TAPERED,
-            StrokeStyle.CALLIGRAPHIC,
-            StrokeStyle.NEON_GLOW,
-            StrokeStyle.DYNAMIC_GRADIENT,
-            StrokeStyle.CHALK_TEXTURE -> Path(sourcePath)
-        }
-
-        if (capStyle != LineCapStyle.NONE) {
-            appendArrowHeadContours(sourcePath, styledBody, capStyle, w)
-        }
-        return styledBody
+        val solidPath = Path(sourcePath)
+        return if (capStyle == LineCapStyle.NONE) solidPath else addArrowCaps(solidPath, width, capStyle)
     }
 
     private fun appendArrowHeadContours(
