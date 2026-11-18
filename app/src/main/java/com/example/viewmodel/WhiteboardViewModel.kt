@@ -1428,6 +1428,28 @@ class WhiteboardViewModel(
         isStickyNoteTransformInProgress = true
     }
 
+    fun updateTextItem(id: String, newText: String) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id) item.copy(text = newText) else item
+                })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun updateShapeLabel(id: String, newLabel: String) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(shapes = board.shapes.map { shape ->
+                    if (shape.id == id) shape.copy(label = newLabel) else shape
+                })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
     fun updateSelectedShape(
         strokeColor: String? = null,
         fillColor: String? = null,

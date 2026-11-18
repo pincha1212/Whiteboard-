@@ -357,8 +357,6 @@ fun SelectionEditDock(
                                 )
                             }
 
-                             (1-tap access right from SelectionEditDock)
-                            
 
                             // 3. Quick Thickness Stepper (- / px / +)
                             QuickStepperPill(

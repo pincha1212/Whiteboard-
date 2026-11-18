@@ -223,29 +223,9 @@ fun DrawScope.drawStrokeVector(
         )
         return
     }
-    if (preserveInputPoints && !stroke.isRainbow) {
-        val livePath = Path().apply {
-            val first = stroke.points.first()
-            moveTo(first.x * scale + panX, first.y * scale + panY)
-            for (index in 1 until stroke.points.size) {
-                val point = stroke.points[index]
-                lineTo(point.x * scale + panX, point.y * scale + panY)
-            }
-        }
-        val sourceColor = parseColor(stroke.colorHex)
-        drawPath(
-            path = livePath,
-            color = sourceColor.copy(alpha = (sourceColor.alpha * stroke.opacity).coerceIn(0f, 1f)),
-            style = Stroke(
-                width = (stroke.width * scale).coerceAtLeast(1f),
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
-        return
-    }
-    AdvancedLineEffects.run {
-        drawAdvancedStroke(
+    drawIntoCanvas { composeCanvas ->
+        com.example.ink.engine.UnifiedBrushPipeline.renderStroke(
+            canvas = composeCanvas.nativeCanvas,
             stroke = stroke,
             panX = panX,
             panY = panY,
