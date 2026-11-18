@@ -8,8 +8,8 @@ package com.example.ink
  */
 object TransformConfig {
     // Geometry limits in board-space units.
-    const val MIN_SIZE_WORLD = 80f
-    const val MAX_SIZE_WORLD = 2000f
+    const val MIN_SIZE_WORLD = 96f
+    const val MAX_SIZE_WORLD = 2400f
 
     // Aspect-ratio safety limits.
     const val MIN_ASPECT_RATIO = 0.25f
