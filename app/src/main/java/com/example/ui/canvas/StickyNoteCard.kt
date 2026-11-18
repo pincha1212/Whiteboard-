@@ -79,6 +79,7 @@ import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.TransformPoint
+import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
 import kotlin.math.PI
 import kotlin.math.atan2
