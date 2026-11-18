@@ -155,8 +155,6 @@ fun WhiteboardCanvasScreen(
         state.penColorHex,
         state.penWidth,
         state.isRainbowPen,
-        state.penStyle,
-        state.penCapStyle
     ) {
         WhiteboardStroke(
             id = "live_active_stroke",
@@ -167,8 +165,8 @@ fun WhiteboardCanvasScreen(
             isRainbow = state.isRainbowPen &&
                 activePreviewBrush != StrokeBrushType.HIGHLIGHTER &&
                 activePreviewBrush != StrokeBrushType.SOFT_BRUSH,
-            strokeStyle = state.penStyle,
-            capStyle = state.penCapStyle,
+            strokeStyle = StrokeStyle.SOLID,
+            capStyle = LineCapStyle.NONE,
             brushType = activePreviewBrush,
             opacity = activePreviewBrush.defaultOpacity
         )
@@ -286,10 +284,7 @@ fun WhiteboardCanvasScreen(
 
                         val isDrawingTool = curState.currentTool == ToolType.PEN ||
                             curState.currentTool == ToolType.FINE_MARKER ||
-                            curState.currentTool == ToolType.HIGHLIGHTER ||
-                            curState.currentTool == ToolType.BRUSH ||
-                            curState.currentTool == ToolType.CALLIGRAPHY ||
-                            curState.currentTool == ToolType.AIRBRUSH
+                            curState.currentTool == ToolType.HIGHLIGHTER
 
                         val activeShape = curState.board.shapes.find { it.id == curState.selectedShapeId && !it.isLocked && !it.isHiddenByCollapse }
                         val activeStroke = curState.board.strokes.find { it.id == curState.selectedStrokeId }
@@ -559,20 +554,21 @@ fun WhiteboardCanvasScreen(
                                         change.consume()
                                     }
                                     CanvasGestureMode.DRAW_STROKE -> {
+                                        // Replay historical stylus samples that Android batches into a pointer event.
+                                        for (historical in change.historical) {
+                                            val hx = (historical.position.x - liveCamera.panX) / liveCamera.scale
+                                            val hy = (historical.position.y - liveCamera.panY) / liveCamera.scale
+                                            val rawHistorical = StrokePoint(hx, hy)
+                                            val historicalPoint = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawHistorical, liveState.rulerState) else rawHistorical
+                                            val previous = localActivePoints.lastOrNull()
+                                            if (previous == null || previous.x != historicalPoint.x || previous.y != historicalPoint.y) localActivePoints.add(historicalPoint)
+                                        }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
                                         val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
-                                        val rawPt = StrokePoint(nwX, nwY)
-                                        val pt = if (liveState.isRulerActive) {
-                                            StrokeStabilizer.projectPointToRulerIfNear(rawPt, liveState.rulerState)
-                                        } else {
-                                            rawPt
-                                        }
-                                        val prevPt = localActivePoints.lastOrNull()
-                                        // Sample much more closely so slow, curved finger movement is not
-                                        // discarded as a sequence of sub-threshold straight segments.
-                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 0.65f / liveCamera.scale) {
-                                            localActivePoints.add(pt)
-                                        }
+                                        val rawPoint = StrokePoint(nwX, nwY)
+                                        val point = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawPoint, liveState.rulerState) else rawPoint
+                                        val previous = localActivePoints.lastOrNull()
+                                        if (previous == null || previous.x != point.x || previous.y != point.y) localActivePoints.add(point)
                                         change.consume()
                                     }
                                     CanvasGestureMode.LASER -> {
