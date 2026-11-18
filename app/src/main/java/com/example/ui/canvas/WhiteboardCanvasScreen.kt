@@ -50,6 +50,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,12 +76,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ink.StickyNoteResizeHandle
-import com.example.ink.StickyNoteGeometry
 import com.example.ink.StrokeStabilizer
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
@@ -98,6 +99,7 @@ import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
 import com.example.viewmodel.WhiteboardUiState
 import com.example.ink.ViewportTransform
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -271,7 +273,7 @@ fun WhiteboardCanvasScreen(
                     .testTag("infinite_canvas")
                     .pointerInput(state.currentTool) {
                         awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val down = awaitFirstDown(requireUnconsumed = true)
                         var isMultiTouch = false
                         var gestureMode = CanvasGestureMode.NONE
                         var activeHandleIndex = -1
@@ -305,7 +307,6 @@ fun WhiteboardCanvasScreen(
 
                         val selectedShapeIds = curState.selectedShapeIds.toHashSet()
                         val selectedStrokeIds = curState.selectedStrokeIds.toHashSet()
-                        val selectedNoteIds = curState.selectedNoteIds.toHashSet()
                         val hitSelectedShape = curState.board.shapes.any { s ->
                             !s.isLocked && !s.isHiddenByCollapse &&
                             (s.id == curState.selectedShapeId || selectedShapeIds.contains(s.id)) &&
@@ -314,14 +315,6 @@ fun WhiteboardCanvasScreen(
                         val hitSelectedStroke = curState.board.strokes.any { s ->
                             (s.id == curState.selectedStrokeId || selectedStrokeIds.contains(s.id)) &&
                             isPointHittingStroke(s, wX, wY, hitTolerance)
-                        }
-                        val hitSelectedNote = curState.board.stickyNotes.any { n ->
-                            if (n.isLocked || n.isHiddenByCollapse || !(n.id == curState.selectedNoteId || selectedNoteIds.contains(n.id))) {
-                                false
-                            } else {
-                                val (lx, ly) = StickyNoteGeometry.toLocalUnrotated(n.x, n.y, n.width, n.height, n.rotation, wX, wY)
-                                lx >= n.x && lx <= (n.x + n.width) && ly >= n.y && ly <= (n.y + n.height)
-                            }
                         }
 
                         if (curState.pendingStickyNoteColor != null) {
@@ -347,7 +340,7 @@ fun WhiteboardCanvasScreen(
                                 CanvasGestureMode.RESIZE_STROKE
                             }
                         } else if (curState.currentTool == ToolType.SELECT_LASSO &&
-                            (hitSelectedShape || hitSelectedStroke || hitSelectedNote)
+                            (hitSelectedShape || hitSelectedStroke)
                         ) {
                             gestureMode = CanvasGestureMode.MOVE_SHAPE
                         } else if (activeShape != null &&
@@ -385,18 +378,10 @@ fun WhiteboardCanvasScreen(
                             }
                             gestureMode = CanvasGestureMode.ERASE_PIXEL
                         } else {
-                            // Hit test topmost unlocked & visible shapes, notes, strokes
+                            // Hit test topmost unlocked & visible shapes and strokes
                             val hitShape = curState.board.shapes.lastOrNull { s ->
                                 !s.isLocked && !s.isHiddenByCollapse &&
                                 isPointHittingShape(s, wX, wY, hitTolerance)
-                            }
-                            val hitNote = curState.board.stickyNotes.lastOrNull { n ->
-                                if (n.isLocked || n.isHiddenByCollapse) {
-                                    false
-                                } else {
-                                    val (lx, ly) = StickyNoteGeometry.toLocalUnrotated(n.x, n.y, n.width, n.height, n.rotation, wX, wY)
-                                    lx >= n.x && lx <= (n.x + n.width) && ly >= n.y && ly <= (n.y + n.height)
-                                }
                             }
                             val hitStroke = curState.board.strokes.lastOrNull { s ->
                                 isPointHittingStroke(s, wX, wY, (24f / curCamera.scale))
@@ -405,8 +390,6 @@ fun WhiteboardCanvasScreen(
                             if (hitShape != null) {
                                 viewModel.selectShape(hitShape.id)
                                 gestureMode = CanvasGestureMode.MOVE_SHAPE
-                            } else if (hitNote != null) {
-                                viewModel.selectNote(hitNote.id)
                             } else if (hitStroke != null) {
                                 viewModel.selectStroke(hitStroke.id)
                                 gestureMode = CanvasGestureMode.MOVE_STROKE
@@ -983,48 +966,25 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Render Sticky Notes (viewport-culled for unselected notes; selected rendered last for handle z-order)
+        // Render Sticky Notes (isolated per-note StateFlow cards + constant-size selection overlay)
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
+        val isPlacementPending = state.pendingStickyNoteColor != null || state.pendingShapeType != null
+        val isMultiSelectActive = (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
 
         StickyNoteLayer(
-            notes = state.board.stickyNotes,
+            viewModel = viewModel,
+            cameraState = cameraState,
             selectedNoteId = state.selectedNoteId,
             selectedNoteIds = state.selectedNoteIds,
-            selectedStrokeIds = state.selectedStrokeIds,
-            selectedShapeIds = state.selectedShapeIds,
-            cameraState = cameraState,
+            isMultiSelectActive = isMultiSelectActive,
             isPanOnlyMode = isPanOnlyMode,
+            isPlacementPending = isPlacementPending,
             hasViewport = hasViewport,
             viewportWidthPx = screenWidthPx,
             viewportHeightPx = screenHeightPx,
-            onSelect = viewModel::selectNote,
-            onBeginTransform = viewModel::beginStickyNoteTransformSnapshot,
-            onEndTransform = viewModel::commitWorkspaceSync,
-            onUpdateText = viewModel::updateStickyNoteText,
-            onUpdateTitle = viewModel::updateStickyNoteTitle,
-            onUpdateColor = viewModel::updateStickyNoteColor,
-            onTogglePin = viewModel::toggleStickyNotePin,
-            onDelete = { note ->
-                if (note.text.isNotBlank() || !note.title.isNullOrBlank()) {
-                    notePendingRemoval = note
-                } else {
-                    viewModel.deleteStickyNote(note.id)
-                }
-            },
-            onDragDelta = { note, dx, dy ->
-                if (state.selectedNoteIds.contains(note.id) &&
-                    (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
-                ) {
-                    viewModel.moveSelectedObjects(
-                        dx / viewModel.cameraState.value.scale,
-                        dy / viewModel.cameraState.value.scale
-                    )
-                } else {
-                    viewModel.moveStickyNote(note.id, dx, dy)
-                }
-            },
-            onResizeHandle = viewModel::resizeStickyNoteHandle,
-            onRotate = viewModel::rotateStickyNote
+            onRequestDeleteNote = { target ->
+                notePendingRemoval = target
+            }
         )
 
         // Strict pan-only touch shield when standalone Hand tool is active: prevents any accidental object selection/editing
@@ -1095,16 +1055,13 @@ fun WhiteboardCanvasScreen(
             val selectedStroke = remember(state.board.strokes, state.selectedStrokeId) {
                 state.selectedStrokeId?.let { id -> state.board.strokes.find { it.id == id } }
             }
-            val selectedNote = remember(state.board.stickyNotes, state.selectedNoteId) {
-                state.selectedNoteId?.let { id -> state.board.stickyNotes.find { it.id == id } }
-            }
 
             CanvasDockOverlay(
                 viewModel = viewModel,
                 hasSelection = hasSelection,
                 selectedShape = selectedShape,
                 selectedStroke = selectedStroke,
-                selectedNote = selectedNote,
+                selectedNoteId = state.selectedNoteId,
                 totalSelectedCount = totalSelectedCount.coerceAtLeast(1),
                 currentTool = state.currentTool,
                 penColorHex = state.penColorHex,
@@ -1453,7 +1410,7 @@ private fun CanvasDockOverlay(
     hasSelection: Boolean,
     selectedShape: ShapeItem?,
     selectedStroke: WhiteboardStroke?,
-    selectedNote: StickyNote?,
+    selectedNoteId: String?,
     totalSelectedCount: Int,
     currentTool: ToolType,
     penColorHex: String,
@@ -1466,6 +1423,26 @@ private fun CanvasDockOverlay(
     onRequestDeleteNote: (StickyNote) -> Unit,
     onOpenShapePicker: () -> Unit
 ) {
+    val selectedNote = if (selectedNoteId != null) {
+        val noteFlow = remember(viewModel, selectedNoteId) {
+            viewModel.stickyNotesStore.flowFor(selectedNoteId)
+        }
+        val initialNote = remember(viewModel, selectedNoteId) {
+            viewModel.stickyNotesStore.getOrNull(selectedNoteId)
+        }
+        val dockNoteFlow = remember(noteFlow) {
+            noteFlow?.distinctUntilChanged { old, new ->
+                old.id == new.id &&
+                    old.colorHex == new.colorHex &&
+                    old.isPinned == new.isPinned &&
+                    old.isAspectRatioLocked == new.isAspectRatioLocked
+            }
+        }
+        dockNoteFlow?.collectAsState(initial = initialNote)?.value
+    } else {
+        null
+    }
+
     val onSelectTool = remember(viewModel) {
         { tool: ToolType ->
             viewModel.cancelPendingPlacement()
@@ -1536,16 +1513,16 @@ private fun CanvasDockOverlay(
                 onDuplicateStroke = { viewModel.duplicateSelectedStroke() },
                 onDeleteStroke = { viewModel.deleteSelectedStroke() },
                 onUpdateNoteColor = { hex ->
-                    selectedNote?.let { viewModel.updateStickyNoteColor(it.id, hex) }
+                    selectedNoteId?.let { viewModel.updateStickyNoteColor(it, hex) }
                 },
                 onToggleNotePin = {
-                    selectedNote?.let { viewModel.toggleStickyNotePin(it.id) }
+                    selectedNoteId?.let { viewModel.toggleStickyNotePin(it) }
                 },
                 onToggleNoteAspectRatioLock = {
-                    selectedNote?.let { viewModel.toggleStickyNoteAspectRatioLock(it.id) }
+                    selectedNoteId?.let { viewModel.toggleStickyNoteAspectRatioLock(it) }
                 },
                 onDeleteNote = {
-                    val target = selectedNote
+                    val target = selectedNoteId?.let { viewModel.stickyNotesStore.getOrNull(it) }
                     if (target != null) {
                         onRequestDeleteNote(target)
                     } else {
@@ -1606,84 +1583,110 @@ private data class CachedShapeBounds(
 
 @Composable
 private fun StickyNoteLayer(
-    notes: List<StickyNote>,
+    viewModel: WhiteboardViewModel,
+    cameraState: State<ViewportTransform>,
     selectedNoteId: String?,
     selectedNoteIds: Set<String>,
-    selectedStrokeIds: Set<String>,
-    selectedShapeIds: Set<String>,
-    cameraState: State<ViewportTransform>,
+    isMultiSelectActive: Boolean,
     isPanOnlyMode: Boolean,
+    isPlacementPending: Boolean,
     hasViewport: Boolean,
     viewportWidthPx: Float,
     viewportHeightPx: Float,
-    onSelect: (String) -> Unit,
-    onBeginTransform: () -> Unit,
-    onEndTransform: () -> Unit,
-    onUpdateText: (String, String) -> Unit,
-    onUpdateTitle: (String, String) -> Unit,
-    onUpdateColor: (String, String) -> Unit,
-    onTogglePin: (String) -> Unit,
-    onDelete: (StickyNote) -> Unit,
-    onDragDelta: (StickyNote, Float, Float) -> Unit,
-    onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
-    onRotate: (String, Float) -> Unit
+    onRequestDeleteNote: (StickyNote) -> Unit
 ) {
-    // Re-evaluate visibility as the camera moves, but only recompose this layer
-    // when the actual set/order of visible notes changes. Note transforms themselves
-    // remain in each note's graphicsLayer phase.
-    val visibleNotes by remember(
-        notes, selectedNoteId, selectedNoteIds, cameraState,
-        hasViewport, viewportWidthPx, viewportHeightPx
-    ) {
-        derivedStateOf {
-            val camera = cameraState.value
-            val safeScale = if (camera.scale > 0.001f) camera.scale else 1f
-            val margin = 180f / safeScale
-            val visibleLeft = -camera.panX / safeScale - margin
-            val visibleTop = -camera.panY / safeScale - margin
-            val visibleRight = (viewportWidthPx - camera.panX) / safeScale + margin
-            val visibleBottom = (viewportHeightPx - camera.panY) / safeScale + margin
-            notes.filter { note ->
-                if (note.isHiddenByCollapse) {
-                    false
-                } else {
-                    val isSelected = note.id == selectedNoteId || selectedNoteIds.contains(note.id)
-                    if (isSelected || !hasViewport) {
-                        true
+    // Subscribes only to note ID list membership (add/remove/board switch).
+    // Individual note drags, resizes, rotations, and typing emit 0 changes here.
+    val noteIds by viewModel.stickyNotesStore.noteIds.collectAsState()
+    val textMeasurer = rememberTextMeasurer()
+
+    val onBeginTransform = viewModel::beginStickyNoteTransformSnapshot
+    val onEndTransform = viewModel::commitWorkspaceSync
+
+    noteIds.forEach { noteId ->
+        val noteFlow = viewModel.stickyNotesStore.flowFor(noteId) ?: return@forEach
+        val isSelected = noteId == selectedNoteId || selectedNoteIds.contains(noteId)
+
+        key(noteId) {
+            val onSelect = remember(viewModel, noteId) { { viewModel.selectNote(noteId) } }
+            val onUpdateText = remember(viewModel, noteId) {
+                { text: String -> viewModel.updateStickyNoteText(noteId, text) }
+            }
+            val onUpdateTitle = remember(viewModel, noteId) {
+                { title: String -> viewModel.updateStickyNoteTitle(noteId, title) }
+            }
+            val onUpdateColor = remember(viewModel, noteId) {
+                { hex: String -> viewModel.updateStickyNoteColor(noteId, hex) }
+            }
+            val onTogglePin = remember(viewModel, noteId) {
+                { viewModel.toggleStickyNotePin(noteId) }
+            }
+            val onDelete = remember(viewModel, noteId, onRequestDeleteNote) {
+                {
+                    val currentNote = viewModel.stickyNotesStore.getOrNull(noteId)
+                    if (currentNote != null && (currentNote.text.isNotBlank() || !currentNote.title.isNullOrBlank())) {
+                        onRequestDeleteNote(currentNote)
                     } else {
-                        val pad = kotlin.math.max(note.width, note.height) * 0.35f
-                        (note.x + note.width + pad) >= visibleLeft &&
-                            (note.x - pad) <= visibleRight &&
-                            (note.y + note.height + pad) >= visibleTop &&
-                            (note.y - pad) <= visibleBottom
+                        viewModel.deleteStickyNote(noteId)
                     }
                 }
             }
-        }
-    }
-    // Two stable passes preserve z-order (unselected first, selected last).
-    for (selectedPass in 0..1) {
-        visibleNotes.forEach { note ->
-            val isSelected = note.id == selectedNoteId || selectedNoteIds.contains(note.id)
-            if (isSelected != (selectedPass == 1)) return@forEach
+            val onDragDelta = remember(viewModel, noteId) {
+                { worldDx: Float, worldDy: Float ->
+                    val cur = viewModel.uiState.value
+                    val totalSel = cur.selectedNoteIds.size + cur.selectedStrokeIds.size + cur.selectedShapeIds.size
+                    if (totalSel > 1 && cur.selectedNoteIds.contains(noteId)) {
+                        viewModel.moveSelectedObjects(worldDx, worldDy)
+                    } else {
+                        viewModel.moveStickyNote(noteId, worldDx, worldDy)
+                    }
+                }
+            }
 
-            StickyNoteView(
-                note = note,
+            StickyNoteCard(
+                noteFlow = noteFlow,
                 cameraState = cameraState,
+                textMeasurer = textMeasurer,
                 isSelected = isSelected,
                 isPanOnlyMode = isPanOnlyMode,
-                onSelect = { onSelect(note.id) },
+                isPlacementPending = isPlacementPending,
+                hasViewport = hasViewport,
+                viewportWidthPx = viewportWidthPx,
+                viewportHeightPx = viewportHeightPx,
+                onSelect = onSelect,
                 onBeginTransform = onBeginTransform,
                 onEndTransform = onEndTransform,
-                onUpdateText = { onUpdateText(note.id, it) },
-                onUpdateTitle = { onUpdateTitle(note.id, it) },
-                onUpdateColor = { onUpdateColor(note.id, it) },
-                onTogglePin = { onTogglePin(note.id) },
-                onDelete = { onDelete(note) },
-                onDragDelta = { dx, dy -> onDragDelta(note, dx, dy) },
-                onResizeHandle = { handle, dx, dy -> onResizeHandle(note.id, handle, dx, dy) },
-                onRotate = { degrees -> onRotate(note.id, degrees) }
+                onUpdateText = onUpdateText,
+                onUpdateTitle = onUpdateTitle,
+                onUpdateColor = onUpdateColor,
+                onTogglePin = onTogglePin,
+                onDelete = onDelete,
+                onDragDelta = onDragDelta
             )
+        }
+    }
+
+    if (selectedNoteId != null && !isMultiSelectActive && !isPanOnlyMode && !isPlacementPending) {
+        val selectedFlow = viewModel.stickyNotesStore.flowFor(selectedNoteId)
+        if (selectedFlow != null) {
+            key("selection_overlay_$selectedNoteId") {
+                val onResizeHandle = remember(viewModel, selectedNoteId) {
+                    { handle: StickyNoteResizeHandle, dxScreen: Float, dyScreen: Float ->
+                        viewModel.resizeStickyNoteHandle(selectedNoteId, handle, dxScreen, dyScreen)
+                    }
+                }
+                val onRotate = remember(viewModel, selectedNoteId) {
+                    { degrees: Float -> viewModel.rotateStickyNote(selectedNoteId, degrees) }
+                }
+                StickyNoteSelectionOverlay(
+                    noteFlow = selectedFlow,
+                    cameraState = cameraState,
+                    onBeginTransform = onBeginTransform,
+                    onEndTransform = onEndTransform,
+                    onResizeHandle = onResizeHandle,
+                    onRotate = onRotate
+                )
+            }
         }
     }
 }

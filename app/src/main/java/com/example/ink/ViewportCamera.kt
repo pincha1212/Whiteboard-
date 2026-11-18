@@ -115,12 +115,13 @@ object StickyNoteGeometry {
     const val MAX_SIZE_WORLD = 2400f
 
     /**
-     * Scale-compensated handle resize in World Space:
+     * Scale- and rotation-compensated handle resize in World Space:
      *   deltaWorldX = deltaScreenX / scale
      *   deltaWorldY = deltaScreenY / scale
      *
-     * Updates width, height (and x, y for top/left handles) while keeping the opposite edge/corner
-     * anchored. When [lockAspectRatio] is true, enforces a 1:1 square (or [targetAspectRatio]).
+     * Rotates the pointer delta into the note's unrotated local frame, computes the new
+     * width/height while keeping the opposite edge/corner anchored, and projects the local
+     * center shift back into world space so rotated notes never drift on screen.
      */
     fun resizeByHandle(
         bounds: StickyNoteBounds,
@@ -129,11 +130,27 @@ object StickyNoteGeometry {
         deltaScreenY: Float,
         scale: Float,
         lockAspectRatio: Boolean,
-        targetAspectRatio: Float = 1.0f
+        targetAspectRatio: Float = 1.0f,
+        rotationDegrees: Float = 0f
     ): StickyNoteBounds {
         val safeScale = scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
         val dxWorld = deltaScreenX / safeScale
         val dyWorld = deltaScreenY / safeScale
+
+        val normalizedRot = ((rotationDegrees % 360f) + 360f) % 360f
+        val localDx: Float
+        val localDy: Float
+        val hasRotation = normalizedRot != 0f
+        if (hasRotation) {
+            val rad = -normalizedRot * (kotlin.math.PI.toFloat() / 180f)
+            val cosA = kotlin.math.cos(rad)
+            val sinA = kotlin.math.sin(rad)
+            localDx = dxWorld * cosA - dyWorld * sinA
+            localDy = dxWorld * sinA + dyWorld * cosA
+        } else {
+            localDx = dxWorld
+            localDy = dyWorld
+        }
 
         val origLeft = bounds.x
         val origTop = bounds.y
@@ -146,25 +163,25 @@ object StickyNoteGeometry {
         var bottom = origBottom
 
         when (handle) {
-            StickyNoteResizeHandle.LEFT -> left += dxWorld
-            StickyNoteResizeHandle.RIGHT -> right += dxWorld
-            StickyNoteResizeHandle.TOP -> top += dyWorld
-            StickyNoteResizeHandle.BOTTOM -> bottom += dyWorld
+            StickyNoteResizeHandle.LEFT -> left += localDx
+            StickyNoteResizeHandle.RIGHT -> right += localDx
+            StickyNoteResizeHandle.TOP -> top += localDy
+            StickyNoteResizeHandle.BOTTOM -> bottom += localDy
             StickyNoteResizeHandle.TOP_LEFT -> {
-                left += dxWorld
-                top += dyWorld
+                left += localDx
+                top += localDy
             }
             StickyNoteResizeHandle.TOP_RIGHT -> {
-                right += dxWorld
-                top += dyWorld
+                right += localDx
+                top += localDy
             }
             StickyNoteResizeHandle.BOTTOM_RIGHT -> {
-                right += dxWorld
-                bottom += dyWorld
+                right += localDx
+                bottom += localDy
             }
             StickyNoteResizeHandle.BOTTOM_LEFT -> {
-                left += dxWorld
-                bottom += dyWorld
+                left += localDx
+                bottom += localDy
             }
         }
 
@@ -181,69 +198,98 @@ object StickyNoteGeometry {
             handle == StickyNoteResizeHandle.BOTTOM_LEFT ||
             handle == StickyNoteResizeHandle.BOTTOM_RIGHT
 
+        val unrotatedX: Float
+        val unrotatedY: Float
+        val finalW: Float
+        val finalH: Float
+
         if (!lockAspectRatio) {
-            var newW = (right - left).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-            var newH = (bottom - top).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-            val newX = when {
-                touchesLeft -> origRight - newW
+            finalW = (right - left).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+            finalH = (bottom - top).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+            unrotatedX = when {
+                touchesLeft -> origRight - finalW
                 touchesRight -> origLeft
                 else -> origLeft
             }
-            val newY = when {
-                touchesTop -> origBottom - newH
+            unrotatedY = when {
+                touchesTop -> origBottom - finalH
                 touchesBottom -> origTop
                 else -> origTop
             }
-            return StickyNoteBounds(newX, newY, newW, newH)
-        }
+        } else {
+            // Aspect-ratio locked (square 1:1 by default)
+            val ratio = targetAspectRatio.coerceIn(0.25f, 4.0f)
+            val rawW = (right - left)
+            val rawH = (bottom - top)
 
-        // Aspect-ratio locked (square 1:1 by default)
-        val ratio = targetAspectRatio.coerceIn(0.25f, 4.0f)
-        val rawW = (right - left)
-        val rawH = (bottom - top)
-
-        val (targetW, targetH) = when (handle) {
-            StickyNoteResizeHandle.LEFT, StickyNoteResizeHandle.RIGHT -> {
-                val w = rawW.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                val h = (w / ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                (h * ratio) to h
-            }
-            StickyNoteResizeHandle.TOP, StickyNoteResizeHandle.BOTTOM -> {
-                val h = rawH.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                val w = (h * ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                w to (w / ratio)
-            }
-            else -> {
-                // Corner handle: follow dominant axis displacement while keeping opposite corner fixed
-                val dw = abs(rawW - bounds.width)
-                val dh = abs(rawH - bounds.height)
-                if (dw >= dh) {
+            val (targetW, targetH) = when (handle) {
+                StickyNoteResizeHandle.LEFT, StickyNoteResizeHandle.RIGHT -> {
                     val w = rawW.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
                     val h = (w / ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
                     (h * ratio) to h
-                } else {
+                }
+                StickyNoteResizeHandle.TOP, StickyNoteResizeHandle.BOTTOM -> {
                     val h = rawH.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
                     val w = (h * ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
                     w to (w / ratio)
                 }
+                else -> {
+                    // Corner handle: follow dominant axis displacement while keeping opposite corner fixed
+                    val dw = abs(rawW - bounds.width)
+                    val dh = abs(rawH - bounds.height)
+                    if (dw >= dh) {
+                        val w = rawW.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                        val h = (w / ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                        (h * ratio) to h
+                    } else {
+                        val h = rawH.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                        val w = (h * ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                        w to (w / ratio)
+                    }
+                }
             }
+
+            val centerX = origLeft + bounds.width * 0.5f
+            val centerY = origTop + bounds.height * 0.5f
+
+            unrotatedX = when {
+                touchesLeft -> origRight - targetW
+                touchesRight -> origLeft
+                else -> centerX - targetW * 0.5f
+            }
+            unrotatedY = when {
+                touchesTop -> origBottom - targetH
+                touchesBottom -> origTop
+                else -> centerY - targetH * 0.5f
+            }
+            finalW = targetW
+            finalH = targetH
         }
 
-        val centerX = origLeft + bounds.width * 0.5f
-        val centerY = origTop + bounds.height * 0.5f
-
-        val finalX = when {
-            touchesLeft -> origRight - targetW
-            touchesRight -> origLeft
-            else -> centerX - targetW * 0.5f
-        }
-        val finalY = when {
-            touchesTop -> origBottom - targetH
-            touchesBottom -> origTop
-            else -> centerY - targetH * 0.5f
+        if (!hasRotation) {
+            return StickyNoteBounds(unrotatedX, unrotatedY, finalW, finalH)
         }
 
-        return StickyNoteBounds(finalX, finalY, targetW, targetH)
+        // Compensate center shift in world space so the opposite anchored point remains fixed.
+        val oldCx = origLeft + bounds.width * 0.5f
+        val oldCy = origTop + bounds.height * 0.5f
+        val localShiftX = (unrotatedX + finalW * 0.5f) - oldCx
+        val localShiftY = (unrotatedY + finalH * 0.5f) - oldCy
+
+        val invRad = normalizedRot * (kotlin.math.PI.toFloat() / 180f)
+        val cosInv = kotlin.math.cos(invRad)
+        val sinInv = kotlin.math.sin(invRad)
+        val worldShiftX = localShiftX * cosInv - localShiftY * sinInv
+        val worldShiftY = localShiftX * sinInv + localShiftY * cosInv
+
+        val finalCx = oldCx + worldShiftX
+        val finalCy = oldCy + worldShiftY
+        return StickyNoteBounds(
+            x = finalCx - finalW * 0.5f,
+            y = finalCy - finalH * 0.5f,
+            width = finalW,
+            height = finalH
+        )
     }
 
     fun headerHeightWorld(noteHeight: Float): Float {
@@ -323,34 +369,78 @@ object StickyNoteGeometry {
         return max(currentHeightWorld, requiredTotalH).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
     }
 
+    /** Zero-allocation greedy word-wrap line counter across '\n'-delimited paragraphs. */
     private fun countWrappedLines(content: String, maxCols: Int): Int {
-        val paragraphs = content.split('\n')
+        if (content.isEmpty()) return 1
         var totalLines = 0
-        for (para in paragraphs) {
-            if (para.isEmpty()) {
-                totalLines += 1
-                continue
-            }
-            val words = para.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-            if (words.isEmpty()) {
-                totalLines += 1
-                continue
-            }
-            var curLineChars = 0
-            var paraLines = 1
-            for (word in words) {
-                if (curLineChars == 0) {
-                    curLineChars = word.length
-                } else if (curLineChars + 1 + word.length <= maxCols) {
-                    curLineChars += 1 + word.length
-                } else {
-                    paraLines += 1
-                    curLineChars = word.length
+        var paraLines = 1
+        var curLineChars = 0
+        var wordLen = 0
+        val len = content.length
+        for (i in 0 until len) {
+            val c = content[i]
+            if (c == '\n') {
+                if (wordLen > 0) {
+                    if (curLineChars == 0) {
+                        curLineChars = wordLen
+                    } else if (curLineChars + 1 + wordLen <= maxCols) {
+                        curLineChars += 1 + wordLen
+                    } else {
+                        paraLines += 1
+                    }
+                    wordLen = 0
                 }
+                totalLines += paraLines
+                paraLines = 1
+                curLineChars = 0
+            } else if (c.isWhitespace()) {
+                if (wordLen > 0) {
+                    if (curLineChars == 0) {
+                        curLineChars = wordLen
+                    } else if (curLineChars + 1 + wordLen <= maxCols) {
+                        curLineChars += 1 + wordLen
+                    } else {
+                        paraLines += 1
+                        curLineChars = wordLen
+                    }
+                    wordLen = 0
+                }
+            } else {
+                wordLen++
             }
-            totalLines += paraLines
         }
+        if (wordLen > 0) {
+            if (curLineChars > 0 && curLineChars + 1 + wordLen > maxCols) {
+                paraLines += 1
+            }
+        }
+        totalLines += paraLines
         return totalLines.coerceAtLeast(1)
+    }
+
+    /** Zero-allocation longest-word scanner returning (startIndex, endIndexExclusive) or max length. */
+    fun findLongestTokenRange(text: String): Pair<Int, Int> {
+        var bestStart = 0
+        var bestEnd = 0
+        var curStart = -1
+        for (i in 0 until text.length) {
+            if (text[i].isWhitespace()) {
+                if (curStart >= 0) {
+                    if (i - curStart > bestEnd - bestStart) {
+                        bestStart = curStart
+                        bestEnd = i
+                    }
+                    curStart = -1
+                }
+            } else if (curStart < 0) {
+                curStart = i
+            }
+        }
+        if (curStart >= 0 && text.length - curStart > bestEnd - bestStart) {
+            bestStart = curStart
+            bestEnd = text.length
+        }
+        return bestStart to bestEnd
     }
 
     /**
@@ -366,26 +456,24 @@ object StickyNoteGeometry {
     ): Float {
         val safeW = innerWidthWorld.coerceAtLeast(24f)
         val safeH = innerHeightWorld.coerceAtLeast(24f)
-        val combinedText = buildString {
-            val t = title?.trim().orEmpty()
-            if (t.isNotEmpty()) {
-                append(t)
-                append('\n')
-            }
-            append(text.ifEmpty { "Escribe el contenido..." })
-        }
+        val cleanTitle = title?.trim().orEmpty()
+        val bodyText = text.ifEmpty { "Escribe el contenido..." }
 
         val minFont = 6f
         val maxFont = max(minFont + 1f, min(safeW, safeH) * 0.42f)
 
-        val words = combinedText.split(Regex("\\s+")).filter { it.isNotEmpty() }
-        val maxWordLen = words.maxOfOrNull { it.length }?.coerceAtLeast(1) ?: 1
+        val titleRange = if (cleanTitle.isNotEmpty()) findLongestTokenRange(cleanTitle) else 0 to 0
+        val bodyRange = findLongestTokenRange(bodyText)
+        val maxWordLen = max(
+            1,
+            max(titleRange.second - titleRange.first, bodyRange.second - bodyRange.first)
+        )
 
         var lo = minFont
         var hi = maxFont
         repeat(16) {
             val mid = (lo + hi) * 0.5f
-            if (doesTextFitWorldBox(combinedText, words, maxWordLen, mid, safeW, safeH)) {
+            if (doesTextFitWorldBox(cleanTitle, bodyText, maxWordLen, mid, safeW, safeH)) {
                 lo = mid
             } else {
                 hi = mid
@@ -395,8 +483,8 @@ object StickyNoteGeometry {
     }
 
     private fun doesTextFitWorldBox(
-        text: String,
-        words: List<String>,
+        cleanTitle: String,
+        bodyText: String,
         maxWordLen: Int,
         fontSize: Float,
         boxW: Float,
@@ -411,32 +499,11 @@ object StickyNoteGeometry {
         }
 
         val maxCols = max(1, (boxW / avgCharW).toInt())
-        val paragraphs = text.split('\n')
         var totalLines = 0
-        for (para in paragraphs) {
-            if (para.isEmpty()) {
-                totalLines += 1
-                continue
-            }
-            val pWords = para.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-            if (pWords.isEmpty()) {
-                totalLines += 1
-                continue
-            }
-            var currentLineChars = 0
-            var paraLines = 1
-            for (word in pWords) {
-                if (currentLineChars == 0) {
-                    currentLineChars = word.length
-                } else if (currentLineChars + 1 + word.length <= maxCols) {
-                    currentLineChars += 1 + word.length
-                } else {
-                    paraLines += 1
-                    currentLineChars = word.length
-                }
-            }
-            totalLines += paraLines
+        if (cleanTitle.isNotEmpty()) {
+            totalLines += countWrappedLines(cleanTitle, maxCols)
         }
+        totalLines += countWrappedLines(bodyText, maxCols)
 
         val requiredH = totalLines * lineH
         return requiredH <= boxH * 0.94f

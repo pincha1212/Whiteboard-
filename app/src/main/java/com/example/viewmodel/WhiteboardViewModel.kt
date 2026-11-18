@@ -29,10 +29,17 @@ import com.example.model.TextItem
 import com.example.model.ToolType
 import com.example.model.WhiteboardBoard
 import com.example.model.WhiteboardStroke
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -92,12 +99,19 @@ class WhiteboardViewModel(
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
     private var isCommittingToStore = false
-    // Sticky-note transforms update the canvas every pointer event but project to the
-    // shared Notes/Whiteboard store only once, when the gesture finishes.
+    // Sticky-note transforms update only the target note's StateFlow on every pointer event
+    // and consolidate into WhiteboardUiState + the shared store once when the gesture ends.
     private var isStickyNoteTransformInProgress = false
+    private val noteSyncLock = Any()
+    private val backgroundSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var pendingNoteTextSyncJob: Job? = null
+    @Volatile
+    private var hasPendingNoteTextSync = false
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
+
+    val stickyNotesStore = StickyNoteStateStore(_uiState.value.board.stickyNotes)
 
     // Camera updates are deliberately isolated from content state so pan/zoom never
     // publishes a new WhiteboardUiState or invalidates toolbars and editor panels.
@@ -119,13 +133,53 @@ class WhiteboardViewModel(
                 val cur = currentBoards.find { it.id == state.board.id } ?: currentBoards.first()
                 state.copy(board = cur, allBoards = currentBoards)
             }
+            stickyNotesStore.replaceAll(_uiState.value.board.stickyNotes)
         }
         store.addListener(storeListener)
     }
 
     override fun onCleared() {
+        flushPendingStickyNoteSync(persist = true)
+        backgroundSyncScope.cancel()
         store.removeListener(storeListener)
         super.onCleared()
+    }
+
+    private fun scheduleNoteTextSync() {
+        synchronized(noteSyncLock) {
+            hasPendingNoteTextSync = true
+            pendingNoteTextSyncJob?.cancel()
+            pendingNoteTextSyncJob = backgroundSyncScope.launch {
+                delay(300L)
+                flushPendingStickyNoteSync(persist = true)
+            }
+        }
+    }
+
+    private fun syncStickyNotesIntoBoardState() {
+        val latestNotes = stickyNotesStore.currentNotes()
+        _uiState.update { state ->
+            if (state.board.stickyNotes == latestNotes) {
+                state
+            } else {
+                state.withUpdatedBoard { b -> b.copy(stickyNotes = latestNotes) }
+            }
+        }
+    }
+
+    private fun flushPendingStickyNoteSync(persist: Boolean) {
+        synchronized(noteSyncLock) {
+            if (!hasPendingNoteTextSync) return
+            hasPendingNoteTextSync = false
+            pendingNoteTextSyncJob?.cancel()
+            pendingNoteTextSyncJob = null
+            syncStickyNotesIntoBoardState()
+            commitBoardMutationToStore(
+                _uiState.value.board,
+                softDeleteMissingNotes = false,
+                persist = persist
+            )
+        }
     }
 
     private fun commitBoardMutationToStore(
@@ -148,27 +202,44 @@ class WhiteboardViewModel(
 
     private fun applyCanonicalBoardsFromDb(boards: List<WhiteboardBoard>) {
         if (boards.isEmpty()) return
+        var activeBoardChangedOrUpdated: WhiteboardBoard? = null
         _uiState.update { state ->
             val currentBoard = boards.find { it.id == state.board.id }
                 ?: if (state.isViewingBoardsHome) boards.first() else state.board
             if (state.allBoards == boards && state.board == currentBoard) {
                 state
             } else {
+                activeBoardChangedOrUpdated = currentBoard
                 state.copy(board = currentBoard, allBoards = boards)
+            }
+        }
+        activeBoardChangedOrUpdated?.let { updatedBoard ->
+            if (!isStickyNoteTransformInProgress && !hasPendingNoteTextSync) {
+                stickyNotesStore.replaceAll(updatedBoard.stickyNotes)
             }
         }
     }
 
     fun commitWorkspaceSync() {
+        var didConsolidate = false
         if (isStickyNoteTransformInProgress) {
             isStickyNoteTransformInProgress = false
+            stickyNotesStore.resetDragAccumulator()
+            syncStickyNotesIntoBoardState()
             commitBoardMutationToStore(
                 _uiState.value.board,
                 softDeleteMissingNotes = false,
                 persist = false
             )
+            didConsolidate = true
         }
-        store.flushToDisk()
+        if (hasPendingNoteTextSync) {
+            flushPendingStickyNoteSync(persist = false)
+            didConsolidate = true
+        }
+        if (didConsolidate || store.currentState.boards.isNotEmpty()) {
+            store.flushToDisk()
+        }
     }
 
     private fun createInitialState(): WhiteboardUiState {
@@ -205,6 +276,9 @@ class WhiteboardViewModel(
     }
 
     fun setTool(tool: ToolType) {
+        if (tool == ToolType.HAND) {
+            flushPendingStickyNoteSync(persist = true)
+        }
         _uiState.update { state ->
             if (tool == ToolType.HAND) {
                 state.copy(
@@ -326,7 +400,7 @@ class WhiteboardViewModel(
             if (s.y + s.height > maxY) maxY = s.y + s.height
         }
 
-        board.stickyNotes.forEach { n ->
+        stickyNotesStore.currentNotes().forEach { n ->
             hasElements = true
             if (n.x < minX) minX = n.x
             if (n.x + n.width > maxX) maxX = n.x + n.width
@@ -686,7 +760,7 @@ class WhiteboardViewModel(
             }
         }.map { it.id }.toSet()
 
-        val enclosedNoteIds = board.stickyNotes.filter { n ->
+        val enclosedNoteIds = stickyNotesStore.currentNotes().filter { n ->
             if (n.isLocked || n.isHiddenByCollapse) {
                 false
             } else {
@@ -752,7 +826,6 @@ class WhiteboardViewModel(
 
     fun addStickyNote(screenW: Float = 1080f, screenH: Float = 1920f, colorHex: String = "#FFF275") {
         saveUndoSnapshot()
-        val state = _uiState.value
         val camera = _cameraState.value
         val worldCenterX = (screenW / 2f - camera.panX) / camera.scale
         val worldCenterY = (screenH / 2f - camera.panY) / camera.scale
@@ -767,104 +840,89 @@ class WhiteboardViewModel(
             colorHex = colorHex
         )
 
+        stickyNotesStore.addNote(newNote)
         _uiState.update {
-            it.withUpdatedBoard { b -> b.copy(stickyNotes = b.stickyNotes + newNote) }
+            it.withUpdatedBoard { b -> b.copy(stickyNotes = stickyNotesStore.currentNotes()) }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun updateStickyNoteTitle(id: String, newTitle: String) {
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.map { n ->
-                    if (n.id == id) {
-                        val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
-                            text = n.text,
-                            noteWidthWorld = n.width,
-                            currentHeightWorld = n.height,
-                            isAspectRatioLocked = n.isAspectRatioLocked,
-                            title = newTitle
-                        )
-                        if (n.isAspectRatioLocked && adaptedH > n.height) {
-                            n.copy(title = newTitle, width = adaptedH, height = adaptedH)
-                        } else if (adaptedH > n.height) {
-                            n.copy(title = newTitle, height = adaptedH)
-                        } else {
-                            n.copy(title = newTitle)
-                        }
-                    } else n
-                })
+        val updated = stickyNotesStore.updateSingle(id) { n ->
+            val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
+                text = n.text,
+                noteWidthWorld = n.width,
+                currentHeightWorld = n.height,
+                isAspectRatioLocked = n.isAspectRatioLocked,
+                title = newTitle
+            )
+            if (n.isAspectRatioLocked && adaptedH > n.height) {
+                n.copy(title = newTitle, width = adaptedH, height = adaptedH)
+            } else if (adaptedH > n.height) {
+                n.copy(title = newTitle, height = adaptedH)
+            } else {
+                n.copy(title = newTitle)
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        if (updated != null) {
+            scheduleNoteTextSync()
+        }
     }
 
     fun updateStickyNoteText(id: String, newText: String) {
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.map { n ->
-                    if (n.id == id) {
-                        val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
-                            text = newText,
-                            noteWidthWorld = n.width,
-                            currentHeightWorld = n.height,
-                            isAspectRatioLocked = n.isAspectRatioLocked,
-                            title = n.title
-                        )
-                        if (n.isAspectRatioLocked && adaptedH > n.height) {
-                            n.copy(text = newText, width = adaptedH, height = adaptedH)
-                        } else if (adaptedH > n.height) {
-                            n.copy(text = newText, height = adaptedH)
-                        } else {
-                            n.copy(text = newText)
-                        }
-                    } else n
-                })
+        val updated = stickyNotesStore.updateSingle(id) { n ->
+            val adaptedH = StickyNoteGeometry.calculateAdaptiveHeightWorld(
+                text = newText,
+                noteWidthWorld = n.width,
+                currentHeightWorld = n.height,
+                isAspectRatioLocked = n.isAspectRatioLocked,
+                title = n.title
+            )
+            if (n.isAspectRatioLocked && adaptedH > n.height) {
+                n.copy(text = newText, width = adaptedH, height = adaptedH)
+            } else if (adaptedH > n.height) {
+                n.copy(text = newText, height = adaptedH)
+            } else {
+                n.copy(text = newText)
             }
         }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        if (updated != null) {
+            scheduleNoteTextSync()
+        }
     }
 
     fun updateStickyNoteColor(id: String, colorHex: String) {
         saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.map { n -> if (n.id == id) n.copy(colorHex = colorHex) else n })
-            }
-        }
+        stickyNotesStore.updateSingle(id) { n -> n.copy(colorHex = colorHex) }
+        syncStickyNotesIntoBoardState()
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun toggleStickyNotePin(id: String) {
         saveUndoSnapshot()
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.map { n -> if (n.id == id) n.copy(isPinned = !n.isPinned) else n })
-            }
-        }
+        stickyNotesStore.updateSingle(id) { n -> n.copy(isPinned = !n.isPinned) }
+        syncStickyNotesIntoBoardState()
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
-    fun moveStickyNote(id: String, deltaX: Float, deltaY: Float) {
-        val state = _uiState.value
-        val camera = _cameraState.value
-        val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id && !note.isLocked) {
-                var nextX = note.x + (deltaX / camera.scale)
-                var nextY = note.y + (deltaY / camera.scale)
-                if (state.isSnapToGrid) {
-                    nextX = kotlin.math.round(nextX / 40f) * 40f
-                    nextY = kotlin.math.round(nextY / 40f) * 40f
-                }
-                note.copy(x = nextX, y = nextY)
-            } else note
-        }
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
-        }
-        if (!isStickyNoteTransformInProgress) {
+    /**
+     * Moves a sticky note by a pure World-Space delta (deltaWorldX, deltaWorldY).
+     * While [isStickyNoteTransformInProgress] is true, only that note's isolated StateFlow
+     * updates (0 WhiteboardUiState emissions, 0 sibling recompositions).
+     */
+    fun moveStickyNote(id: String, deltaWorldX: Float, deltaWorldY: Float) {
+        val before = stickyNotesStore.getOrNull(id) ?: return
+        val updated = stickyNotesStore.moveSingleWorld(
+            id = id,
+            worldDx = deltaWorldX,
+            worldDy = deltaWorldY,
+            snapToGrid = _uiState.value.isSnapToGrid
+        ) ?: return
+
+        if (isStickyNoteTransformInProgress) return
+
+        if (updated != before) {
+            syncStickyNotesIntoBoardState()
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
         }
     }
@@ -875,36 +933,33 @@ class WhiteboardViewModel(
         deltaScreenX: Float,
         deltaScreenY: Float
     ) {
-        val state = _uiState.value
         val camera = _cameraState.value
-        var modified = false
-        val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id && !note.isLocked) {
-                modified = true
-                val next = StickyNoteGeometry.resizeByHandle(
-                    bounds = StickyNoteBounds(note.x, note.y, note.width, note.height),
-                    handle = handle,
-                    deltaScreenX = deltaScreenX,
-                    deltaScreenY = deltaScreenY,
-                    scale = camera.scale,
-                    lockAspectRatio = note.isAspectRatioLocked,
-                    targetAspectRatio = 1.0f
-                )
-                note.copy(
-                    x = next.x,
-                    y = next.y,
-                    width = next.width,
-                    height = next.height
-                )
-            } else note
-        }
-        if (!modified) return
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
-        }
-        if (!isStickyNoteTransformInProgress) {
+        val before = stickyNotesStore.getOrNull(id) ?: return
+        if (before.isLocked) return
+
+        val updated = stickyNotesStore.updateSingle(id) { note ->
+            val next = StickyNoteGeometry.resizeByHandle(
+                bounds = StickyNoteBounds(note.x, note.y, note.width, note.height),
+                handle = handle,
+                deltaScreenX = deltaScreenX,
+                deltaScreenY = deltaScreenY,
+                scale = camera.scale,
+                lockAspectRatio = note.isAspectRatioLocked,
+                targetAspectRatio = 1.0f,
+                rotationDegrees = note.rotation
+            )
+            note.copy(
+                x = next.x,
+                y = next.y,
+                width = next.width,
+                height = next.height
+            )
+        } ?: return
+
+        if (isStickyNoteTransformInProgress) return
+
+        if (updated != before) {
+            syncStickyNotesIntoBoardState()
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
         }
     }
@@ -917,47 +972,30 @@ class WhiteboardViewModel(
         newHeight: Float,
         saveSnapshot: Boolean = false
     ) {
-        val state = _uiState.value
         val cleanW = newWidth.coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
         val cleanH = newHeight.coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
         if (saveSnapshot) saveUndoSnapshot()
-        val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id && !note.isLocked) {
-                note.copy(x = newX, y = newY, width = cleanW, height = cleanH)
-            } else note
+        stickyNotesStore.updateSingle(id) { note ->
+            if (!note.isLocked) note.copy(x = newX, y = newY, width = cleanW, height = cleanH) else note
         }
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
-        }
+        syncStickyNotesIntoBoardState()
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = saveSnapshot)
     }
 
     fun toggleStickyNoteAspectRatioLock(id: String) {
-        val target = _uiState.value.board.stickyNotes.find { it.id == id } ?: return
+        val target = stickyNotesStore.getOrNull(id) ?: return
         saveUndoSnapshot()
         val nextLocked = !target.isAspectRatioLocked
-        val updated = _uiState.value.board.stickyNotes.map { note ->
-            if (note.id != id) {
-                note
-            } else if (nextLocked) {
+        stickyNotesStore.updateSingle(id) { note ->
+            if (nextLocked) {
                 val side = ((note.width + note.height) * 0.5f)
                     .coerceIn(StickyNoteGeometry.MIN_SIZE_WORLD, StickyNoteGeometry.MAX_SIZE_WORLD)
-                note.copy(
-                    width = side,
-                    height = side,
-                    isAspectRatioLocked = true
-                )
+                note.copy(width = side, height = side, isAspectRatioLocked = true)
             } else {
                 note.copy(isAspectRatioLocked = false)
             }
         }
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
-        }
+        syncStickyNotesIntoBoardState()
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
@@ -968,15 +1006,17 @@ class WhiteboardViewModel(
     ) {
         if (saveSnapshot) saveUndoSnapshot()
         val cleanAngle = ((rotationDegrees % 360f) + 360f) % 360f
-        _uiState.update { state ->
-            val updated = state.board.stickyNotes.map { note ->
-                if (note.id == id && !note.isLocked) {
-                    note.copy(rotation = cleanAngle)
-                } else note
-            }
-            state.withUpdatedBoard { b -> b.copy(stickyNotes = updated) }
-        }
-        if (!isStickyNoteTransformInProgress) {
+        val before = stickyNotesStore.getOrNull(id) ?: return
+        if (before.isLocked) return
+
+        val updated = stickyNotesStore.updateSingle(id) { note ->
+            if (!note.isLocked) note.copy(rotation = cleanAngle) else note
+        } ?: return
+
+        if (isStickyNoteTransformInProgress) return
+
+        if (updated != before) {
+            syncStickyNotesIntoBoardState()
             commitBoardMutationToStore(
                 _uiState.value.board,
                 softDeleteMissingNotes = false,
@@ -987,10 +1027,11 @@ class WhiteboardViewModel(
 
     fun deleteStickyNote(id: String) {
         saveUndoSnapshot()
+        stickyNotesStore.removeNotes(setOf(id))
         _uiState.update { state ->
             val remainingNoteIds = state.selectedNoteIds - id
             state.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
+                b.copy(stickyNotes = stickyNotesStore.currentNotes())
             }.copy(
                 selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
                 selectedNoteIds = remainingNoteIds
@@ -1001,10 +1042,11 @@ class WhiteboardViewModel(
 
     fun detachStickyNoteFromBoard(id: String) {
         saveUndoSnapshot()
+        stickyNotesStore.removeNotes(setOf(id))
         _uiState.update { state ->
             val remainingNoteIds = state.selectedNoteIds - id
             state.withUpdatedBoard { b ->
-                b.copy(stickyNotes = b.stickyNotes.filter { n -> n.id != id })
+                b.copy(stickyNotes = stickyNotesStore.currentNotes())
             }.copy(
                 selectedNoteId = if (state.selectedNoteId == id) remainingNoteIds.firstOrNull() else state.selectedNoteId,
                 selectedNoteIds = remainingNoteIds
@@ -1032,13 +1074,14 @@ class WhiteboardViewModel(
 
         if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty()) return
         saveUndoSnapshot()
+        stickyNotesStore.removeNotes(noteIds)
 
         _uiState.update {
             it.withUpdatedBoard { b ->
                 b.copy(
                     strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
                     shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
-                    stickyNotes = b.stickyNotes.filter { n -> !noteIds.contains(n.id) }
+                    stickyNotes = stickyNotesStore.currentNotes()
                 )
             }.copy(
                 selectedStrokeId = null,
@@ -1104,12 +1147,14 @@ class WhiteboardViewModel(
                 y = worldY - 100f,
                 colorHex = state.pendingStickyNoteColor
             )
+            stickyNotesStore.addNote(newNote)
             _uiState.update {
                 it.withUpdatedBoard { b ->
-                    b.copy(stickyNotes = b.stickyNotes + newNote)
+                    b.copy(stickyNotes = stickyNotesStore.currentNotes())
                 }.copy(
                     pendingStickyNoteColor = null,
-                    selectedNoteId = newNote.id
+                    selectedNoteId = newNote.id,
+                    selectedNoteIds = setOf(newNote.id)
                 )
             }
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
@@ -1231,6 +1276,7 @@ class WhiteboardViewModel(
     }
 
     fun selectStroke(id: String?) {
+        flushPendingStickyNoteSync(persist = true)
         _uiState.update {
             it.copy(
                 selectedStrokeId = id,
@@ -1244,6 +1290,7 @@ class WhiteboardViewModel(
     }
 
     fun selectShape(id: String?) {
+        flushPendingStickyNoteSync(persist = true)
         _uiState.update {
             it.copy(
                 selectedShapeId = id,
@@ -1257,6 +1304,9 @@ class WhiteboardViewModel(
     }
 
     fun selectNote(id: String?) {
+        if (_uiState.value.selectedNoteId != id) {
+            flushPendingStickyNoteSync(persist = true)
+        }
         _uiState.update {
             it.copy(
                 selectedNoteId = id,
@@ -1270,6 +1320,7 @@ class WhiteboardViewModel(
     }
 
     fun clearSelection() {
+        flushPendingStickyNoteSync(persist = true)
         _uiState.update {
             it.copy(
                 selectedStrokeId = null,
@@ -1509,6 +1560,13 @@ class WhiteboardViewModel(
 
         if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty()) return
 
+        if (noteIds.isNotEmpty()) {
+            stickyNotesStore.moveMultipleWorld(noteIds, dxWorld, dyWorld)
+        }
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && isStickyNoteTransformInProgress) {
+            return
+        }
+
         val updatedStrokes = if (strokeIds.isEmpty()) state.board.strokes else state.board.strokes.map { s ->
             if (strokeIds.contains(s.id)) {
                 s.copy(points = s.points.map { StrokePoint(it.x + dxWorld, it.y + dyWorld) })
@@ -1523,11 +1581,7 @@ class WhiteboardViewModel(
                 )
             } else sh
         }
-        val updatedNotes = if (noteIds.isEmpty()) state.board.stickyNotes else state.board.stickyNotes.map { n ->
-            if (noteIds.contains(n.id) && !n.isLocked) {
-                n.copy(x = n.x + dxWorld, y = n.y + dyWorld)
-            } else n
-        }
+        val updatedNotes = if (noteIds.isEmpty()) state.board.stickyNotes else stickyNotesStore.currentNotes()
         _uiState.update {
             it.withUpdatedBoard { b ->
                 b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
@@ -1744,6 +1798,8 @@ class WhiteboardViewModel(
     }
 
     fun persistCurrentBoard() {
+        flushPendingStickyNoteSync(persist = false)
+        syncStickyNotesIntoBoardState()
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
@@ -2136,13 +2192,14 @@ class WhiteboardViewModel(
     }
 
     fun duplicateCurrentSelection() {
+        flushPendingStickyNoteSync(persist = false)
         val state = _uiState.value
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
         val noteIds = if (state.selectedNoteIds.isNotEmpty()) state.selectedNoteIds else state.selectedNoteId?.let { setOf(it) } ?: emptySet()
         val strokesToDup = state.board.strokes.filter { strokeIds.contains(it.id) }
         val shapesToDup = state.board.shapes.filter { shapeIds.contains(it.id) }
-        val notesToDup = state.board.stickyNotes.filter { noteIds.contains(it.id) }
+        val notesToDup = stickyNotesStore.currentNotes().filter { noteIds.contains(it.id) }
         if (strokesToDup.isEmpty() && shapesToDup.isEmpty() && notesToDup.isEmpty()) return
         saveUndoSnapshot()
         val newStrokes = strokesToDup.map { s ->
@@ -2165,6 +2222,9 @@ class WhiteboardViewModel(
                 parentId = null
             )
         }
+        for (newNote in newNotes) {
+            stickyNotesStore.addNote(newNote)
+        }
         val newStrokeIds = newStrokes.map { it.id }.toSet()
         val newShapeIds = newShapes.map { it.id }.toSet()
         val newNoteIds = newNotes.map { it.id }.toSet()
@@ -2173,7 +2233,7 @@ class WhiteboardViewModel(
                 b.copy(
                     strokes = b.strokes + newStrokes,
                     shapes = b.shapes + newShapes,
-                    stickyNotes = b.stickyNotes + newNotes
+                    stickyNotes = stickyNotesStore.currentNotes()
                 )
             }.copy(
                 selectedStrokeId = newStrokeIds.firstOrNull(),
@@ -2190,11 +2250,14 @@ class WhiteboardViewModel(
     }
 
     fun openBoard(boardId: String) {
+        flushPendingStickyNoteSync(persist = true)
         val target = _uiState.value.allBoards.find { it.id == boardId }
             ?: store.currentState.boards.find { it.id == boardId }
             ?: return
         undoStack.clear()
         redoStack.clear()
+        isStickyNoteTransformInProgress = false
+        stickyNotesStore.replaceAll(target.stickyNotes)
         _uiState.update {
             it.copy(
                 board = target,
@@ -2215,12 +2278,15 @@ class WhiteboardViewModel(
     }
 
     fun openBoardAndFocusNote(boardId: String, noteId: String) {
+        flushPendingStickyNoteSync(persist = true)
         val targetBoard = _uiState.value.allBoards.find { it.id == boardId }
             ?: store.currentState.boards.find { it.id == boardId }
             ?: return
         val targetNote = targetBoard.stickyNotes.find { it.id == noteId }
         undoStack.clear()
         redoStack.clear()
+        isStickyNoteTransformInProgress = false
+        stickyNotesStore.replaceAll(targetBoard.stickyNotes)
         val currentCamera = _cameraState.value
         val focusScale = 1.0f
         val nextPanX: Float
@@ -2256,6 +2322,7 @@ class WhiteboardViewModel(
     }
 
     fun closeBoardToHome() {
+        commitWorkspaceSync()
         _uiState.update {
             it.withUpdatedBoard { b -> b }.copy(
                 isViewingBoardsHome = true,
@@ -2279,6 +2346,9 @@ class WhiteboardViewModel(
         colorTheme: CanvasColorTheme = CanvasColorTheme.WHITE,
         openImmediately: Boolean = true
     ) {
+        if (openImmediately) {
+            flushPendingStickyNoteSync(persist = true)
+        }
         val newBoard = WhiteboardBoard(
             id = UUID.randomUUID().toString(),
             title = title.ifBlank { "Nueva Pizarra" },
@@ -2288,6 +2358,8 @@ class WhiteboardViewModel(
         if (openImmediately) {
             undoStack.clear()
             redoStack.clear()
+            isStickyNoteTransformInProgress = false
+            stickyNotesStore.replaceAll(newBoard.stickyNotes)
         }
         isCommittingToStore = true
         val db = try {
@@ -2296,6 +2368,9 @@ class WhiteboardViewModel(
             isCommittingToStore = false
         }
         val canonicalBoard = db.boards.find { it.id == newBoard.id } ?: newBoard
+        if (openImmediately) {
+            stickyNotesStore.replaceAll(canonicalBoard.stickyNotes)
+        }
         _uiState.update {
             it.copy(
                 board = if (openImmediately) canonicalBoard else it.board,
@@ -2402,6 +2477,9 @@ class WhiteboardViewModel(
             state.board.id == boardId -> nextBoards.first()
             else -> nextBoards.find { it.id == state.board.id } ?: nextBoards.first()
         }
+        if (state.board.id == boardId) {
+            stickyNotesStore.replaceAll(nextCurrent.stickyNotes)
+        }
         _uiState.update {
             it.copy(
                 board = nextCurrent,
@@ -2449,6 +2527,7 @@ class WhiteboardViewModel(
 
     fun clearBoard() {
         saveUndoSnapshot()
+        stickyNotesStore.replaceAll(emptyList())
         val log = AuditLogEntry(
             actionName = "BOARD_CLEARED",
             details = "Lienzo limpiado (elementos eliminados)",
@@ -2621,6 +2700,7 @@ class WhiteboardViewModel(
             y = worldCenterY - 100f,
             colorHex = colorHex
         )
+        stickyNotesStore.addNote(note)
         _uiState.update { state ->
             state.withUpdatedBoard { b ->
                 val log = AuditLogEntry(
@@ -2628,9 +2708,10 @@ class WhiteboardViewModel(
                     details = "Nota adhesiva creada en centro ($colorHex)",
                     category = "NOTES"
                 )
-                b.copy(stickyNotes = b.stickyNotes + note, auditLogs = (b.auditLogs + log).takeLast(100))
+                b.copy(stickyNotes = stickyNotesStore.currentNotes(), auditLogs = (b.auditLogs + log).takeLast(100))
             }.copy(
                 selectedNoteId = note.id,
+                selectedNoteIds = setOf(note.id),
                 pendingStickyNoteColor = null
             )
         }
@@ -2638,6 +2719,8 @@ class WhiteboardViewModel(
     }
 
     fun createSnapshot(versionName: String, description: String) {
+        flushPendingStickyNoteSync(persist = false)
+        syncStickyNotesIntoBoardState()
         val board = _uiState.value.board
         val serialized = BoardSnapshotSerializer.serializeBoard(board)
         val cleanName = versionName.trim().ifBlank { "v${board.snapshots.size + 1}.0" }
@@ -2671,6 +2754,7 @@ class WhiteboardViewModel(
         val restored = BoardSnapshotSerializer.deserializeIntoBoard(snapshot.serializedData, current)
             ?: return false
         saveUndoSnapshot()
+        stickyNotesStore.replaceAll(restored.stickyNotes)
         val log = AuditLogEntry(
             actionName = "SNAPSHOT_RESTORED",
             details = "Restaurada versión ${snapshot.versionName}",
@@ -2714,6 +2798,8 @@ class WhiteboardViewModel(
     }
 
     private fun saveUndoSnapshot() {
+        flushPendingStickyNoteSync(persist = false)
+        syncStickyNotesIntoBoardState()
         val b = _uiState.value.board
         if (undoStack.size >= 30) {
             undoStack.removeAt(0)
@@ -2725,9 +2811,12 @@ class WhiteboardViewModel(
 
     fun undo() {
         if (undoStack.isEmpty()) return
+        flushPendingStickyNoteSync(persist = false)
+        syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
         redoStack.add(BoardSnapshot(currentBoard.strokes, currentBoard.stickyNotes, currentBoard.shapes, currentBoard.textItems))
         val previous = undoStack.removeAt(undoStack.lastIndex)
+        stickyNotesStore.replaceAll(previous.notes)
 
         _uiState.update {
             it.withUpdatedBoard { b ->
@@ -2753,9 +2842,12 @@ class WhiteboardViewModel(
 
     fun redo() {
         if (redoStack.isEmpty()) return
+        flushPendingStickyNoteSync(persist = false)
+        syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
         undoStack.add(BoardSnapshot(currentBoard.strokes, currentBoard.stickyNotes, currentBoard.shapes, currentBoard.textItems))
         val next = redoStack.removeAt(redoStack.lastIndex)
+        stickyNotesStore.replaceAll(next.notes)
 
         _uiState.update {
             it.withUpdatedBoard { b ->

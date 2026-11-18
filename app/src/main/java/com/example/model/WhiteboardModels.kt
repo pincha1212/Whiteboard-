@@ -1,5 +1,6 @@
 package com.example.model
 
+import androidx.compose.runtime.Immutable
 import java.util.UUID
 
 enum class ToolType {
@@ -152,6 +153,7 @@ data class WhiteboardStroke(
     }
 }
 
+@Immutable
 data class StickyNote(
     val id: String = UUID.randomUUID().toString(),
     val text: String,

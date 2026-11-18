@@ -13,17 +13,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
@@ -32,8 +29,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,10 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
@@ -53,41 +50,75 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
-import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
+import kotlinx.coroutines.flow.StateFlow
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
 val StickyNoteComputedFontSpKey = SemanticsPropertyKey<Float>("StickyNoteComputedFontSp")
 
+private val StickyNotePalette: List<Pair<String, Color>> = listOf(
+    "#FFF275" to Color(0xFFFFF275),
+    "#86E3CE" to Color(0xFF86E3CE),
+    "#A1F0A6" to Color(0xFFA1F0A6),
+    "#FF9AA2" to Color(0xFFFF9AA2),
+    "#D5AAFF" to Color(0xFFD5AAFF),
+    "#FFB347" to Color(0xFFFFB347),
+    "#2D3139" to Color(0xFF2D3139)
+)
+
+private val StickyNoteColorMap: Map<String, Color> =
+    StickyNotePalette.associate { it.first.uppercase() to it.second }
+
+@Immutable
+private data class StickyNoteVisualContent(
+    val id: String,
+    val text: String,
+    val title: String?,
+    val width: Float,
+    val height: Float,
+    val colorHex: String,
+    val isPinned: Boolean,
+    val isLocked: Boolean,
+    val isAspectRatioLocked: Boolean,
+    val isHiddenByCollapse: Boolean
+)
+
+private fun StickyNote.toVisualContent(): StickyNoteVisualContent = StickyNoteVisualContent(
+    id = id,
+    text = text,
+    title = title,
+    width = width,
+    height = height,
+    colorHex = colorHex,
+    isPinned = isPinned,
+    isLocked = isLocked,
+    isAspectRatioLocked = isAspectRatioLocked,
+    isHiddenByCollapse = isHiddenByCollapse
+)
+
 /**
  * Computes the largest font size (in sp) that fits inside ([innerWidthPx], [innerHeightPx])
- * without vertical overflow, internal scrolling, or mid-word horizontal breaks.
+ * in world-space layout pixels without vertical overflow or mid-word horizontal breaks.
  */
 fun computeAutoFitStickyFontSizeSp(
     text: String,
@@ -102,26 +133,26 @@ fun computeAutoFitStickyFontSizeSp(
     val cleanTitle = title?.trim().orEmpty()
     val displayText = text.ifEmpty { "Escribe el contenido..." }
 
-    val minPx = (6f * density.density.coerceAtLeast(1f) * 0.65f).coerceAtLeast(4f)
+    val minPx = 5.5f
     val proportionalMaxPx = (min(innerWidthPx, innerHeightPx) * 0.40f).coerceAtLeast(minPx + 1f)
-    val deterministicFitPx = with(density) {
-        val wWorld = innerWidthPx / density.density
-        val hWorld = innerHeightPx / density.density
-        StickyNoteGeometry.estimateAutoFitFontSizeWorld(
-            text = displayText,
-            innerWidthWorld = wWorld,
-            innerHeightWorld = hWorld,
-            title = title
-        ).sp.toPx()
-    }
-    val maxPx = min(proportionalMaxPx, (deterministicFitPx * 1.15f).coerceAtLeast(minPx + 0.5f))
+    val deterministicFitPx = StickyNoteGeometry.estimateAutoFitFontSizeWorld(
+        text = displayText,
+        innerWidthWorld = innerWidthPx,
+        innerHeightWorld = innerHeightPx,
+        title = title
+    )
+    val maxPx = min(proportionalMaxPx, (deterministicFitPx * 1.18f).coerceAtLeast(minPx + 0.5f))
 
-    val dividerReservePx = with(density) { 8.dp.toPx() }
-    val longestToken = (if (cleanTitle.isNotEmpty()) "$cleanTitle $displayText" else displayText)
-        .split(Regex("\\s+"))
-        .filter { it.isNotEmpty() }
-        .maxByOrNull { it.length }
-        .orEmpty()
+    val dividerReservePx = 8f
+    val titleRange = if (cleanTitle.isNotEmpty()) StickyNoteGeometry.findLongestTokenRange(cleanTitle) else 0 to 0
+    val bodyRange = StickyNoteGeometry.findLongestTokenRange(displayText)
+    val titleLen = titleRange.second - titleRange.first
+    val bodyLen = bodyRange.second - bodyRange.first
+    val longestToken = when {
+        titleLen == 0 && bodyLen == 0 -> ""
+        titleLen >= bodyLen -> cleanTitle.substring(titleRange.first, titleRange.second)
+        else -> displayText.substring(bodyRange.first, bodyRange.second)
+    }
 
     fun fitsAtPx(fontPx: Float): Boolean {
         val spVal = with(density) { fontPx.toSp() }
@@ -168,7 +199,7 @@ fun computeAutoFitStickyFontSizeSp(
 
     var lo = minPx
     var hi = maxPx.coerceAtLeast(lo + 0.5f)
-    repeat(14) {
+    repeat(10) {
         val mid = (lo + hi) * 0.5f
         if (fitsAtPx(mid)) {
             lo = mid
@@ -179,660 +210,481 @@ fun computeAutoFitStickyFontSizeSp(
     return with(density) { lo.toSp() }
 }
 
+/**
+ * High-performance Sticky Note Card:
+ * - Observes only its own [StateFlow<StickyNote>].
+ * - Position (x, y), rotation, and camera scale/pan are read exclusively inside [graphicsLayer],
+ *   resulting in zero recompositions and zero layout invalidations during drag, rotate, pan, or zoom.
+ * - All internal dimensions use consistent board-space units converted via [LocalDensity].
+ */
 @Composable
-fun StickyNoteView(
-    note: StickyNote,
-    cameraState: State<com.example.ink.ViewportTransform>,
+fun StickyNoteCard(
+    noteFlow: StateFlow<StickyNote>,
+    cameraState: State<ViewportTransform>,
+    textMeasurer: TextMeasurer,
+    isSelected: Boolean,
+    isPanOnlyMode: Boolean,
+    isPlacementPending: Boolean,
+    hasViewport: Boolean,
+    viewportWidthPx: Float,
+    viewportHeightPx: Float,
+    onSelect: () -> Unit,
+    onBeginTransform: () -> Unit,
+    onEndTransform: () -> Unit,
     onUpdateText: (String) -> Unit,
-    onUpdateTitle: (String) -> Unit = {},
+    onUpdateTitle: (String) -> Unit,
     onUpdateColor: (String) -> Unit,
     onTogglePin: () -> Unit,
     onDelete: () -> Unit,
-    onSelect: () -> Unit = {},
-    onBeginTransform: () -> Unit = {},
-    onEndTransform: () -> Unit = {},
     onDragDelta: (Float, Float) -> Unit,
-    onResizeHandle: (StickyNoteResizeHandle, Float, Float) -> Unit = { _, _, _ -> },
-    onRotate: (Float) -> Unit = {},
-    isSelected: Boolean = false,
-    isPanOnlyMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
-    val textMeasurer = rememberTextMeasurer()
+    val noteState = noteFlow.collectAsState()
+    val visualContent by remember(noteState) {
+        derivedStateOf { noteState.value.toVisualContent() }
+    }
+    if (visualContent.isHiddenByCollapse) return
 
+    val isWithinViewport by remember(
+        noteState,
+        cameraState,
+        isSelected,
+        hasViewport,
+        viewportWidthPx,
+        viewportHeightPx
+    ) {
+        derivedStateOf {
+            if (isSelected || !hasViewport) return@derivedStateOf true
+            val cam = cameraState.value
+            val n = noteState.value
+            val safeScale = cam.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+            val margin = 220f / safeScale + max(n.width, n.height) * 0.45f
+            val visibleLeft = -cam.panX / safeScale - margin
+            val visibleTop = -cam.panY / safeScale - margin
+            val visibleRight = (viewportWidthPx - cam.panX) / safeScale + margin
+            val visibleBottom = (viewportHeightPx - cam.panY) / safeScale + margin
+            (n.x + n.width) >= visibleLeft &&
+                n.x <= visibleRight &&
+                (n.y + n.height) >= visibleTop &&
+                n.y <= visibleBottom
+        }
+    }
+    if (!isWithinViewport) return
+
+    val density = LocalDensity.current
+    val currentIsSelected by rememberUpdatedState(isSelected)
     val currentOnSelect by rememberUpdatedState(onSelect)
     val currentOnBeginTransform by rememberUpdatedState(onBeginTransform)
     val currentOnEndTransform by rememberUpdatedState(onEndTransform)
-    val currentOnUpdateTitle by rememberUpdatedState(onUpdateTitle)
     val currentOnDragDelta by rememberUpdatedState(onDragDelta)
-    val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
-    val currentOnRotate by rememberUpdatedState(onRotate)
-    val currentNoteRotation by rememberUpdatedState(note.rotation)
 
-    val noteBg = try {
-        Color(android.graphics.Color.parseColor(note.colorHex))
-    } catch (_: Exception) {
-        Color(0xFFFFF275)
+    val cardWidthDp = with(density) { visualContent.width.coerceAtLeast(16f).toDp() }
+    val cardHeightDp = with(density) { visualContent.height.coerceAtLeast(16f).toDp() }
+
+    val canInteract = !isPanOnlyMode && !isPlacementPending
+    val gestureModifier = if (!canInteract) {
+        Modifier
+    } else {
+        Modifier.pointerInput(visualContent.id, visualContent.isLocked) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                // Consume down so underlying Canvas (requireUnconsumed = true) never draws an accidental stroke.
+                down.consume()
+                var isDragging = false
+                var beganSnapshot = false
+                var totalDragWorld = 0f
+                val safeScale = cameraState.value.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+                val touchSlopWorld = viewConfiguration.touchSlop / safeScale
+
+                do {
+                    val event = awaitPointerEvent()
+                    var activePointer: PointerInputChange? = null
+                    var activeCount = 0
+                    for (pointerChange in event.changes) {
+                        if (pointerChange.pressed) {
+                            activeCount++
+                            if (activeCount == 1) activePointer = pointerChange
+                        }
+                    }
+                    if (activeCount >= 2 || event.changes.any { it.isConsumed }) {
+                        // Yield immediately to multi-touch canvas pan/pinch-to-zoom.
+                        isDragging = false
+                        break
+                    }
+                    val change = activePointer ?: break
+                    val delta = change.positionChange()
+                    if (!isDragging) {
+                        totalDragWorld += hypot(delta.x, delta.y)
+                        if (totalDragWorld > touchSlopWorld) {
+                            isDragging = true
+                            if (!currentIsSelected) {
+                                currentOnSelect()
+                            }
+                            if (!visualContent.isLocked && !beganSnapshot) {
+                                beganSnapshot = true
+                                currentOnBeginTransform()
+                            }
+                        }
+                    }
+                    if (isDragging && !visualContent.isLocked && (delta.x != 0f || delta.y != 0f)) {
+                        val rot = noteState.value.rotation
+                        val worldDx: Float
+                        val worldDy: Float
+                        if (rot != 0f) {
+                            val angleRad = rot * (PI.toFloat() / 180f)
+                            val cosA = cos(angleRad)
+                            val sinA = sin(angleRad)
+                            worldDx = delta.x * cosA - delta.y * sinA
+                            worldDy = delta.x * sinA + delta.y * cosA
+                        } else {
+                            worldDx = delta.x
+                            worldDy = delta.y
+                        }
+                        currentOnDragDelta(worldDx, worldDy)
+                        change.consume()
+                    }
+                } while (event.changes.any { it.pressed })
+
+                if (!isDragging) {
+                    currentOnSelect()
+                }
+                if (beganSnapshot) {
+                    currentOnEndTransform()
+                }
+            }
+        }
     }
 
-    val isDarkBg = note.colorHex.equals("#2D3139", ignoreCase = true)
-    val textColor = if (isDarkBg) Color.White else Color(0xFF1B1D1F)
-    val headerBg = noteBg.copy(alpha = 0.85f)
-
-    val colors = listOf(
-        "#FFF275" to "Amarillo",
-        "#86E3CE" to "Cian",
-        "#A1F0A6" to "Menta",
-        "#FF9AA2" to "Rosa",
-        "#D5AAFF" to "Lavanda",
-        "#FFB347" to "Naranja",
-        "#2D3139" to "Pizarra"
-    )
-
-    var showPalette by remember { mutableStateOf(false) }
-
-    // Keep the note's internal layout in board-space units. Camera zoom is applied
-    // once to the outer layer, so text and child layouts are not resized/re-measured.
-    val cardWidthPx = note.width.coerceAtLeast(16f)
-    val cardHeightPx = note.height.coerceAtLeast(16f)
-    val cardWidthDp = with(density) { cardWidthPx.toDp() }
-    val cardHeightDp = with(density) { cardHeightPx.toDp() }
-
-    val cornerRadiusDp = 8.dp
-    val headerHeightWorld = StickyNoteGeometry.headerHeightWorld(note.height)
-    val headerHeightDp = with(density) { headerHeightWorld.toDp() }
-
-    val innerPadWorld = StickyNoteGeometry.innerPaddingWorld(note.width, note.height)
-    val innerPadDp = with(density) { innerPadWorld.toDp() }
-
-    val (innerWidthWorld, innerHeightWorld) = StickyNoteGeometry.innerTextBoxWorld(note.width, note.height)
-    val innerHeightPx = innerHeightWorld.coerceAtLeast(16f)
-
-    // Compute auto-fit font size once in world dimensions (keyed on text/size, NOT camera scale)
-    // so pinch-to-zoom and pan incur zero TextMeasurer binary-search recomputations.
-    val baseWorldFontSp = remember(note.title, note.text, innerWidthWorld, innerHeightWorld, density.density, density.fontScale) {
-        computeAutoFitStickyFontSizeSp(
-            text = note.text,
-            innerWidthPx = innerWidthWorld.coerceAtLeast(16f),
-            innerHeightPx = innerHeightWorld.coerceAtLeast(16f),
-            textMeasurer = textMeasurer,
-            density = density,
-            title = note.title
-        )
+    val cornerRadiusDp = with(density) { 10f.toDp() }
+    val borderWidthDp = with(density) { (if (isSelected && !isPanOnlyMode) 2.5f else 1f).toDp() }
+    val noteBg = remember(visualContent.colorHex) {
+        StickyNoteColorMap[visualContent.colorHex.uppercase()] ?: try {
+            Color(android.graphics.Color.parseColor(visualContent.colorHex))
+        } catch (_: Exception) {
+            Color(0xFFFFF275)
+        }
     }
-    // Font size remains constant in board space; outer camera transform scales it visually.
-    val autoFitFontSp = baseWorldFontSp
-
-    // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
-    // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
-    val handleTargetDp = 48.dp
-    val sideGutterDp = 24.dp
-    val sideGutterPx = with(density) { sideGutterDp.toPx() }
-    val verticalGutterDp = 64.dp
-    val verticalGutterPx = with(density) { verticalGutterDp.toPx() }
-    val activeSelectionHandles = isSelected && !note.isLocked && !isPanOnlyMode
-
-    var cardCenterRoot by remember { mutableStateOf(Offset.Zero) }
-    var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var isRotating by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
             .zIndex(if (isSelected) 10f else 0f)
-            .offset {
-                // The layout position is outside the graphics layer, so graphicsLayer.scale
-                // cannot scale note.x/note.y. Project the world-space origin into screen space
-                // here; the layer below scales only the note's internal content and size.
-                val camera = cameraState.value
-                IntOffset(
-                    ((note.x - sideGutterPx) * camera.scale).roundToInt(),
-                    ((note.y - verticalGutterPx) * camera.scale).roundToInt()
-                )
-            }
-            .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + verticalGutterDp * 2)
+            .size(cardWidthDp, cardHeightDp)
             .graphicsLayer {
                 val camera = cameraState.value
+                val n = noteState.value
+                transformOrigin = TransformOrigin(0f, 0f)
+                translationX = n.x * camera.scale + camera.panX
+                translationY = n.y * camera.scale + camera.panY
                 scaleX = camera.scale
                 scaleY = camera.scale
-                translationX = camera.panX
-                translationY = camera.panY
-                transformOrigin = TransformOrigin(0f, 0f)
             }
             .graphicsLayer {
-                rotationZ = note.rotation
                 transformOrigin = TransformOrigin.Center
+                rotationZ = noteState.value.rotation
             }
+            .clip(RoundedCornerShape(cornerRadiusDp))
+            .background(noteBg)
+            .border(
+                width = borderWidthDp,
+                color = if (isSelected && !isPanOnlyMode) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    Color.Black.copy(alpha = 0.16f)
+                },
+                shape = RoundedCornerShape(cornerRadiusDp)
+            )
+            .then(gestureModifier)
+            .testTag("sticky_note_${visualContent.id}")
     ) {
-        val cardGestureModifier = if (isPanOnlyMode) {
-            Modifier
-        } else {
-            Modifier.pointerInput(note.id, note.isLocked) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var isDragging = false
-                    var beganSnapshot = false
-                    var totalDragPx = 0f
-                    val touchSlop = viewConfiguration.touchSlop
+        StickyNoteCardBody(
+            content = visualContent,
+            noteBg = noteBg,
+            textMeasurer = textMeasurer,
+            isSelected = isSelected,
+            isPanOnlyMode = isPanOnlyMode,
+            onSelect = currentOnSelect,
+            onUpdateText = onUpdateText,
+            onUpdateTitle = onUpdateTitle,
+            onUpdateColor = onUpdateColor,
+            onTogglePin = onTogglePin,
+            onDelete = onDelete
+        )
+    }
+}
 
-                    do {
-                        val event = awaitPointerEvent()
-                        var activePointer: PointerInputChange? = null
-                        var hasMultipleActivePointers = false
-                        for (pointerChange in event.changes) {
-                            if (pointerChange.pressed) {
-                                if (activePointer != null) {
-                                    hasMultipleActivePointers = true
-                                    break
-                                }
-                                activePointer = pointerChange
-                            }
-                        }
-                        if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                            // Yield immediately to multi-touch canvas pan/pinch-to-zoom
-                            isDragging = false
-                            break
-                        }
-                        val change = activePointer ?: break
-                        val delta = change.positionChange()
-                        if (!isDragging) {
-                            totalDragPx += hypot(delta.x, delta.y)
-                            if (totalDragPx > touchSlop) {
-                                isDragging = true
-                                currentOnSelect()
-                                if (!note.isLocked && !beganSnapshot) {
-                                    beganSnapshot = true
-                                    currentOnBeginTransform()
-                                }
-                            }
-                        }
-                        if (isDragging && !note.isLocked && (delta.x != 0f || delta.y != 0f)) {
-                            val angleRad = currentNoteRotation * (PI.toFloat() / 180f)
-                            val cosA = cos(angleRad)
-                            val sinA = sin(angleRad)
-                            val screenDx = delta.x * cosA - delta.y * sinA
-                            val screenDy = delta.x * sinA + delta.y * cosA
-                            currentOnDragDelta(screenDx, screenDy)
-                            change.consume()
-                        }
-                    } while (event.changes.any { it.pressed })
+@Composable
+private fun StickyNoteCardBody(
+    content: StickyNoteVisualContent,
+    noteBg: Color,
+    textMeasurer: TextMeasurer,
+    isSelected: Boolean,
+    isPanOnlyMode: Boolean,
+    onSelect: () -> Unit,
+    onUpdateText: (String) -> Unit,
+    onUpdateTitle: (String) -> Unit,
+    onUpdateColor: (String) -> Unit,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val density = LocalDensity.current
+    val isDarkBg = content.colorHex.equals("#2D3139", ignoreCase = true)
+    val textColor = if (isDarkBg) Color.White else Color(0xFF1B1D1F)
+    val headerBg = remember(noteBg) { noteBg.copy(alpha = 0.85f) }
 
-                    if (!isDragging) {
-                        currentOnSelect()
+    var showPalette by remember(content.id) { mutableStateOf(false) }
+    if ((!isSelected || isPanOnlyMode) && showPalette) {
+        showPalette = false
+    }
+
+    val headerHeightWorld = StickyNoteGeometry.headerHeightWorld(content.height)
+    val innerPadWorld = StickyNoteGeometry.innerPaddingWorld(content.width, content.height)
+    val (innerWidthWorld, innerHeightWorld) = StickyNoteGeometry.innerTextBoxWorld(content.width, content.height)
+
+    val headerHeightDp = with(density) { headerHeightWorld.toDp() }
+    val innerPadDp = with(density) { innerPadWorld.toDp() }
+    val headerHorizontalPadDp = with(density) { (innerPadWorld * 0.8f).coerceAtLeast(4f).toDp() }
+    val iconDp = with(density) { (headerHeightWorld * 0.62f).coerceIn(8f, 16f).toDp() }
+    val colorDotDp = with(density) { (headerHeightWorld * 0.58f).coerceIn(7f, 15f).toDp() }
+    val deleteHitDp = with(density) { (headerHeightWorld * 0.88f).coerceAtLeast(12f).toDp() }
+    val dividerThicknessDp = with(density) { 1f.toDp() }
+    val dividerVerticalPadDp = with(density) { 3f.toDp() }
+
+    val autoFitFontSp = remember(
+        content.title,
+        content.text,
+        innerWidthWorld,
+        innerHeightWorld,
+        density.density,
+        density.fontScale
+    ) {
+        computeAutoFitStickyFontSizeSp(
+            text = content.text,
+            innerWidthPx = innerWidthWorld,
+            innerHeightPx = innerHeightWorld,
+            textMeasurer = textMeasurer,
+            density = density,
+            title = content.title
+        )
+    }
+
+    val canEditNote = isSelected && !content.isLocked && !isPanOnlyMode
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(headerHeightDp)
+                .background(headerBg)
+                .padding(horizontal = headerHorizontalPadDp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(colorDotDp)
+                    .clip(CircleShape)
+                    .background(textColor.copy(alpha = 0.25f))
+                    .let {
+                        if (isPanOnlyMode) it else it.clickable {
+                            onSelect()
+                            showPalette = !showPalette
+                        }
                     }
-                    if (beganSnapshot) {
-                        currentOnEndTransform()
+            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(with(density) { 4f.toDp() })
+            ) {
+                if (content.isAspectRatioLocked && !isPanOnlyMode) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = "Proporción 1:1 bloqueada",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(with(density) { (headerHeightWorld * 0.52f).coerceAtLeast(7f).toDp() })
+                    )
+                }
+                if (content.isPinned) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = "Fijada",
+                        tint = textColor.copy(alpha = 0.75f),
+                        modifier = Modifier
+                            .size(iconDp)
+                            .let { if (isPanOnlyMode) it else it.clickable { onTogglePin() } }
+                    )
+                }
+                if (!isPanOnlyMode) {
+                    Box(
+                        modifier = Modifier
+                            .size(deleteHitDp)
+                            .clip(CircleShape)
+                            .clickable { onDelete() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Eliminar nota",
+                            tint = textColor.copy(alpha = 0.72f),
+                            modifier = Modifier.size(iconDp)
+                        )
                     }
                 }
             }
         }
 
-        // Centered sub-container for the note card and 8 resize handles
-        Box(
-            modifier = Modifier
-                .size(cardWidthDp + sideGutterDp * 2, cardHeightDp + sideGutterDp * 2)
-                .align(Alignment.Center)
-        ) {
-            // Actual Sticky Note Card (exact world-projected bounds inside gutter; zero heavy shadow overdraw)
-            Box(
+        if (showPalette && !isPanOnlyMode) {
+            val paletteDotDp = with(density) {
+                min(16f, (content.width - innerPadWorld * 2f) / 9f).coerceAtLeast(8f).toDp()
+            }
+            Row(
                 modifier = Modifier
-                    .padding(sideGutterDp)
-                    .fillMaxSize()
-                    .then(
-                        if (activeSelectionHandles) {
-                            Modifier.onGloballyPositioned { coords ->
-                                cardCenterRoot = coords.boundsInRoot().center
-                            }
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .clip(RoundedCornerShape(cornerRadiusDp))
-                    .background(noteBg)
-                    .border(
-                        width = if (isSelected && !isPanOnlyMode) 2.dp else 1.dp,
-                        color = if (isSelected && !isPanOnlyMode) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Black.copy(alpha = 0.16f)
-                        },
-                        shape = RoundedCornerShape(cornerRadiusDp)
-                    )
-                    .then(cardGestureModifier)
-                    .testTag("sticky_note_${note.id}")
+                    .fillMaxWidth()
+                    .background(Color.White.copy(alpha = 0.95f))
+                    .padding(vertical = with(density) { 4f.toDp() }),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Proportional Header Bar
-                val iconDp = (headerHeightDp * 0.62f).coerceIn(8.dp, 16.dp)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(headerHeightDp)
-                        .background(headerBg)
-                        .padding(horizontal = (innerPadDp * 0.8f).coerceAtLeast(3.dp)),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                StickyNotePalette.forEach { (hex, color) ->
                     Box(
                         modifier = Modifier
-                            .size((headerHeightDp * 0.58f).coerceIn(7.dp, 15.dp))
+                            .size(paletteDotDp)
                             .clip(CircleShape)
-                            .background(textColor.copy(alpha = 0.25f))
-                            .let {
-                                if (isPanOnlyMode) it else it.clickable {
-                                    currentOnSelect()
-                                    showPalette = !showPalette
-                                }
+                            .background(color)
+                            .clickable {
+                                onUpdateColor(hex)
+                                showPalette = false
                             }
                     )
+                }
+            }
+        }
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (note.isAspectRatioLocked && !isPanOnlyMode) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Proporción 1:1 bloqueada",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size((iconDp * 0.85f).coerceAtLeast(7.dp))
-                            )
-                        }
-                        if (note.isPinned) {
-                            Icon(
-                                imageVector = Icons.Default.PushPin,
-                                contentDescription = "Fijada",
-                                tint = textColor.copy(alpha = 0.75f),
-                                modifier = Modifier
-                                    .size(iconDp)
-                                    .let { if (isPanOnlyMode) it else it.clickable { onTogglePin() } }
-                            )
-                        }
+        val titleStyle = TextStyle(
+            color = textColor,
+            fontSize = (autoFitFontSp.value * 1.15f).sp,
+            lineHeight = (autoFitFontSp.value * 1.32f).sp,
+            fontWeight = FontWeight.Bold
+        )
+        val effectiveStyle = TextStyle(
+            color = textColor,
+            fontSize = autoFitFontSp,
+            lineHeight = (autoFitFontSp.value * 1.18f).sp,
+            fontWeight = FontWeight.Medium
+        )
+        val bodyMinHeightDp = with(density) { (innerHeightWorld * 0.55f).toDp() }
 
-                        if (!isPanOnlyMode) {
-                            Box(
-                                modifier = Modifier
-                                    .size((headerHeightDp * 0.88f).coerceAtLeast(10.dp))
-                                    .clip(CircleShape)
-                                    .clickable { onDelete() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Eliminar nota",
-                                    tint = textColor.copy(alpha = 0.72f),
-                                    modifier = Modifier.size(iconDp)
+        if (canEditNote) {
+            val scrollState = rememberScrollState()
+            LaunchedEffect(content.text, content.title) {
+                if (scrollState.maxValue > 0) {
+                    scrollState.scrollTo(scrollState.maxValue)
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(innerPadDp)
+                    .verticalScroll(scrollState)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    BasicTextField(
+                        value = content.title.orEmpty(),
+                        onValueChange = onUpdateTitle,
+                        textStyle = titleStyle,
+                        cursorBrush = SolidColor(textColor),
+                        decorationBox = { inner ->
+                            if (content.title.isNullOrEmpty()) {
+                                Text(
+                                    text = "Título...",
+                                    style = titleStyle.copy(color = textColor.copy(alpha = 0.45f))
                                 )
                             }
-                        }
-                    }
-                }
-
-                // Color Palette Flyout
-                if (showPalette && !isPanOnlyMode) {
-                    Row(
+                            inner()
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White.copy(alpha = 0.95f))
-                            .padding(vertical = 3.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        colors.forEach { (hex, _) ->
-                            val c = Color(android.graphics.Color.parseColor(hex))
-                            Box(
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .clip(CircleShape)
-                                    .background(c)
-                                    .clickable {
-                                        onUpdateColor(hex)
-                                        showPalette = false
-                                    }
-                            )
-                        }
-                    }
-                }
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) onSelect()
+                            }
+                            .testTag("sticky_note_title_input_${content.id}")
+                    )
 
-                // Auto-Fit Content Container (adapts dynamically and stays in view at all times)
-                val scrollState = rememberScrollState()
-                LaunchedEffect(note.text, note.title) {
-                    if (scrollState.maxValue > 0) {
-                        scrollState.scrollTo(scrollState.maxValue)
-                    }
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(innerPadDp)
-                        .verticalScroll(scrollState)
-                ) {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        val titleStyle = TextStyle(
-                            color = textColor,
-                            fontSize = (autoFitFontSp.value * 1.15f).sp,
-                            lineHeight = (autoFitFontSp.value * 1.32f).sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        val canEditNote = isSelected && !note.isLocked && !isPanOnlyMode
-                        if (canEditNote) {
-                            BasicTextField(
-                                value = note.title.orEmpty(),
-                                onValueChange = { currentOnUpdateTitle(it) },
-                                textStyle = titleStyle,
-                                cursorBrush = SolidColor(textColor),
-                                decorationBox = { inner ->
-                                    if (note.title.isNullOrEmpty()) {
-                                        Text(
-                                            text = "Título...",
-                                            style = titleStyle.copy(color = textColor.copy(alpha = 0.45f))
-                                        )
-                                    }
-                                    inner()
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .onFocusChanged { focusState ->
-                                        if (focusState.isFocused) currentOnSelect()
-                                    }
-                                    .testTag("sticky_note_title_input_${note.id}")
-                            )
-                        } else {
-                            Text(
-                                text = note.title?.takeIf { it.isNotEmpty() } ?: "Título...",
-                                style = if (note.title.isNullOrEmpty()) titleStyle.copy(color = textColor.copy(alpha = 0.45f)) else titleStyle,
-                                modifier = Modifier.fillMaxWidth().testTag("sticky_note_title_input_${note.id}")
-                            )
-                        }
+                    HorizontalDivider(
+                        color = textColor.copy(alpha = 0.16f),
+                        thickness = dividerThicknessDp,
+                        modifier = Modifier.padding(vertical = dividerVerticalPadDp)
+                    )
 
-                        HorizontalDivider(
-                            color = textColor.copy(alpha = 0.16f),
-                            thickness = 1.dp,
-                            modifier = Modifier.padding(vertical = 3.dp)
-                        )
-
-                        val effectiveStyle = TextStyle(
-                            color = textColor,
-                            fontSize = autoFitFontSp,
-                            lineHeight = (autoFitFontSp.value * 1.18f).sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        val bodyModifier = Modifier
+                    BasicTextField(
+                        value = content.text,
+                        onValueChange = onUpdateText,
+                        textStyle = effectiveStyle,
+                        cursorBrush = SolidColor(textColor),
+                        decorationBox = { inner ->
+                            if (content.text.isEmpty()) {
+                                Text(
+                                    text = "Escribe el contenido...",
+                                    style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
+                                )
+                            }
+                            inner()
+                        },
+                        modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = with(density) { (innerHeightPx * 0.55f).toDp() })
+                            .heightIn(min = bodyMinHeightDp)
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) onSelect()
+                            }
                             .semantics {
                                 set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
                             }
-                            .testTag("sticky_note_input_${note.id}")
-                        if (canEditNote) {
-                            BasicTextField(
-                                value = note.text,
-                                onValueChange = onUpdateText,
-                                textStyle = effectiveStyle,
-                                cursorBrush = SolidColor(textColor),
-                                decorationBox = { inner ->
-                                    if (note.text.isEmpty()) {
-                                        Text(
-                                            text = "Escribe el contenido...",
-                                            style = effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
-                                        )
-                                    }
-                                    inner()
-                                },
-                                modifier = bodyModifier.onFocusChanged { focusState ->
-                                    if (focusState.isFocused) currentOnSelect()
-                                }
-                            )
-                        } else {
-                            Text(
-                                text = note.text.ifEmpty { "Escribe el contenido..." },
-                                style = if (note.text.isEmpty()) effectiveStyle.copy(color = textColor.copy(alpha = 0.42f)) else effectiveStyle,
-                                modifier = bodyModifier
-                            )
-                        }
-                    }
+                            .testTag("sticky_note_input_${content.id}")
+                    )
                 }
             }
-        }
-
-        // 8 Mobile Touch Resize Handles (Corners + Edges), each 48.dp x 48.dp touch target
-        if (activeSelectionHandles) {
-            val handles = listOf(
-                StickyNoteResizeHandle.TOP_LEFT to Alignment.TopStart,
-                StickyNoteResizeHandle.TOP to Alignment.TopCenter,
-                StickyNoteResizeHandle.TOP_RIGHT to Alignment.TopEnd,
-                StickyNoteResizeHandle.RIGHT to Alignment.CenterEnd,
-                StickyNoteResizeHandle.BOTTOM_RIGHT to Alignment.BottomEnd,
-                StickyNoteResizeHandle.BOTTOM to Alignment.BottomCenter,
-                StickyNoteResizeHandle.BOTTOM_LEFT to Alignment.BottomStart,
-                StickyNoteResizeHandle.LEFT to Alignment.CenterStart
-            )
-
-            handles.forEach { (handle, alignment) ->
-                val isCorner = handle == StickyNoteResizeHandle.TOP_LEFT ||
-                    handle == StickyNoteResizeHandle.TOP_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_LEFT
-                val isHorizontalEdge = handle == StickyNoteResizeHandle.TOP ||
-                    handle == StickyNoteResizeHandle.BOTTOM
-
-                Box(
-                    modifier = Modifier
-                        .align(alignment)
-                        .size(handleTargetDp)
-                        .pointerInput(note.id, handle, note.isLocked) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                var beganResize = false
-                                do {
-                                    val event = awaitPointerEvent()
-                                    var activePointer: PointerInputChange? = null
-                                    var hasMultipleActivePointers = false
-                                    for (pointerChange in event.changes) {
-                                        if (pointerChange.pressed) {
-                                            if (activePointer != null) {
-                                                hasMultipleActivePointers = true
-                                                break
-                                            }
-                                            activePointer = pointerChange
-                                        }
-                                    }
-                                    if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                        break
-                                    }
-                                    val change = activePointer ?: break
-                                    val delta = change.positionChange()
-                                    if (delta.x != 0f || delta.y != 0f) {
-                                        if (!beganResize) {
-                                            beganResize = true
-                                            currentOnSelect()
-                                            currentOnBeginTransform()
-                                        }
-                                        currentOnResizeHandle(handle, delta.x, delta.y)
-                                        change.consume()
-                                    }
-                                } while (event.changes.any { it.pressed })
-                                if (beganResize) {
-                                    currentOnEndTransform()
-                                }
-                            }
-                        }
-                        .testTag("sticky_note_handle_${handle.name}_${note.id}"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    val accentColor = if (note.isAspectRatioLocked) {
-                        MaterialTheme.colorScheme.tertiary
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    }
-                    when {
-                        isCorner -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(13.dp)
-                                    .shadow(3.dp, CircleShape)
-                                    .clip(CircleShape)
-                                    .background(Color.White)
-                                    .border(2.5.dp, accentColor, CircleShape)
-                            )
-                        }
-                        isHorizontalEdge -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 22.dp, height = 7.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                        else -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 7.dp, height = 22.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                    }
-                }
-            }
-        }
-        } // End centered sub-container for note card & 8 resize handles
-
-        // Protruding Rotation Handle placed directly inside the Outer Box (unclipped 0..64.dp top gutter)
-        if (activeSelectionHandles) {
-            // 1. Anchor tick centered on the actual top edge of the card (y = 64.dp).
-            Box(
+        } else {
+            // Read-only fast path: zero ScrollState, LaunchedEffect, or BasicTextField overhead.
+            Column(
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = 60.5.dp)
-                    .size(7.dp)
-                    .shadow(2.dp, RoundedCornerShape(2.dp))
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color.White)
-                    .border(1.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-            )
-
-            // 2. Guide stem running from handle center (y = 24.dp) to card top edge (y = 64.dp).
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = 24.dp)
-                    .width(2.dp)
-                    .height(40.dp)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-
-            // 3. Rotation handle (48x48.dp touch target) positioned cleanly inside Outer Box top gutter (y = 0..48.dp).
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .offset(y = 0.dp)
-                    .zIndex(2f)
-                    .size(handleTargetDp)
-                    .onGloballyPositioned { handleCoords = it }
-                    .pointerInput(note.id, note.isLocked) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            down.consume()
-                            currentOnSelect()
-                            var beganRotation = false
-
-                            val currentCamera = cameraState.value
-                            val fallbackCenterX = currentCamera.worldToScreenX(note.x + note.width / 2f)
-                            val fallbackCenterY = currentCamera.worldToScreenY(note.y + note.height / 2f)
-
-                            do {
-                                val event = awaitPointerEvent()
-                                var activePointer: PointerInputChange? = null
-                                var hasMultipleActivePointers = false
-                                for (pointerChange in event.changes) {
-                                    if (pointerChange.pressed) {
-                                        if (activePointer != null) {
-                                            hasMultipleActivePointers = true
-                                            break
-                                        }
-                                        activePointer = pointerChange
-                                    }
-                                }
-                                if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                    break
-                                }
-                                val change = activePointer ?: break
-                                val moveDelta = change.positionChange()
-                                if (moveDelta.x != 0f || moveDelta.y != 0f) {
-                                    if (!beganRotation) {
-                                        beganRotation = true
-                                        isRotating = true
-                                        currentOnBeginTransform()
-                                    }
-                                    val pointerRoot = handleCoords?.localToRoot(change.position)
-                                    val pX = pointerRoot?.x ?: (fallbackCenterX + change.position.x)
-                                    val pY = pointerRoot?.y ?: (fallbackCenterY + change.position.y)
-
-                                    val cX = if (cardCenterRoot != Offset.Zero) cardCenterRoot.x else fallbackCenterX
-                                    val cY = if (cardCenterRoot != Offset.Zero) cardCenterRoot.y else fallbackCenterY
-
-                                    val targetDegrees = StickyNoteGeometry.calculateRotationDegrees(
-                                        centerX = cX,
-                                        centerY = cY,
-                                        pointerX = pX,
-                                        pointerY = pY,
-                                        snapThresholdDegrees = 3f
-                                    )
-                                    currentOnRotate(targetDegrees)
-                                    change.consume()
-                                }
-                            } while (event.changes.any { it.pressed })
-                            isRotating = false
-                            if (beganRotation) {
-                                currentOnEndTransform()
-                            }
-                        }
-                    }
-                    .semantics {
-                        contentDescription = "Girar nota adhesiva"
-                    }
-                    .testTag("sticky_note_rotation_handle_${note.id}"),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(innerPadDp)
             ) {
-                Box(
+                Text(
+                    text = content.title?.takeIf { it.isNotEmpty() } ?: "Título...",
+                    style = if (content.title.isNullOrEmpty()) {
+                        titleStyle.copy(color = textColor.copy(alpha = 0.45f))
+                    } else {
+                        titleStyle
+                    },
                     modifier = Modifier
-                        .size(22.dp)
-                        .shadow(4.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.RotateRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            }
+                        .fillMaxWidth()
+                        .testTag("sticky_note_title_input_${content.id}")
+                )
 
-            if (isRotating) {
-                Box(
+                HorizontalDivider(
+                    color = textColor.copy(alpha = 0.16f),
+                    thickness = dividerThicknessDp,
+                    modifier = Modifier.padding(vertical = dividerVerticalPadDp)
+                )
+
+                Text(
+                    text = content.text.ifEmpty { "Escribe el contenido..." },
+                    style = if (content.text.isEmpty()) {
+                        effectiveStyle.copy(color = textColor.copy(alpha = 0.42f))
+                    } else {
+                        effectiveStyle
+                    },
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .offset(x = 38.dp, y = 8.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.inverseSurface)
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = "${note.rotation.roundToInt()}°",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.inverseOnSurface
-                    )
-                }
+                        .fillMaxWidth()
+                        .heightIn(min = bodyMinHeightDp)
+                        .semantics {
+                            set(StickyNoteComputedFontSpKey, autoFitFontSp.value)
+                        }
+                        .testTag("sticky_note_input_${content.id}")
+                )
             }
         }
     }
