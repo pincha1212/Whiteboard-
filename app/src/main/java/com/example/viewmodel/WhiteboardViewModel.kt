@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import com.example.data.BoardSnapshotSerializer
 import com.example.data.LocalFirstWorkspaceStore
 import com.example.data.WorkspaceDbState
-import com.example.ink.IdeationTemplateFactory
 import com.example.ink.PixelEraserGeometry
 import com.example.ink.ShapeRecognizer
 import com.example.ink.StickyNoteBounds
@@ -14,7 +13,6 @@ import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
-import com.example.model.CustomBoardTemplate
 import com.example.model.LaserPoint
 import com.example.model.LineCapStyle
 import com.example.model.RulerState
@@ -26,7 +24,6 @@ import com.example.model.StickyNote
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
-import com.example.model.TemplateType
 import com.example.model.TextItem
 import com.example.model.ToolType
 import com.example.model.WhiteboardBoard
@@ -78,9 +75,6 @@ data class WhiteboardUiState(
     val handDrawnFactor: Float = 0.24f,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val showTemplatesOnNewBoard: Boolean = false,
-    val shouldAutoOpenTemplatePicker: Boolean = false,
-    val customTemplates: List<CustomBoardTemplate> = emptyList()
 )
 
 private data class BoardSnapshot(
@@ -2155,184 +2149,6 @@ class WhiteboardViewModel(
         }
     }
 
-    fun applyTemplate(type: TemplateType, screenW: Float = 1080f, screenH: Float = 1920f) {
-        saveUndoSnapshot()
-        val state = _uiState.value
-        val camera = _cameraState.value
-        val worldCenterX = (screenW / 2f - camera.panX) / camera.scale
-        val worldCenterY = (screenH / 2f - camera.panY) / camera.scale
-        val generated = IdeationTemplateFactory.createTemplate(type, worldCenterX, worldCenterY)
-
-        val wasEmpty = state.board.strokes.isEmpty() &&
-            state.board.shapes.isEmpty() &&
-            state.board.stickyNotes.isEmpty() &&
-            state.board.textItems.isEmpty()
-
-        val fitScale = if (wasEmpty && screenW < 980f) {
-            (screenW * 0.90f / 980f).coerceIn(0.45f, 1.0f)
-        } else {
-            camera.scale
-        }
-        val fitPanX = if (wasEmpty && fitScale != camera.scale) {
-            screenW / 2f - worldCenterX * fitScale
-        } else {
-            camera.panX
-        }
-        val fitPanY = if (wasEmpty && fitScale != camera.scale) {
-            screenH / 2f - worldCenterY * fitScale
-        } else {
-            camera.panY
-        }
-
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(
-                    shapes = b.shapes + generated.shapes,
-                    stickyNotes = b.stickyNotes + generated.stickyNotes,
-                    textItems = b.textItems + generated.textItems
-                )
-            }.copy(
-                pendingStickyNoteColor = null,
-                pendingShapeType = null,
-                shouldAutoOpenTemplatePicker = false
-            )
-        }
-        if (wasEmpty) {
-            _cameraState.update { it.copy(scale = fitScale, panX = fitPanX, panY = fitPanY) }
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-    }
-
-    fun updateTextItem(id: String, newText: String) {
-        _uiState.update { state ->
-            state.withUpdatedBoard { b ->
-                b.copy(textItems = b.textItems.map { t -> if (t.id == id && !t.isLocked) t.copy(text = newText) else t })
-            }
-        }
-    }
-
-    fun updateShapeLabel(id: String, newLabel: String) {
-        saveUndoSnapshot()
-        _uiState.update { state ->
-            state.withUpdatedBoard { b ->
-                b.copy(shapes = b.shapes.map { s -> if (s.id == id) s.copy(label = newLabel) else s })
-            }
-        }
-    }
-
-    fun toggleShowTemplatesOnNewBoard(enabled: Boolean? = null) {
-        _uiState.update {
-            it.copy(showTemplatesOnNewBoard = enabled ?: !it.showTemplatesOnNewBoard)
-        }
-    }
-
-    fun consumeAutoOpenTemplatePicker() {
-        _uiState.update { it.copy(shouldAutoOpenTemplatePicker = false) }
-    }
-
-    fun saveCurrentBoardAsTemplate(
-        title: String,
-        description: String = ""
-    ): CustomBoardTemplate {
-        val state = _uiState.value
-        val board = state.board
-        val serialized = BoardSnapshotSerializer.serializeBoard(board)
-        val cleanTitle = title.trim().ifBlank {
-            board.title.ifBlank { "Mi plantilla ${state.customTemplates.size + 1}" }
-        }
-        val template = CustomBoardTemplate(
-            title = cleanTitle,
-            description = description.trim(),
-            strokeCount = board.strokes.size,
-            shapeCount = board.shapes.size,
-            noteCount = board.stickyNotes.size,
-            textCount = board.textItems.size,
-            serializedData = serialized
-        )
-        _uiState.update {
-            it.copy(customTemplates = listOf(template) + it.customTemplates)
-        }
-        return template
-    }
-
-    fun applyCustomTemplate(template: CustomBoardTemplate): Boolean {
-        val current = _uiState.value.board
-        val restored = BoardSnapshotSerializer.deserializeIntoBoard(template.serializedData, current)
-            ?: return false
-        saveUndoSnapshot()
-        // Generate fresh IDs so elements from applied custom templates remain independent across boards
-        val idMap = mutableMapOf<String, String>()
-        fun remap(oldId: String?): String? {
-            if (oldId == null) return null
-            return idMap.getOrPut(oldId) { UUID.randomUUID().toString() }
-        }
-        val freshShapes = restored.shapes.map { sh ->
-            sh.copy(
-                id = remap(sh.id)!!,
-                groupId = null,
-                parentId = null,
-                templateRole = null,
-                isLocked = false,
-                isCollapsed = false,
-                isHiddenByCollapse = false
-            )
-        }
-        val freshNotes = restored.stickyNotes.map { n ->
-            n.copy(
-                id = remap(n.id)!!,
-                groupId = null,
-                parentId = null,
-                isLocked = false,
-                isHiddenByCollapse = false
-            )
-        }
-        val freshTexts = restored.textItems.map { t ->
-            t.copy(
-                id = remap(t.id)!!,
-                groupId = null,
-                parentId = null,
-                isLocked = false,
-                isHiddenByCollapse = false
-            )
-        }
-        val freshStrokes = restored.strokes.map { s ->
-            s.copy(id = UUID.randomUUID().toString())
-        }
-        val freshStickers = restored.stickers.map { st ->
-            st.copy(id = UUID.randomUUID().toString())
-        }
-
-        val appliedBoard = restored.copy(
-            strokes = freshStrokes,
-            shapes = freshShapes,
-            stickyNotes = freshNotes,
-            textItems = freshTexts,
-            stickers = freshStickers
-        )
-
-        _uiState.update {
-            it.withUpdatedBoard { appliedBoard }.copy(
-                selectedStrokeId = null,
-                selectedShapeId = null,
-                selectedNoteId = null,
-                selectedStrokeIds = emptySet(),
-                selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet(),
-                pendingStickyNoteColor = null,
-                pendingShapeType = null,
-                shouldAutoOpenTemplatePicker = false
-            )
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-        return true
-    }
-
-    fun deleteCustomTemplate(templateId: String) {
-        _uiState.update { state ->
-            state.copy(customTemplates = state.customTemplates.filter { it.id != templateId })
-        }
-    }
-
     fun openBoard(boardId: String) {
         val target = _uiState.value.allBoards.find { it.id == boardId }
             ?: store.currentState.boards.find { it.id == boardId }
@@ -2455,7 +2271,6 @@ class WhiteboardViewModel(
                 pendingStickyNoteColor = if (openImmediately) null else it.pendingStickyNoteColor,
                 canUndo = if (openImmediately) false else it.canUndo,
                 canRedo = if (openImmediately) false else it.canRedo,
-                shouldAutoOpenTemplatePicker = if (openImmediately) it.showTemplatesOnNewBoard else it.shouldAutoOpenTemplatePicker
             )
         }
         if (openImmediately) resetZoom()
