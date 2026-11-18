@@ -111,8 +111,8 @@ data class StickyNoteBounds(
 )
 
 object StickyNoteGeometry {
-    const val MIN_SIZE_WORLD = 96f
-    const val MAX_SIZE_WORLD = 2400f
+    const val MIN_SIZE_WORLD = TransformConfig.MIN_SIZE_WORLD
+    const val MAX_SIZE_WORLD = TransformConfig.MAX_SIZE_WORLD
 
     /**
      * Scale-compensated handle resize in World Space:
@@ -182,8 +182,8 @@ object StickyNoteGeometry {
             handle == StickyNoteResizeHandle.BOTTOM_RIGHT
 
         if (!lockAspectRatio) {
-            var newW = (right - left).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-            var newH = (bottom - top).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+            var newW = (right - left).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
+            var newH = (bottom - top).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
             val newX = when {
                 touchesLeft -> origRight - newW
                 touchesRight -> origLeft
@@ -198,19 +198,19 @@ object StickyNoteGeometry {
         }
 
         // Aspect-ratio locked (square 1:1 by default)
-        val ratio = targetAspectRatio.coerceIn(0.25f, 4.0f)
+        val ratio = targetAspectRatio.coerceIn(TransformConfig.MIN_ASPECT_RATIO, TransformConfig.MAX_ASPECT_RATIO)
         val rawW = (right - left)
         val rawH = (bottom - top)
 
         val (targetW, targetH) = when (handle) {
             StickyNoteResizeHandle.LEFT, StickyNoteResizeHandle.RIGHT -> {
-                val w = rawW.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                val h = (w / ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                val w = rawW.coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
+                val h = (w / ratio).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
                 (h * ratio) to h
             }
             StickyNoteResizeHandle.TOP, StickyNoteResizeHandle.BOTTOM -> {
-                val h = rawH.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                val w = (h * ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                val h = rawH.coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
+                val w = (h * ratio).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
                 w to (w / ratio)
             }
             else -> {
@@ -218,12 +218,12 @@ object StickyNoteGeometry {
                 val dw = abs(rawW - bounds.width)
                 val dh = abs(rawH - bounds.height)
                 if (dw >= dh) {
-                    val w = rawW.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                    val h = (w / ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                    val w = rawW.coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
+                    val h = (w / ratio).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
                     (h * ratio) to h
                 } else {
-                    val h = rawH.coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-                    val w = (h * ratio).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+                    val h = rawH.coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
+                    val w = (h * ratio).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
                     w to (w / ratio)
                 }
             }
@@ -320,7 +320,7 @@ object StickyNoteGeometry {
         requiredTextH += bodyLines * lineH
 
         val requiredTotalH = headerH + pad * 2f + requiredTextH
-        return max(currentHeightWorld, requiredTotalH).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+        return max(currentHeightWorld, requiredTotalH).coerceIn(TransformConfig.MIN_SIZE_WORLD, TransformConfig.MAX_SIZE_WORLD)
     }
 
     private fun countWrappedLines(content: String, maxCols: Int): Int {
@@ -453,7 +453,7 @@ object StickyNoteGeometry {
         centerY: Float,
         pointerX: Float,
         pointerY: Float,
-        snapThresholdDegrees: Float = 3f
+        snapThresholdDegrees: Float = TransformConfig.SNAP_TOLERANCE_DEGREES
     ): Float {
         val dx = (pointerX - centerX).toDouble()
         val dy = (pointerY - centerY).toDouble()
@@ -462,10 +462,22 @@ object StickyNoteGeometry {
         // Top handle points straight up (-90° in screen space), which corresponds to 0° note rotation
         val unadjusted = rawAngleDeg + 90f
         val normalized = ((unadjusted % 360f) + 360f) % 360f
-        return snapAngle(normalized, snapThresholdDegrees)
+        return snapAngle45(normalized, snapThresholdDegrees)
     }
 
-    fun snapAngle(angle: Float, threshold: Float = 3f): Float {
+    fun snapAngle45(angle: Float, threshold: Float = TransformConfig.SNAP_TOLERANCE_DEGREES): Float {
+        val normalized = ((angle % 360f) + 360f) % 360f
+        val nearest = kotlin.math.round(normalized / TransformConfig.SNAP_STEP_DEGREES) * TransformConfig.SNAP_STEP_DEGREES
+        val circularDistance = kotlin.math.min(
+            kotlin.math.abs(normalized - nearest),
+            360f - kotlin.math.abs(normalized - nearest)
+        )
+        return if (circularDistance <= threshold) normalizeAngle(nearest) else normalized
+    }
+
+    private fun normalizeAngle(angle: Float): Float = ((angle % 360f) + 360f) % 360f
+
+    fun snapAngle(angle: Float, threshold: Float = TransformConfig.SNAP_TOLERANCE_DEGREES): Float {
         val norm = ((angle % 360f) + 360f) % 360f
         val snapTargets = floatArrayOf(0f, 90f, 180f, 270f, 360f)
         for (target in snapTargets) {

@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -173,6 +174,7 @@ fun WhiteboardCanvasScreen(
     }
 
     var isDrawingGestureActive by remember { mutableStateOf(false) }
+    var isStylusModeEnabled by remember { mutableStateOf(false) }
 
     val canvasBg = try {
         Color(android.graphics.Color.parseColor(state.board.colorTheme.hex))
@@ -236,7 +238,7 @@ fun WhiteboardCanvasScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput("global_viewport_multitouch") {
+                .pointerInput("global_viewport_multitouch", isStylusModeEnabled) {
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         do {
@@ -244,7 +246,7 @@ fun WhiteboardCanvasScreen(
                             // Count pressed pointers without allocating a filtered list on every event.
                             var activePointerCount = 0
                             for (change in event.changes) {
-                                if (change.pressed) activePointerCount++
+                                if (change.pressed && (!isStylusModeEnabled || change.type == PointerType.Touch)) activePointerCount++
                             }
                             if (activePointerCount >= 2) {
                                 val zoom = event.calculateZoom()
@@ -264,7 +266,7 @@ fun WhiteboardCanvasScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .testTag("infinite_canvas")
-                    .pointerInput(state.currentTool) {
+                    .pointerInput(state.currentTool, isStylusModeEnabled) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                         var isMultiTouch = false
@@ -319,7 +321,12 @@ fun WhiteboardCanvasScreen(
                             }
                         }
 
-                        if (curState.pendingStickyNoteColor != null) {
+                        val isStylusPointer = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+                        val forceFingerPan = isStylusModeEnabled && !isStylusPointer
+
+                        if (forceFingerPan) {
+                            gestureMode = CanvasGestureMode.PAN
+                        } else if (curState.pendingStickyNoteColor != null) {
                             viewModel.placePendingAt(wX, wY)
                         } else if (curState.pendingShapeType != null) {
                             val startPt = StrokePoint(wX, wY)
@@ -427,7 +434,10 @@ fun WhiteboardCanvasScreen(
                             var activePointerCount = 0
                             var activePointer = null as androidx.compose.ui.input.pointer.PointerInputChange?
                             for (change in event.changes) {
-                                if (change.pressed) {
+                                val belongsToActiveInput = !isStylusModeEnabled ||
+                                    (isStylusPointer && (change.type == PointerType.Stylus || change.type == PointerType.Eraser)) ||
+                                    (!isStylusPointer && change.type == PointerType.Touch)
+                                if (change.pressed && belongsToActiveInput) {
                                     activePointerCount++
                                     if (activePointerCount == 1) activePointer = change
                                 }
@@ -972,6 +982,8 @@ fun WhiteboardCanvasScreen(
             selectedShapeIds = state.selectedShapeIds,
             cameraState = cameraState,
             isPanOnlyMode = isPanOnlyMode,
+            stylusModeEnabled = isStylusModeEnabled,
+            onPanViewport = { dx, dy -> viewModel.onPanZoom(dx, dy, 1.0f) },
             hasViewport = hasViewport,
             viewportWidthPx = screenWidthPx,
             viewportHeightPx = screenHeightPx,
@@ -1002,7 +1014,10 @@ fun WhiteboardCanvasScreen(
                 }
             },
             onResizeHandle = viewModel::resizeStickyNoteHandle,
-            onRotate = viewModel::rotateStickyNote
+            onRotate = viewModel::rotateStickyNote,
+            onTransformGesture = { noteId, previous, current, zoom, rotation ->
+                viewModel.transformStickyNoteGesture(noteId, previous, current, zoom, rotation)
+            }
         )
 
         // Strict pan-only touch shield when standalone Hand tool is active: prevents any accidental object selection/editing
@@ -1146,6 +1161,8 @@ fun WhiteboardCanvasScreen(
                     onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
                     onAddText = { viewModel.requestAddStickyNote("#FFF275") },
                     onClearBoard = { viewModel.clearBoard() },
+                    isStylusModeEnabled = isStylusModeEnabled,
+                    onToggleStylusMode = { isStylusModeEnabled = !isStylusModeEnabled },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .navigationBarsPadding()
@@ -1442,6 +1459,8 @@ private fun StickyNoteLayer(
     selectedShapeIds: Set<String>,
     cameraState: State<ViewportTransform>,
     isPanOnlyMode: Boolean,
+    stylusModeEnabled: Boolean,
+    onPanViewport: (Float, Float) -> Unit,
     hasViewport: Boolean,
     viewportWidthPx: Float,
     viewportHeightPx: Float,
@@ -1455,7 +1474,8 @@ private fun StickyNoteLayer(
     onDelete: (StickyNote) -> Unit,
     onDragDelta: (StickyNote, Float, Float) -> Unit,
     onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
-    onRotate: (String, Float) -> Unit
+    onRotate: (String, Float) -> Unit,
+    onTransformGesture: (String, com.example.ink.TransformPoint, com.example.ink.TransformPoint, Float, Float) -> Unit
 ) {
     // Re-evaluate visibility as the camera moves, but only recompose this layer
     // when the actual set/order of visible notes changes. Note transforms themselves
@@ -1501,6 +1521,8 @@ private fun StickyNoteLayer(
                 cameraState = cameraState,
                 isSelected = isSelected,
                 isPanOnlyMode = isPanOnlyMode,
+                stylusModeEnabled = stylusModeEnabled,
+                onPanViewport = onPanViewport,
                 onSelect = { onSelect(note.id) },
                 onBeginTransform = onBeginTransform,
                 onEndTransform = onEndTransform,
@@ -1511,7 +1533,10 @@ private fun StickyNoteLayer(
                 onDelete = { onDelete(note) },
                 onDragDelta = { dx, dy -> onDragDelta(note, dx, dy) },
                 onResizeHandle = { handle, dx, dy -> onResizeHandle(note.id, handle, dx, dy) },
-                onRotate = { degrees -> onRotate(note.id, degrees) }
+                onRotate = { degrees -> onRotate(note.id, degrees) },
+                onTransformGesture = { previous, current, zoom, rotation ->
+                    onTransformGesture(note.id, previous, current, zoom, rotation)
+                }
             )
         }
     }

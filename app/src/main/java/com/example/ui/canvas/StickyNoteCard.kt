@@ -31,6 +31,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
@@ -50,13 +51,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
@@ -75,13 +78,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.TransformConfig
+import com.example.ink.TransformPoint
+import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
-import kotlin.math.PI
-import kotlin.math.cos
+import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 val StickyNoteComputedFontSpKey = SemanticsPropertyKey<Float>("StickyNoteComputedFontSp")
 
@@ -194,8 +199,11 @@ fun StickyNoteView(
     onDragDelta: (Float, Float) -> Unit,
     onResizeHandle: (StickyNoteResizeHandle, Float, Float) -> Unit = { _, _, _ -> },
     onRotate: (Float) -> Unit = {},
+    onTransformGesture: (TransformPoint, TransformPoint, Float, Float) -> Unit = { _, _, _, _ -> },
     isSelected: Boolean = false,
     isPanOnlyMode: Boolean = false,
+    stylusModeEnabled: Boolean = false,
+    onPanViewport: (Float, Float) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -208,7 +216,8 @@ fun StickyNoteView(
     val currentOnDragDelta by rememberUpdatedState(onDragDelta)
     val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
     val currentOnRotate by rememberUpdatedState(onRotate)
-    val currentNoteRotation by rememberUpdatedState(note.rotation)
+    val currentOnTransformGesture by rememberUpdatedState(onTransformGesture)
+    val currentOnPanViewport by rememberUpdatedState(onPanViewport)
 
     val noteBg = try {
         Color(android.graphics.Color.parseColor(note.colorHex))
@@ -266,19 +275,53 @@ fun StickyNoteView(
 
     // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
     // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
-    val handleTargetDp = 48.dp
-    val sideGutterDp = 24.dp
+    val handleTargetDp = TransformConfig.HANDLE_TOUCH_TARGET_DP.dp
+    val sideGutterDp = TransformConfig.SIDE_GUTTER_DP.dp
     val sideGutterPx = with(density) { sideGutterDp.toPx() }
-    val verticalGutterDp = 64.dp
+    val verticalGutterDp = TransformConfig.VERTICAL_GUTTER_DP.dp
     val verticalGutterPx = with(density) { verticalGutterDp.toPx() }
     val activeSelectionHandles = isSelected && !note.isLocked && !isPanOnlyMode
 
     var cardCenterRoot by remember { mutableStateOf(Offset.Zero) }
+    var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var activeResizeHandle by remember { mutableStateOf<StickyNoteResizeHandle?>(null) }
+    val hapticFeedback = LocalHapticFeedback.current
     var isRotating by remember { mutableStateOf(false) }
+
+    val stylusTouchPanModifier = if (stylusModeEnabled) {
+        Modifier.pointerInput(note.id, stylusModeEnabled) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val isStylusInput = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+                if (!isStylusInput) {
+                    var lastPosition = down.position
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change != null && change.pressed) {
+                            val delta = change.position - lastPosition
+                            if (delta.x != 0f || delta.y != 0f) {
+                                currentOnPanViewport(delta.x, delta.y)
+                            }
+                            lastPosition = change.position
+                            change.consume()
+                        }
+                    } while (event.changes.any { it.id == down.id && it.pressed })
+                } else {
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                    } while (event.changes.any { it.id == down.id && it.pressed })
+                }
+            }
+        }
+    } else {
+        Modifier
+    }
 
     Box(
         modifier = modifier
+            .then(stylusTouchPanModifier)
             .zIndex(if (isSelected) 10f else 0f)
             .offset {
                 // The layout position is outside the graphics layer, so graphicsLayer.scale
@@ -309,60 +352,99 @@ fun StickyNoteView(
         } else {
             Modifier.pointerInput(note.id, note.isLocked) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var isDragging = false
-                    var beganSnapshot = false
-                    var totalDragPx = 0f
-                    val touchSlop = viewConfiguration.touchSlop
+                    val down = awaitFirstDown(requireUnconsumed = true)
+                    val coordinates = cardCoords
+                    val firstRoot = coordinates?.localToRoot(down.position) ?: down.position
+                    val previous = mutableMapOf(down.id to firstRoot)
+                    var previousPointerCount = 1
+                    var totalDrag = 0f
+                    var pendingDrag = Offset.Zero
+                    var beganTransform = false
 
                     do {
                         val event = awaitPointerEvent()
-                        var activePointer: PointerInputChange? = null
-                        var hasMultipleActivePointers = false
-                        for (pointerChange in event.changes) {
-                            if (pointerChange.pressed) {
-                                if (activePointer != null) {
-                                    hasMultipleActivePointers = true
-                                    break
-                                }
-                                activePointer = pointerChange
-                            }
+                        val pressed = event.changes.filter { it.pressed }
+                        if (pressed.isEmpty()) break
+                        if (event.changes.any { it.isConsumed } && !beganTransform) break
+
+                        val current = pressed.associate { change ->
+                            change.id to (cardCoords?.localToRoot(change.position) ?: change.position)
                         }
-                        if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                            // Yield immediately to multi-touch canvas pan/pinch-to-zoom
-                            isDragging = false
-                            break
+
+                        if (current.size != previousPointerCount) {
+                            previous.clear()
+                            previous.putAll(current)
+                            previousPointerCount = current.size
+                            continue
                         }
-                        val change = activePointer ?: break
-                        val delta = change.positionChange()
-                        if (!isDragging) {
-                            totalDragPx += hypot(delta.x, delta.y)
-                            if (totalDragPx > touchSlop) {
-                                isDragging = true
-                                currentOnSelect()
-                                if (!note.isLocked && !beganSnapshot) {
-                                    beganSnapshot = true
+
+                        if (current.size >= 2) {
+                            val ids = current.keys.take(2)
+                            val oldA = previous[ids[0]]
+                            val oldB = previous[ids[1]]
+                            val newA = current[ids[0]]
+                            val newB = current[ids[1]]
+                            if (oldA != null && oldB != null && newA != null && newB != null) {
+                                val previousCentroid = Offset((oldA.x + oldB.x) * 0.5f, (oldA.y + oldB.y) * 0.5f)
+                                val currentCentroid = Offset((newA.x + newB.x) * 0.5f, (newA.y + newB.y) * 0.5f)
+                                val oldDx = oldB.x - oldA.x
+                                val oldDy = oldB.y - oldA.y
+                                val newDx = newB.x - newA.x
+                                val newDy = newB.y - newA.y
+                                val oldDistance = hypot(oldDx, oldDy).coerceAtLeast(1f)
+                                val newDistance = hypot(newDx, newDy)
+                                val zoomChange = (newDistance / oldDistance).coerceIn(0.05f, 20f)
+                                var rotationDelta = Math.toDegrees(
+                                    (atan2(newDy, newDx) - atan2(oldDy, oldDx)).toDouble()
+                                ).toFloat()
+                                if (rotationDelta > 180f) rotationDelta -= 360f
+                                if (rotationDelta < -180f) rotationDelta += 360f
+
+                                if (!beganTransform && !note.isLocked) {
+                                    beganTransform = true
+                                    currentOnSelect()
                                     currentOnBeginTransform()
                                 }
+                                if (beganTransform) {
+                                    currentOnTransformGesture(
+                                        TransformPoint(previousCentroid.x, previousCentroid.y),
+                                        TransformPoint(currentCentroid.x, currentCentroid.y),
+                                        zoomChange,
+                                        rotationDelta
+                                    )
+                                    event.changes.forEach { if (it.pressed) it.consume() }
+                                }
+                            }
+                        } else {
+                            val change = pressed.first()
+                            val oldPosition = previous[change.id]
+                            val newPosition = current[change.id]
+                            if (oldPosition != null && newPosition != null) {
+                                val delta = newPosition - oldPosition
+                                if (!beganTransform) {
+                                    pendingDrag += delta
+                                    totalDrag += hypot(delta.x, delta.y)
+                                    if (totalDrag > viewConfiguration.touchSlop && !note.isLocked) {
+                                        beganTransform = true
+                                        currentOnSelect()
+                                        currentOnBeginTransform()
+                                        currentOnDragDelta(pendingDrag.x, pendingDrag.y)
+                                        pendingDrag = Offset.Zero
+                                        change.consume()
+                                    }
+                                } else if (delta != Offset.Zero) {
+                                    currentOnDragDelta(delta.x, delta.y)
+                                    change.consume()
+                                }
                             }
                         }
-                        if (isDragging && !note.isLocked && (delta.x != 0f || delta.y != 0f)) {
-                            val angleRad = currentNoteRotation * (PI.toFloat() / 180f)
-                            val cosA = cos(angleRad)
-                            val sinA = sin(angleRad)
-                            val screenDx = delta.x * cosA - delta.y * sinA
-                            val screenDy = delta.x * sinA + delta.y * cosA
-                            currentOnDragDelta(screenDx, screenDy)
-                            change.consume()
-                        }
+
+                        previous.clear()
+                        previous.putAll(current)
                     } while (event.changes.any { it.pressed })
 
-                    if (!isDragging) {
-                        currentOnSelect()
-                    }
-                    if (beganSnapshot) {
-                        currentOnEndTransform()
-                    }
+                    if (!beganTransform) currentOnSelect()
+                    if (beganTransform) currentOnEndTransform()
                 }
             }
         }
@@ -378,15 +460,10 @@ fun StickyNoteView(
                 modifier = Modifier
                     .padding(sideGutterDp)
                     .fillMaxSize()
-                    .then(
-                        if (activeSelectionHandles) {
-                            Modifier.onGloballyPositioned { coords ->
-                                cardCenterRoot = coords.boundsInRoot().center
-                            }
-                        } else {
-                            Modifier
-                        }
-                    )
+                    .onGloballyPositioned { coords ->
+                        cardCoords = coords
+                        if (activeSelectionHandles) cardCenterRoot = coords.boundsInRoot().center
+                    }
                     .clip(RoundedCornerShape(cornerRadiusDp))
                     .background(noteBg)
                     .border(
@@ -609,52 +686,48 @@ fun StickyNoteView(
             )
 
             handles.forEach { (handle, alignment) ->
-                val isCorner = handle == StickyNoteResizeHandle.TOP_LEFT ||
-                    handle == StickyNoteResizeHandle.TOP_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_LEFT
-                val isHorizontalEdge = handle == StickyNoteResizeHandle.TOP ||
-                    handle == StickyNoteResizeHandle.BOTTOM
-
+                var handleCoordinates by remember(note.id, handle) { mutableStateOf<LayoutCoordinates?>(null) }
+                val handleScale by animateFloatAsState(
+                    targetValue = if (activeResizeHandle == handle) 1.18f else 1f,
+                    label = "sticky-note-handle-scale"
+                )
                 Box(
                     modifier = Modifier
                         .align(alignment)
                         .size(handleTargetDp)
+                        .graphicsLayer {
+                            val inverseZoom = 1f / cameraState.value.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+                            scaleX = inverseZoom
+                            scaleY = inverseZoom
+                        }
+                        .onGloballyPositioned { handleCoordinates = it }
                         .pointerInput(note.id, handle, note.isLocked) {
                             awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var previousRoot = handleCoordinates?.localToRoot(down.position) ?: down.position
                                 var beganResize = false
+                                activeResizeHandle = handle
                                 do {
                                     val event = awaitPointerEvent()
-                                    var activePointer: PointerInputChange? = null
-                                    var hasMultipleActivePointers = false
-                                    for (pointerChange in event.changes) {
-                                        if (pointerChange.pressed) {
-                                            if (activePointer != null) {
-                                                hasMultipleActivePointers = true
-                                                break
-                                            }
-                                            activePointer = pointerChange
-                                        }
-                                    }
-                                    if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                        break
-                                    }
-                                    val change = activePointer ?: break
-                                    val delta = change.positionChange()
-                                    if (delta.x != 0f || delta.y != 0f) {
-                                        if (!beganResize) {
+                                    val change = event.changes.firstOrNull { it.id == down.id && it.pressed } ?: break
+                                    if (event.changes.any { it.isConsumed } && !beganResize) break
+                                    val currentRoot = handleCoordinates?.localToRoot(change.position) ?: change.position
+                                    val delta = currentRoot - previousRoot
+                                    if (delta != Offset.Zero) {
+                                        if (!beganResize && !note.isLocked) {
                                             beganResize = true
                                             currentOnSelect()
                                             currentOnBeginTransform()
                                         }
-                                        currentOnResizeHandle(handle, delta.x, delta.y)
-                                        change.consume()
+                                        if (beganResize) {
+                                            currentOnResizeHandle(handle, delta.x, delta.y)
+                                            change.consume()
+                                        }
                                     }
+                                    previousRoot = currentRoot
                                 } while (event.changes.any { it.pressed })
-                                if (beganResize) {
-                                    currentOnEndTransform()
-                                }
+                                activeResizeHandle = null
+                                if (beganResize) currentOnEndTransform()
                             }
                         }
                         .testTag("sticky_note_handle_${handle.name}_${note.id}"),
@@ -665,38 +738,18 @@ fun StickyNoteView(
                     } else {
                         MaterialTheme.colorScheme.primary
                     }
-                    when {
-                        isCorner -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(13.dp)
-                                    .shadow(3.dp, CircleShape)
-                                    .clip(CircleShape)
-                                    .background(Color.White)
-                                    .border(2.5.dp, accentColor, CircleShape)
-                            )
-                        }
-                        isHorizontalEdge -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 22.dp, height = 7.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                        else -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 7.dp, height = 22.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                    }
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = handleScale
+                                scaleY = handleScale
+                            }
+                            .size(TransformConfig.HANDLE_VISUAL_SIZE_DP.dp)
+                            .shadow(2.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .border(1.25.dp, accentColor, CircleShape)
+                    )
                 }
             }
         }
@@ -720,19 +773,28 @@ fun StickyNoteView(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 24.dp)
+                    .offset(y = TransformConfig.ROTATION_GUIDE_OFFSET_DP.dp)
                     .width(2.dp)
-                    .height(40.dp)
+                    .height(TransformConfig.ROTATION_GUIDE_HEIGHT_DP.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
 
             // 3. Rotation handle (48x48.dp touch target) positioned cleanly inside Outer Box top gutter (y = 0..48.dp).
+            val rotationHandleScale by animateFloatAsState(
+                targetValue = if (isRotating) 1.2f else 1f,
+                label = "sticky-note-rotation-handle-scale"
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .offset(y = 0.dp)
                     .zIndex(2f)
                     .size(handleTargetDp)
+                    .graphicsLayer {
+                        val inverseZoom = 1f / cameraState.value.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+                        scaleX = inverseZoom
+                        scaleY = inverseZoom
+                    }
                     .onGloballyPositioned { handleCoords = it }
                     .pointerInput(note.id, note.isLocked) {
                         awaitEachGesture {
@@ -740,57 +802,59 @@ fun StickyNoteView(
                             down.consume()
                             currentOnSelect()
                             var beganRotation = false
+                            var lastSnappedAngle: Float? = null
 
                             val currentCamera = cameraState.value
                             val fallbackCenterX = currentCamera.worldToScreenX(note.x + note.width / 2f)
                             val fallbackCenterY = currentCamera.worldToScreenY(note.y + note.height / 2f)
+                            var previousRoot = handleCoords?.localToRoot(down.position) ?: down.position
 
                             do {
                                 val event = awaitPointerEvent()
-                                var activePointer: PointerInputChange? = null
-                                var hasMultipleActivePointers = false
-                                for (pointerChange in event.changes) {
-                                    if (pointerChange.pressed) {
-                                        if (activePointer != null) {
-                                            hasMultipleActivePointers = true
-                                            break
-                                        }
-                                        activePointer = pointerChange
-                                    }
-                                }
-                                if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                    break
-                                }
-                                val change = activePointer ?: break
-                                val moveDelta = change.positionChange()
-                                if (moveDelta.x != 0f || moveDelta.y != 0f) {
-                                    if (!beganRotation) {
+                                val change = event.changes.firstOrNull { it.id == down.id && it.pressed } ?: break
+                                if (event.changes.any { it.isConsumed } && !beganRotation) break
+                                val pointerRoot = handleCoords?.localToRoot(change.position) ?: change.position
+                                val delta = pointerRoot - previousRoot
+                                if (delta != Offset.Zero) {
+                                    if (!beganRotation && !note.isLocked) {
                                         beganRotation = true
                                         isRotating = true
                                         currentOnBeginTransform()
                                     }
-                                    val pointerRoot = handleCoords?.localToRoot(change.position)
-                                    val pX = pointerRoot?.x ?: (fallbackCenterX + change.position.x)
-                                    val pY = pointerRoot?.y ?: (fallbackCenterY + change.position.y)
-
-                                    val cX = if (cardCenterRoot != Offset.Zero) cardCenterRoot.x else fallbackCenterX
-                                    val cY = if (cardCenterRoot != Offset.Zero) cardCenterRoot.y else fallbackCenterY
-
-                                    val targetDegrees = StickyNoteGeometry.calculateRotationDegrees(
-                                        centerX = cX,
-                                        centerY = cY,
-                                        pointerX = pX,
-                                        pointerY = pY,
-                                        snapThresholdDegrees = 3f
-                                    )
-                                    currentOnRotate(targetDegrees)
-                                    change.consume()
+                                    if (beganRotation) {
+                                        val pX = pointerRoot.x
+                                        val pY = pointerRoot.y
+                                        val cX = if (cardCenterRoot != Offset.Zero) cardCenterRoot.x else fallbackCenterX
+                                        val cY = if (cardCenterRoot != Offset.Zero) cardCenterRoot.y else fallbackCenterY
+                                        val targetDegrees = StickyNoteGeometry.calculateRotationDegrees(
+                                            centerX = cX,
+                                            centerY = cY,
+                                            pointerX = pX,
+                                            pointerY = pY,
+                                            snapThresholdDegrees = TransformConfig.SNAP_TOLERANCE_DEGREES
+                                        )
+                                        val normalized = ((targetDegrees % 360f) + 360f) % 360f
+                                        val nearest = (round(normalized / TransformConfig.SNAP_STEP_DEGREES) * TransformConfig.SNAP_STEP_DEGREES) % 360f
+                                        val distance = minOf(
+                                            kotlin.math.abs(normalized - nearest),
+                                            360f - kotlin.math.abs(normalized - nearest)
+                                        )
+                                        if (distance <= TransformConfig.SNAP_TOLERANCE_DEGREES) {
+                                            if (lastSnappedAngle != nearest) {
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                            lastSnappedAngle = nearest
+                                        } else {
+                                            lastSnappedAngle = null
+                                        }
+                                        currentOnRotate(targetDegrees)
+                                        change.consume()
+                                    }
                                 }
+                                previousRoot = pointerRoot
                             } while (event.changes.any { it.pressed })
                             isRotating = false
-                            if (beganRotation) {
-                                currentOnEndTransform()
-                            }
+                            if (beganRotation) currentOnEndTransform()
                         }
                     }
                     .semantics {
@@ -801,20 +865,16 @@ fun StickyNoteView(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(22.dp)
-                        .shadow(4.dp, CircleShape)
+                        .graphicsLayer {
+                            scaleX = rotationHandleScale
+                            scaleY = rotationHandleScale
+                        }
+                        .size(TransformConfig.ROTATION_HANDLE_VISUAL_SIZE_DP.dp)
+                        .shadow(2.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Color.White)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.RotateRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
+                        .border(1.25.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                )
             }
 
             if (isRotating) {

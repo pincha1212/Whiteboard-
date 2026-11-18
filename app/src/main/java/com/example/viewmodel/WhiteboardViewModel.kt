@@ -6,9 +6,11 @@ import com.example.data.LocalFirstWorkspaceStore
 import com.example.data.WorkspaceDbState
 import com.example.ink.PixelEraserGeometry
 import com.example.ink.ShapeRecognizer
-import com.example.ink.StickyNoteBounds
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.TransformGeometry
+import com.example.ink.TransformState
+import com.example.ink.TransformPoint
 import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
@@ -855,33 +857,78 @@ class WhiteboardViewModel(
         deltaScreenY: Float
     ) {
         val state = _uiState.value
-        val camera = _cameraState.value
-        var modified = false
+        val cameraScale = _cameraState.value.scale
+        val target = state.board.stickyNotes.firstOrNull { it.id == id && !it.isLocked } ?: return
+        val transformed = TransformGeometry.resize(
+            state = TransformState(
+                x = target.x,
+                y = target.y,
+                width = target.width,
+                height = target.height,
+                rotationAngle = target.rotation
+            ),
+            handle = handle,
+            deltaScreenX = deltaScreenX,
+            deltaScreenY = deltaScreenY,
+            cameraScale = cameraScale,
+            lockAspectRatio = target.isAspectRatioLocked,
+            aspectRatio = if (target.isAspectRatioLocked) 1f else target.width / target.height
+        )
         val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id && !note.isLocked) {
-                modified = true
-                val next = StickyNoteGeometry.resizeByHandle(
-                    bounds = StickyNoteBounds(note.x, note.y, note.width, note.height),
-                    handle = handle,
-                    deltaScreenX = deltaScreenX,
-                    deltaScreenY = deltaScreenY,
-                    scale = camera.scale,
-                    lockAspectRatio = note.isAspectRatioLocked,
-                    targetAspectRatio = 1.0f
-                )
+            if (note.id == id) {
                 note.copy(
-                    x = next.x,
-                    y = next.y,
-                    width = next.width,
-                    height = next.height
+                    x = transformed.x,
+                    y = transformed.y,
+                    width = transformed.width,
+                    height = transformed.height
                 )
             } else note
         }
-        if (!modified) return
         _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
+            it.withUpdatedBoard { board -> board.copy(stickyNotes = updated) }
+        }
+        if (!isStickyNoteTransformInProgress) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
+        }
+    }
+
+
+    fun transformStickyNoteGesture(
+        id: String,
+        previousCentroid: TransformPoint,
+        currentCentroid: TransformPoint,
+        zoomChange: Float,
+        rotationDeltaDegrees: Float
+    ) {
+        val state = _uiState.value
+        val target = state.board.stickyNotes.firstOrNull { it.id == id && !it.isLocked } ?: return
+        val transformed = TransformGeometry.transformByGesture(
+            state = TransformState(
+                x = target.x,
+                y = target.y,
+                width = target.width,
+                height = target.height,
+                rotationAngle = target.rotation
+            ),
+            previousCentroidScreen = previousCentroid,
+            currentCentroidScreen = currentCentroid,
+            zoomChange = zoomChange,
+            rotationDeltaDegrees = rotationDeltaDegrees,
+            camera = _cameraState.value
+        )
+        val updated = state.board.stickyNotes.map { note ->
+            if (note.id == id) {
+                note.copy(
+                    x = transformed.x,
+                    y = transformed.y,
+                    width = transformed.width,
+                    height = transformed.height,
+                    rotation = transformed.rotationAngle
+                )
+            } else note
+        }
+        _uiState.update {
+            it.withUpdatedBoard { board -> board.copy(stickyNotes = updated) }
         }
         if (!isStickyNoteTransformInProgress) {
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
@@ -1570,38 +1617,54 @@ class WhiteboardViewModel(
                     )
                 }
             } else {
-                // Corner handles: 0=TL, 1=TR, 2=BL, 3=BR
-                val anchorX = if (handleIndex == 0 || handleIndex == 2) s.x + s.width else s.x
-                val anchorY = if (handleIndex == 0 || handleIndex == 1) s.y + s.height else s.y
-                val minSize = 24f
-
-                val clampedX = when (handleIndex) {
-                    0, 2 -> kotlin.math.min(newWorldX, anchorX - minSize)
-                    else -> kotlin.math.max(newWorldX, anchorX + minSize)
+                if (handleIndex !in 0..3) return@map s
+                val transform = TransformState(
+                    x = s.x,
+                    y = s.y,
+                    width = s.width.coerceAtLeast(1f),
+                    height = s.height.coerceAtLeast(1f),
+                    rotationAngle = s.rotation
+                )
+                val pointerLocal = TransformGeometry.worldToLocal(transform, newWorldX, newWorldY)
+                val horizontal = if (handleIndex == 0 || handleIndex == 2) -1f else 1f
+                val vertical = if (handleIndex == 0 || handleIndex == 1) -1f else 1f
+                val localDeltaX = pointerLocal.x - horizontal * transform.width * 0.5f
+                val localDeltaY = pointerLocal.y - vertical * transform.height * 0.5f
+                val worldDelta = TransformGeometry.localVectorToWorld(
+                    localDeltaX,
+                    localDeltaY,
+                    transform.rotationAngle
+                )
+                val cameraScale = _cameraState.value.scale
+                val handle = when (handleIndex) {
+                    0 -> StickyNoteResizeHandle.TOP_LEFT
+                    1 -> StickyNoteResizeHandle.TOP_RIGHT
+                    2 -> StickyNoteResizeHandle.BOTTOM_LEFT
+                    else -> StickyNoteResizeHandle.BOTTOM_RIGHT
                 }
-                val clampedY = when (handleIndex) {
-                    0, 1 -> kotlin.math.min(newWorldY, anchorY - minSize)
-                    else -> kotlin.math.max(newWorldY, anchorY + minSize)
-                }
-
-                val newX = kotlin.math.min(anchorX, clampedX)
-                val newY = kotlin.math.min(anchorY, clampedY)
-                val newW = kotlin.math.abs(clampedX - anchorX).coerceAtLeast(minSize)
-                val newH = kotlin.math.abs(clampedY - anchorY).coerceAtLeast(minSize)
-
-                val oldW = s.width.coerceAtLeast(1f)
-                val oldH = s.height.coerceAtLeast(1f)
-                val remappedVerts = s.vertices.map { v ->
-                    val rx = (v.x - s.x) / oldW
-                    val ry = (v.y - s.y) / oldH
-                    StrokePoint(newX + rx * newW, newY + ry * newH)
+                val next = TransformGeometry.resize(
+                    state = transform,
+                    handle = handle,
+                    deltaScreenX = worldDelta.x * cameraScale,
+                    deltaScreenY = worldDelta.y * cameraScale,
+                    cameraScale = cameraScale,
+                    minSize = 24f,
+                    maxSize = 3000f
+                )
+                val remappedVerts = s.vertices.map { vertex ->
+                    val normalizedX = (vertex.x - s.x) / transform.width
+                    val normalizedY = (vertex.y - s.y) / transform.height
+                    StrokePoint(
+                        next.x + normalizedX * next.width,
+                        next.y + normalizedY * next.height
+                    )
                 }
 
                 s.copy(
-                    x = newX,
-                    y = newY,
-                    width = newW,
-                    height = newH,
+                    x = next.x,
+                    y = next.y,
+                    width = next.width,
+                    height = next.height,
                     vertices = remappedVerts
                 )
             }
