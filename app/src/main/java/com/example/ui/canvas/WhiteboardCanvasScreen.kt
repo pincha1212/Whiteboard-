@@ -126,8 +126,6 @@ fun WhiteboardCanvasScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    var showShapePicker by remember { mutableStateOf(false) }
-    var showTemplatePicker by remember { mutableStateOf(false) }
     var showBackgroundSettings by remember { mutableStateOf(false) }
     var showBoardsManager by remember { mutableStateOf(false) }
     var showExportModal by remember { mutableStateOf(false) }
@@ -139,12 +137,6 @@ fun WhiteboardCanvasScreen(
     var canvasSizePx by remember { mutableStateOf(IntSize(1080, 1920)) }
     val density = LocalDensity.current
 
-    LaunchedEffect(state.shouldAutoOpenTemplatePicker) {
-        if (state.shouldAutoOpenTemplatePicker) {
-            showTemplatePicker = true
-            viewModel.consumeAutoOpenTemplatePicker()
-        }
-    }
 
     var pendingDragStart by remember { mutableStateOf<StrokePoint?>(null) }
     var pendingDragEnd by remember { mutableStateOf<StrokePoint?>(null) }
@@ -1165,10 +1157,8 @@ fun WhiteboardCanvasScreen(
                     onUpdateHandDrawnFactor = { viewModel.setHandDrawnFactor(it) },
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
-                    onOpenShapePicker = { showShapePicker = true },
                     onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
                     onAddText = { viewModel.requestAddStickyNote("#FFF275") },
-                    onOpenTemplates = { showTemplatePicker = true },
                     onClearBoard = { viewModel.clearBoard() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1270,61 +1260,6 @@ fun WhiteboardCanvasScreen(
             )
         }
 
-        if (showShapePicker) {
-            ShapePickerBottomSheet(
-                initialColorHex = state.penColorHex,
-                initialStrokeStyle = state.penStyle,
-                initialCapStyle = state.penCapStyle,
-                initialBrushType = viewModel.brushTypeForTool(state.currentTool),
-                onSelectBrushType = { viewModel.setPendingBrushType(it) },
-                onSelectShapeType = { shapeType, isFilled, strokeColor, fillColor, style, capStyle ->
-                    viewModel.requestAddCustomShape(
-                        type = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor,
-                        style = style,
-                        capStyle = capStyle,
-                        brushType = viewModel.uiState.value.pendingBrushType
-                    )
-                },
-                onDismiss = { showShapePicker = false }
-            )
-        }
-
-        if (showTemplatePicker) {
-            TemplatePickerModal(
-                showOnNewBoard = state.showTemplatesOnNewBoard,
-                onToggleShowOnNewBoard = { viewModel.toggleShowTemplatesOnNewBoard(it) },
-                onStartBlankCanvas = {
-                    val hasAny = state.board.strokes.isNotEmpty() ||
-                        state.board.shapes.isNotEmpty() ||
-                        state.board.stickyNotes.isNotEmpty() ||
-                        state.board.textItems.isNotEmpty()
-                    if (hasAny) {
-                        viewModel.clearBoard()
-                    }
-                    showTemplatePicker = false
-                },
-                onSelectTemplate = { viewModel.applyTemplate(it, screenWidthPx, screenHeightPx) },
-                onDismiss = { showTemplatePicker = false },
-                customTemplates = state.customTemplates,
-                currentBoardTitle = state.board.title,
-                onSaveCurrentAsTemplate = { title, desc ->
-                    val saved = viewModel.saveCurrentBoardAsTemplate(title, desc)
-                    Toast.makeText(context, "Plantilla '${saved.title}' guardada", Toast.LENGTH_SHORT).show()
-                },
-                onSelectCustomTemplate = { tmpl ->
-                    val ok = viewModel.applyCustomTemplate(tmpl)
-                    if (!ok) {
-                        Toast.makeText(context, "No se pudo aplicar esta plantilla", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDeleteCustomTemplate = { templateId ->
-                    viewModel.deleteCustomTemplate(templateId)
-                }
-            )
-        }
 
         if (showBackgroundSettings) {
             BackgroundSettingsModal(

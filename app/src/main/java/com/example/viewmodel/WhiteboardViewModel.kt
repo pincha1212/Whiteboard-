@@ -10,7 +10,6 @@ import com.example.ink.ShapeRecognizer
 import com.example.ink.StickyNoteBounds
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
-import com.example.ink.StrokeStabilizer
 import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
@@ -406,20 +405,18 @@ class WhiteboardViewModel(
         saveUndoSnapshot()
         val state = _uiState.value
         val brushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else brushTypeForTool(state.currentTool)
-        val stabilizedPoints = StrokeStabilizer.stabilizePoints(points, brushType.stabilization)
-        val simplifiedPoints = com.example.ink.engine.ShapeGenerator.simplifyStrokePoints(stabilizedPoints, tolerance = 1.35f)
         val effectiveWidth = effectiveStrokeWidthForBrush(brushType, state.penWidth)
         val effectiveColor = effectiveColorForBrush(brushType, state.penColorHex)
         val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER || brushType == StrokeBrushType.SOFT_BRUSH
 
         val newStroke = WhiteboardStroke(
-            points = simplifiedPoints,
+            points = points,
             colorHex = effectiveColor,
             width = effectiveWidth,
             isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
             isRainbow = state.isRainbowPen && !isTranslucentEmphasis,
-            strokeStyle = state.penStyle,
-            capStyle = state.penCapStyle,
+            strokeStyle = StrokeStyle.SOLID,
+            capStyle = LineCapStyle.NONE,
             brushType = brushType,
             opacity = brushType.defaultOpacity
         )
