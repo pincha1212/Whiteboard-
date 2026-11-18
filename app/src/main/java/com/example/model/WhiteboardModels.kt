@@ -36,30 +36,6 @@ enum class LineCapStyle(val displayName: String, val symbol: String) {
     START_ARROW("Flecha inicio", "←")
 }
 
-enum class StrokeStyle(
-    val displayName: String,
-    val category: StrokeCategory = StrokeCategory.PATTERNS
-) {
-    SOLID("Sólida", StrokeCategory.PATTERNS),
-    DASHED("Discontinua", StrokeCategory.PATTERNS),
-    DOTTED("Punteada", StrokeCategory.PATTERNS),
-    DASH_DOT("Punto y raya", StrokeCategory.PATTERNS),
-    DOUBLE("Doble / Paralela", StrokeCategory.PATTERNS),
-    ZIGZAG("Zigzag / Dentada", StrokeCategory.PATTERNS),
-    WAVY("Ondulada", StrokeCategory.PATTERNS),
-    SQUARE_WAVE("Almena / Onda cuadrada", StrokeCategory.PATTERNS),
-    RAILWAY("Vías de tren", StrokeCategory.PATTERNS),
-    ARROW_PATTERN("Flechas continuas", StrokeCategory.PATTERNS),
-
-    TAPERED("Presión / Tapered", StrokeCategory.PRESSURE),
-    CALLIGRAPHIC("Caligráfico / Biselado", StrokeCategory.PRESSURE),
-    SKETCH("Multilínea / Boceto", StrokeCategory.PRESSURE),
-
-    NEON_GLOW("Neón / Resplandor", StrokeCategory.TEXTURE_LIGHT),
-    DYNAMIC_GRADIENT("Degradado dinámico", StrokeCategory.TEXTURE_LIGHT),
-    CHALK_TEXTURE("Tiza / Acuarela", StrokeCategory.TEXTURE_LIGHT)
-}
-
 enum class CanvasGridType(val title: String) {
     DOTS("Puntos"),
     GRID("Cuadrícula"),
