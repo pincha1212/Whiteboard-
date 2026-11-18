@@ -108,7 +108,7 @@ internal fun computeNodeWidthMultiplier(node: BrushNode, style: StrokeStyle): Fl
 }
 
 internal fun buildDynamicShaderIfNeeded(nodes: List<BrushNode>, config: BrushConfig): Shader? {
-    if (!config.isRainbow && config.strokeStyle != StrokeStyle.DYNAMIC_GRADIENT) return null
+    if (!config.isRainbow) return null
     if (nodes.isEmpty()) return null
     var minX = Float.MAX_VALUE
     var maxX = -Float.MAX_VALUE
@@ -768,23 +768,14 @@ object BrushEngineRegistry {
     private val fineMarker = FineMarkerBrush()
 
     fun forBrushType(brushType: StrokeBrushType, strokeStyle: StrokeStyle = StrokeStyle.SOLID): BrushEngine {
-        if (strokeStyle == StrokeStyle.CALLIGRAPHIC && brushType == StrokeBrushType.FOUNTAIN_PEN) {
-            return calligraphy
-        }
         return when (brushType) {
             StrokeBrushType.FOUNTAIN_PEN -> fountainPen
             StrokeBrushType.FINE_MARKER -> fineMarker
             StrokeBrushType.HIGHLIGHTER -> highlighter
-            StrokeBrushType.SOFT_BRUSH -> bristle
-            StrokeBrushType.CALLIGRAPHY -> calligraphy
-            StrokeBrushType.AIRBRUSH -> airbrush
         }
     }
 
     fun allCoreBrushes(): List<BrushEngine> = listOf(
-        highlighter,
-        bristle,
-        calligraphy,
-        airbrush
+        highlighter
     )
 }
