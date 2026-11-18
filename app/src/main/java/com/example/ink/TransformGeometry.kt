@@ -17,8 +17,8 @@ data class TransformState(
     val centerY: Float get() = y + height * 0.5f
 
     fun normalized(
-        minSize: Float = StickyNoteGeometry.MIN_SIZE_WORLD,
-        maxSize: Float = StickyNoteGeometry.MAX_SIZE_WORLD
+        minSize: Float = TransformConfig.MIN_SIZE_WORLD,
+        maxSize: Float = TransformConfig.MAX_SIZE_WORLD
     ): TransformState = copy(
         width = width.coerceIn(minSize, maxSize),
         height = height.coerceIn(minSize, maxSize),
@@ -59,8 +59,8 @@ object TransformGeometry {
         cameraScale: Float,
         lockAspectRatio: Boolean = false,
         aspectRatio: Float = state.width / state.height,
-        minSize: Float = StickyNoteGeometry.MIN_SIZE_WORLD,
-        maxSize: Float = StickyNoteGeometry.MAX_SIZE_WORLD
+        minSize: Float = TransformConfig.MIN_SIZE_WORLD,
+        maxSize: Float = TransformConfig.MAX_SIZE_WORLD
     ): TransformState {
         val safeScale = cameraScale.coerceAtLeast(ViewportTransform.MIN_SCALE)
         val radians = Math.toRadians(-state.rotationAngle.toDouble())
@@ -98,7 +98,7 @@ object TransformGeometry {
         }
 
         if (lockAspectRatio) {
-            val ratio = aspectRatio.coerceIn(0.25f, 4f)
+            val ratio = aspectRatio.coerceIn(TransformConfig.MIN_ASPECT_RATIO, TransformConfig.MAX_ASPECT_RATIO)
             val widthFactor = newWidth / state.width.coerceAtLeast(1f)
             val heightFactor = newHeight / state.height.coerceAtLeast(1f)
             val rawFactor = when {
@@ -145,8 +145,8 @@ object TransformGeometry {
         zoomChange: Float,
         rotationDeltaDegrees: Float,
         camera: ViewportTransform,
-        minSize: Float = StickyNoteGeometry.MIN_SIZE_WORLD,
-        maxSize: Float = StickyNoteGeometry.MAX_SIZE_WORLD
+        minSize: Float = TransformConfig.MIN_SIZE_WORLD,
+        maxSize: Float = TransformConfig.MAX_SIZE_WORLD
     ): TransformState {
         val previousWorldX = camera.screenToWorldX(previousCentroidScreen.x)
         val previousWorldY = camera.screenToWorldY(previousCentroidScreen.y)
@@ -156,7 +156,7 @@ object TransformGeometry {
 
         val minFactor = max(minSize / state.width, minSize / state.height)
         val maxFactor = min(maxSize / state.width, maxSize / state.height)
-        val factor = zoomChange.coerceAtLeast(0.01f).coerceIn(minFactor, maxFactor)
+        val factor = zoomChange.coerceAtLeast(TransformConfig.MIN_GESTURE_SCALE_FACTOR).coerceIn(minFactor, maxFactor)
         val width = state.width * factor
         val height = state.height * factor
         val angle = normalizeAngle(state.rotationAngle + rotationDeltaDegrees)
