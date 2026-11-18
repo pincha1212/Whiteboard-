@@ -187,10 +187,8 @@ object UnifiedBrushPipeline {
         val engine = BrushEngineRegistry.forBrushType(effectiveBrushType, stroke.strokeStyle)
         val colorInt = safeParseColor(stroke.colorHex, Color.BLACK)
 
-        val effectiveHandDrawn = when {
-            effectiveBrushType == StrokeBrushType.FINE_MARKER -> min(handDrawnFactor, 0.16f)
-            else -> handDrawnFactor
-        }
+        // Freehand strokes must stay on the captured pointer path; no organic offset or lag.
+        val effectiveHandDrawn = 0f
 
         val config = BrushConfig(
             color = colorInt,
@@ -206,7 +204,7 @@ object UnifiedBrushPipeline {
         )
 
         val buildNodes = {
-            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = !preserveInputPoints)
+            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = false)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
             PathHumanizer.humanizePath(
                 styledPath,
