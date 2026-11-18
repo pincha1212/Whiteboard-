@@ -223,8 +223,12 @@ fun WhiteboardCanvasScreen(
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val activePointers = event.changes.filter { it.pressed }
-                            if (activePointers.size >= 2) {
+                            // Count pressed pointers without allocating a filtered list on every event.
+                            var activePointerCount = 0
+                            for (change in event.changes) {
+                                if (change.pressed) activePointerCount++
+                            }
+                            if (activePointerCount >= 2) {
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
                                 val centroid = event.calculateCentroid(useCurrent = true)
@@ -404,16 +408,24 @@ fun WhiteboardCanvasScreen(
                             if (gestureMode == CanvasGestureMode.DRAW_STROKE && drawPointerChange != null) {
                                 lastDrawPointerPosition = drawPointerChange.position
                             }
-                            val activePointers = event.changes.filter { it.pressed }
+                            // Avoid allocating a new List<PointerInputChange> for every move event.
+                            var activePointerCount = 0
+                            var activePointer = null as androidx.compose.ui.input.pointer.PointerInputChange?
+                            for (change in event.changes) {
+                                if (change.pressed) {
+                                    activePointerCount++
+                                    if (activePointerCount == 1) activePointer = change
+                                }
+                            }
 
-                            if (activePointers.size >= 2) {
+                            if (activePointerCount >= 2) {
                                 isMultiTouch = true
                                 isDrawingGestureActive = false
                                 localActivePoints.clear()
                                 localLassoPoints.clear()
                                 pixelEraserCursorWorld = null
-                            } else if (activePointers.size == 1 && !isMultiTouch) {
-                                val change = activePointers.first()
+                            } else if (activePointerCount == 1 && !isMultiTouch) {
+                                val change = activePointer!!
                                 val liveState = viewModel.uiState.value
                                 val liveCamera = viewModel.cameraState.value
 
@@ -1001,8 +1013,11 @@ fun WhiteboardCanvasScreen(
                             awaitFirstDown(requireUnconsumed = false)
                             do {
                                 val event = awaitPointerEvent()
-                                val activePointers = event.changes.filter { it.pressed }
-                                if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                                var activePointerCount = 0
+                                for (change in event.changes) {
+                                    if (change.pressed) activePointerCount++
+                                }
+                                if (activePointerCount >= 2 || event.changes.any { it.isConsumed }) {
                                     break
                                 }
                                 val pan = event.calculatePan()
