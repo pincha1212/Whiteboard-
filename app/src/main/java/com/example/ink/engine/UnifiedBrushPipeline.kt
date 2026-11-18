@@ -168,7 +168,9 @@ object UnifiedBrushPipeline {
         if (stroke.points.size < 2) return
         val safeScale = scale.coerceAtLeast(0.05f)
         val worldWidth = stroke.width.coerceAtLeast(1.5f)
-        if (viewportW > 0f && viewportH > 0f) {
+        // A live preview wraps a mutable point list. Its bounds would require an O(n)
+        // rescan on every pointer update, while the preview is already known to be active.
+        if (!preserveInputPoints && viewportW > 0f && viewportH > 0f) {
             val bounds = stroke.geometryMetrics
             if (bounds.hasPoints) {
                 val sMinX = bounds.minX * safeScale + panX
