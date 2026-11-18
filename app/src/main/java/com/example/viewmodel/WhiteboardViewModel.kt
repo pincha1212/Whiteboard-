@@ -6,9 +6,10 @@ import com.example.data.LocalFirstWorkspaceStore
 import com.example.data.WorkspaceDbState
 import com.example.ink.PixelEraserGeometry
 import com.example.ink.ShapeRecognizer
-import com.example.ink.StickyNoteBounds
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.TransformGeometry
+import com.example.ink.TransformState
 import com.example.ink.ViewportTransform
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
@@ -855,33 +856,35 @@ class WhiteboardViewModel(
         deltaScreenY: Float
     ) {
         val state = _uiState.value
-        val camera = _cameraState.value
-        var modified = false
+        val cameraScale = _cameraState.value.scale
+        val target = state.board.stickyNotes.firstOrNull { it.id == id && !it.isLocked } ?: return
+        val transformed = TransformGeometry.resize(
+            state = TransformState(
+                x = target.x,
+                y = target.y,
+                width = target.width,
+                height = target.height,
+                rotationAngle = target.rotation
+            ),
+            handle = handle,
+            deltaScreenX = deltaScreenX,
+            deltaScreenY = deltaScreenY,
+            cameraScale = cameraScale,
+            lockAspectRatio = target.isAspectRatioLocked,
+            aspectRatio = if (target.isAspectRatioLocked) 1f else target.width / target.height
+        )
         val updated = state.board.stickyNotes.map { note ->
-            if (note.id == id && !note.isLocked) {
-                modified = true
-                val next = StickyNoteGeometry.resizeByHandle(
-                    bounds = StickyNoteBounds(note.x, note.y, note.width, note.height),
-                    handle = handle,
-                    deltaScreenX = deltaScreenX,
-                    deltaScreenY = deltaScreenY,
-                    scale = camera.scale,
-                    lockAspectRatio = note.isAspectRatioLocked,
-                    targetAspectRatio = 1.0f
-                )
+            if (note.id == id) {
                 note.copy(
-                    x = next.x,
-                    y = next.y,
-                    width = next.width,
-                    height = next.height
+                    x = transformed.x,
+                    y = transformed.y,
+                    width = transformed.width,
+                    height = transformed.height
                 )
             } else note
         }
-        if (!modified) return
         _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(stickyNotes = updated)
-            }
+            it.withUpdatedBoard { board -> board.copy(stickyNotes = updated) }
         }
         if (!isStickyNoteTransformInProgress) {
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = false)
