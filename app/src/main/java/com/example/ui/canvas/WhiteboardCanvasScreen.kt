@@ -676,7 +676,7 @@ fun WhiteboardCanvasScreen(
                 val activeBrush = viewModel.brushTypeForTool(state.currentTool)
                 // Show the captured pointer path directly. Stabilization is applied once on release,
                 // so the live tip never lags behind the user's actual movement.
-                val previewPoints = localActivePoints.toList()
+                val previewPoints = localActivePoints
                 val tempStroke = WhiteboardStroke(
                     id = "live_active_stroke",
                     points = previewPoints,
