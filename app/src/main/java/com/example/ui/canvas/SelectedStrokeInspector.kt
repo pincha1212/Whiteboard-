@@ -622,12 +622,6 @@ fun SelectionEditDock(
                                     Spacer(modifier = Modifier.height(10.dp))
 
                                     // Line Style (available across all preset and freeform shapes)
-                                    LineStyleSelectorPanel(
-                                        selectedStyle = selectedShape.strokeStyle,
-                                        previewColorHex = selectedShape.strokeColorHex,
-                                        onSelectStyle = onUpdateShapeStyle,
-                                        availableStyles = StrokeStyle.values().toList()
-                                    )
 
                                     Spacer(modifier = Modifier.height(10.dp))
                                     BrushTypeSelectorRow(
@@ -1003,11 +997,6 @@ fun SelectionEditDock(
                                         modifier = Modifier.height(28.dp)
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    LineStyleSelectorPanel(
-                                        selectedStyle = selectedStroke.strokeStyle,
-                                        previewColorHex = selectedStroke.colorHex,
-                                        onSelectStyle = onUpdateStrokeStyle
-                                    )
                                     Spacer(modifier = Modifier.height(10.dp))
                                     BrushTypeSelectorRow(
                                         selectedBrush = selectedStroke.brushType,
