@@ -51,9 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -81,14 +79,11 @@ import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.TransformPoint
 import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
-import kotlin.math.PI
 import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.round
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 val StickyNoteComputedFontSpKey = SemanticsPropertyKey<Float>("StickyNoteComputedFontSp")
 
@@ -217,7 +212,6 @@ fun StickyNoteView(
     val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
     val currentOnRotate by rememberUpdatedState(onRotate)
     val currentOnTransformGesture by rememberUpdatedState(onTransformGesture)
-    val currentNoteRotation by rememberUpdatedState(note.rotation)
 
     val noteBg = try {
         Color(android.graphics.Color.parseColor(note.colorHex))
@@ -655,13 +649,6 @@ fun StickyNoteView(
             )
 
             handles.forEach { (handle, alignment) ->
-                val isCorner = handle == StickyNoteResizeHandle.TOP_LEFT ||
-                    handle == StickyNoteResizeHandle.TOP_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_RIGHT ||
-                    handle == StickyNoteResizeHandle.BOTTOM_LEFT
-                val isHorizontalEdge = handle == StickyNoteResizeHandle.TOP ||
-                    handle == StickyNoteResizeHandle.BOTTOM
-
                 var handleCoordinates by remember(note.id, handle) { mutableStateOf<LayoutCoordinates?>(null) }
                 val handleScale by animateFloatAsState(
                     targetValue = if (activeResizeHandle == handle) 1.18f else 1f,
