@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.TransformConfig
 import com.example.ink.TransformPoint
 import com.example.ink.ViewportTransform
 import com.example.model.StickyNote
@@ -274,10 +275,10 @@ fun StickyNoteView(
 
     // Symmetrical gutters: 24.dp horizontal, 64.dp vertical (48.dp rotation handle + 40.dp guide stem fully inside outer Box)
     // Box center matches card center exactly, ensuring pure transform-origin: center center rotation
-    val handleTargetDp = 48.dp
-    val sideGutterDp = 24.dp
+    val handleTargetDp = TransformConfig.HANDLE_TOUCH_TARGET_DP.dp
+    val sideGutterDp = TransformConfig.SIDE_GUTTER_DP.dp
     val sideGutterPx = with(density) { sideGutterDp.toPx() }
-    val verticalGutterDp = 64.dp
+    val verticalGutterDp = TransformConfig.VERTICAL_GUTTER_DP.dp
     val verticalGutterPx = with(density) { verticalGutterDp.toPx() }
     val activeSelectionHandles = isSelected && !note.isLocked && !isPanOnlyMode
 
@@ -743,7 +744,7 @@ fun StickyNoteView(
                                 scaleX = handleScale
                                 scaleY = handleScale
                             }
-                            .size(9.dp)
+                            .size(TransformConfig.HANDLE_VISUAL_SIZE_DP.dp)
                             .shadow(2.dp, CircleShape)
                             .clip(CircleShape)
                             .background(Color.White)
@@ -772,9 +773,9 @@ fun StickyNoteView(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .offset(y = 24.dp)
+                    .offset(y = TransformConfig.ROTATION_GUIDE_OFFSET_DP.dp)
                     .width(2.dp)
-                    .height(40.dp)
+                    .height(TransformConfig.ROTATION_GUIDE_HEIGHT_DP.dp)
                     .background(MaterialTheme.colorScheme.primary)
             )
 
@@ -830,15 +831,15 @@ fun StickyNoteView(
                                             centerY = cY,
                                             pointerX = pX,
                                             pointerY = pY,
-                                            snapThresholdDegrees = 3f
+                                            snapThresholdDegrees = TransformConfig.SNAP_TOLERANCE_DEGREES
                                         )
                                         val normalized = ((targetDegrees % 360f) + 360f) % 360f
-                                        val nearest = (round(normalized / 45f) * 45f) % 360f
+                                        val nearest = (round(normalized / TransformConfig.SNAP_STEP_DEGREES) * TransformConfig.SNAP_STEP_DEGREES) % 360f
                                         val distance = minOf(
                                             kotlin.math.abs(normalized - nearest),
                                             360f - kotlin.math.abs(normalized - nearest)
                                         )
-                                        if (distance <= 3f) {
+                                        if (distance <= TransformConfig.SNAP_TOLERANCE_DEGREES) {
                                             if (lastSnappedAngle != nearest) {
                                                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                             }
@@ -868,7 +869,7 @@ fun StickyNoteView(
                             scaleX = rotationHandleScale
                             scaleY = rotationHandleScale
                         }
-                        .size(10.dp)
+                        .size(TransformConfig.ROTATION_HANDLE_VISUAL_SIZE_DP.dp)
                         .shadow(2.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Color.White)
