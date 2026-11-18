@@ -379,9 +379,6 @@ class WhiteboardViewModel(
     fun effectiveStrokeWidthForBrush(brushType: StrokeBrushType, basePenWidth: Float): Float {
         return when (brushType) {
             StrokeBrushType.HIGHLIGHTER -> (basePenWidth * 2.2f).coerceAtLeast(16f)
-            StrokeBrushType.SOFT_BRUSH -> (basePenWidth * 1.9f).coerceAtLeast(12f)
-            StrokeBrushType.CALLIGRAPHY -> (basePenWidth * 1.45f).coerceAtLeast(6f)
-            StrokeBrushType.AIRBRUSH -> (basePenWidth * 2.1f).coerceAtLeast(12f)
             StrokeBrushType.FINE_MARKER -> (basePenWidth * 0.65f).coerceIn(2f, 8f)
             StrokeBrushType.FOUNTAIN_PEN -> basePenWidth
         }
@@ -398,7 +395,7 @@ class WhiteboardViewModel(
         val brushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else brushTypeForTool(state.currentTool)
         val effectiveWidth = effectiveStrokeWidthForBrush(brushType, state.penWidth)
         val effectiveColor = effectiveColorForBrush(brushType, state.penColorHex)
-        val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER || brushType == StrokeBrushType.SOFT_BRUSH
+        val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER
 
         val newStroke = WhiteboardStroke(
             points = points,
