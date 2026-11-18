@@ -48,6 +48,9 @@ object TransformGeometry {
         return TransformPoint(dx * c - dy * s, dx * s + dy * c)
     }
 
+    fun localVectorToWorld(localX: Float, localY: Float, rotationAngle: Float): TransformPoint =
+        rotate(localX, localY, rotationAngle)
+
     fun resize(
         state: TransformState,
         handle: StickyNoteResizeHandle,
