@@ -22,7 +22,7 @@ data class TransformState(
     ): TransformState = copy(
         width = width.coerceIn(minSize, maxSize),
         height = height.coerceIn(minSize, maxSize),
-        rotationAngle = normalizeAngle(rotationAngle)
+        rotationAngle = TransformGeometry.normalizeAngle(rotationAngle)
     )
 }
 
