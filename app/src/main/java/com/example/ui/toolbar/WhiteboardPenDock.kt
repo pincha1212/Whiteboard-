@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.LineCapStyle
 import com.example.model.ShapeType
 import com.example.model.ToolType
+import com.example.model.StrokeStyle
 
 @Composable
 fun WhiteboardPenDock(
@@ -86,10 +87,8 @@ fun WhiteboardPenDock(
     onUpdateHandDrawnFactor: (Float) -> Unit = {},
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
-    onOpenShapePicker: () -> Unit,
     onAddStickyNote: () -> Unit,
     onAddText: () -> Unit,
-    onOpenTemplates: () -> Unit,
     onClearBoard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
