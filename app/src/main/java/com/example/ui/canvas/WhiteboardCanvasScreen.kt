@@ -154,6 +154,34 @@ fun WhiteboardCanvasScreen(
     val localActivePoints = remember { mutableStateListOf<StrokePoint>() }
     val localLassoPoints = remember { mutableStateListOf<StrokePoint>() }
 
+    // Keep one preview stroke wrapper while its backing point list changes in place.
+    // The live renderer reads the current points directly and does not cache its geometry.
+    val activePreviewBrush = viewModel.brushTypeForTool(state.currentTool)
+    val livePreviewStroke = remember(
+        localActivePoints,
+        state.currentTool,
+        state.penColorHex,
+        state.penWidth,
+        state.isRainbowPen,
+        state.penStyle,
+        state.penCapStyle
+    ) {
+        WhiteboardStroke(
+            id = "live_active_stroke",
+            points = localActivePoints,
+            colorHex = viewModel.effectiveColorForBrush(activePreviewBrush, state.penColorHex),
+            width = viewModel.effectiveStrokeWidthForBrush(activePreviewBrush, state.penWidth),
+            isHighlighter = activePreviewBrush == StrokeBrushType.HIGHLIGHTER,
+            isRainbow = state.isRainbowPen &&
+                activePreviewBrush != StrokeBrushType.HIGHLIGHTER &&
+                activePreviewBrush != StrokeBrushType.SOFT_BRUSH,
+            strokeStyle = state.penStyle,
+            capStyle = state.penCapStyle,
+            brushType = activePreviewBrush,
+            opacity = activePreviewBrush.defaultOpacity
+        )
+    }
+
     var isDrawingGestureActive by remember { mutableStateOf(false) }
 
     val canvasBg = try {
@@ -685,24 +713,10 @@ fun WhiteboardCanvasScreen(
             }
 
             if (localActivePoints.size >= 2) {
-                val activeBrush = viewModel.brushTypeForTool(state.currentTool)
                 // Show the captured pointer path directly. Stabilization is applied once on release,
                 // so the live tip never lags behind the user's actual movement.
-                val previewPoints = localActivePoints
-                val tempStroke = WhiteboardStroke(
-                    id = "live_active_stroke",
-                    points = previewPoints,
-                    colorHex = viewModel.effectiveColorForBrush(activeBrush, state.penColorHex),
-                    width = viewModel.effectiveStrokeWidthForBrush(activeBrush, state.penWidth),
-                    isHighlighter = activeBrush == StrokeBrushType.HIGHLIGHTER,
-                    isRainbow = state.isRainbowPen && activeBrush != StrokeBrushType.HIGHLIGHTER && activeBrush != StrokeBrushType.SOFT_BRUSH,
-                    strokeStyle = state.penStyle,
-                    capStyle = state.penCapStyle,
-                    brushType = activeBrush,
-                    opacity = activeBrush.defaultOpacity
-                )
                 drawStrokeVector(
-                    stroke = tempStroke,
+                    stroke = livePreviewStroke,
                     panX = camera.panX,
                     panY = camera.panY,
                     scale = camera.scale,
