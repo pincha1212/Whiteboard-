@@ -4,6 +4,7 @@ import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.ImageCardItem
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
@@ -109,12 +110,34 @@ object BoardSnapshotSerializer {
             obj.put("voiceDurationSec", n.voiceDurationSec)
             obj.put("isLocked", n.isLocked)
             obj.put("isAspectRatioLocked", n.isAspectRatioLocked)
+            val tagsArr = JSONArray()
+            n.tags.forEach { tagsArr.put(it) }
+            obj.put("tags", tagsArr)
             n.groupId?.let { obj.put("groupId", it) }
             n.parentId?.let { obj.put("parentId", it) }
             obj.put("isHiddenByCollapse", n.isHiddenByCollapse)
             notesArr.put(obj)
         }
         root.put("stickyNotes", notesArr)
+
+        val imageCardsArr = JSONArray()
+        board.imageCards.forEach { image ->
+            imageCardsArr.put(JSONObject().apply {
+                put("id", image.id)
+                put("imageUri", image.imageUri)
+                put("x", image.x.toDouble())
+                put("y", image.y.toDouble())
+                put("width", image.width.toDouble())
+                put("height", image.height.toDouble())
+                put("caption", image.caption)
+                val tags = JSONArray()
+                image.tags.forEach { tags.put(it) }
+                put("tags", tags)
+                put("rotation", image.rotation.toDouble())
+                put("isPinned", image.isPinned)
+            })
+        }
+        root.put("imageCards", imageCardsArr)
 
         val textsArr = JSONArray()
         board.textItems.forEach { t ->
@@ -302,9 +325,36 @@ object BoardSnapshotSerializer {
                             voiceDurationSec = obj.optInt("voiceDurationSec", 0),
                             isLocked = obj.optBoolean("isLocked", false),
                             isAspectRatioLocked = obj.optBoolean("isAspectRatioLocked", false),
+                            tags = obj.optJSONArray("tags")?.let { arr ->
+                                List(arr.length()) { index -> arr.optString(index) }
+                            } ?: emptyList(),
                             groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                             parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
                             isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
+                        )
+                    )
+                }
+            }
+
+            val imageCards = mutableListOf<ImageCardItem>()
+            val imageCardsArr = root.optJSONArray("imageCards")
+            if (imageCardsArr != null) {
+                for (i in 0 until imageCardsArr.length()) {
+                    val obj = imageCardsArr.getJSONObject(i)
+                    imageCards.add(
+                        ImageCardItem(
+                            id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                            imageUri = obj.optString("imageUri", ""),
+                            x = obj.optDouble("x", 0.0).toFloat(),
+                            y = obj.optDouble("y", 0.0).toFloat(),
+                            width = obj.optDouble("width", 260.0).toFloat(),
+                            height = obj.optDouble("height", 200.0).toFloat(),
+                            caption = obj.optString("caption", ""),
+                            tags = obj.optJSONArray("tags")?.let { arr ->
+                                List(arr.length()) { index -> arr.optString(index) }
+                            } ?: emptyList(),
+                            rotation = obj.optDouble("rotation", 0.0).toFloat(),
+                            isPinned = obj.optBoolean("isPinned", false)
                         )
                     )
                 }
@@ -398,10 +448,11 @@ object BoardSnapshotSerializer {
                 strokes = strokes,
                 shapes = shapes,
                 stickyNotes = notes,
+                imageCards = if (root.has("imageCards")) imageCards else currentBoard.imageCards,
                 textItems = texts,
                 stickers = stickers,
-                auditLogs = if (auditLogs.isNotEmpty()) auditLogs else currentBoard.auditLogs,
-                snapshots = if (snapshots.isNotEmpty()) snapshots else currentBoard.snapshots
+                auditLogs = if (root.has("auditLogs")) auditLogs else currentBoard.auditLogs,
+                snapshots = if (root.has("snapshots")) snapshots else currentBoard.snapshots
             )
         } catch (_: Exception) {
             null
