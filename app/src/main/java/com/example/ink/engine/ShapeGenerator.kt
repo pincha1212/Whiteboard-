@@ -400,7 +400,10 @@ object ShapeGenerator {
         capStyle: LineCapStyle = LineCapStyle.NONE
     ): Path {
         val solidPath = Path(sourcePath)
-        return if (capStyle == LineCapStyle.NONE) solidPath else addArrowCaps(solidPath, width, capStyle)
+        if (capStyle != LineCapStyle.NONE) {
+            appendArrowHeadContours(sourcePath, solidPath, capStyle, strokeWidth)
+        }
+        return solidPath
     }
 
     private fun appendArrowHeadContours(
