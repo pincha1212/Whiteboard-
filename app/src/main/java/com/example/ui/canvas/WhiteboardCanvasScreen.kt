@@ -164,9 +164,7 @@ fun WhiteboardCanvasScreen(
             colorHex = viewModel.effectiveColorForBrush(activePreviewBrush, state.penColorHex),
             width = viewModel.effectiveStrokeWidthForBrush(activePreviewBrush, state.penWidth),
             isHighlighter = activePreviewBrush == StrokeBrushType.HIGHLIGHTER,
-            isRainbow = state.isRainbowPen &&
-                activePreviewBrush != StrokeBrushType.HIGHLIGHTER &&
-                activePreviewBrush != StrokeBrushType.SOFT_BRUSH,
+            isRainbow = state.isRainbowPen && activePreviewBrush != StrokeBrushType.HIGHLIGHTER,
             strokeStyle = StrokeStyle.SOLID,
             capStyle = LineCapStyle.NONE,
             brushType = activePreviewBrush,
