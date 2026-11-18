@@ -327,6 +327,7 @@ fun StickyNoteView(
                     val previous = mutableMapOf(down.id to firstRoot)
                     var previousPointerCount = 1
                     var totalDrag = 0f
+                    var pendingDrag = Offset.Zero
                     var beganTransform = false
 
                     do {
@@ -389,13 +390,18 @@ fun StickyNoteView(
                             val newPosition = current[change.id]
                             if (oldPosition != null && newPosition != null) {
                                 val delta = newPosition - oldPosition
-                                totalDrag += hypot(delta.x, delta.y)
-                                if (!beganTransform && totalDrag > viewConfiguration.touchSlop && !note.isLocked) {
-                                    beganTransform = true
-                                    currentOnSelect()
-                                    currentOnBeginTransform()
-                                }
-                                if (beganTransform && (delta.x != 0f || delta.y != 0f)) {
+                                if (!beganTransform) {
+                                    pendingDrag += delta
+                                    totalDrag += hypot(delta.x, delta.y)
+                                    if (totalDrag > viewConfiguration.touchSlop && !note.isLocked) {
+                                        beganTransform = true
+                                        currentOnSelect()
+                                        currentOnBeginTransform()
+                                        currentOnDragDelta(pendingDrag.x, pendingDrag.y)
+                                        pendingDrag = Offset.Zero
+                                        change.consume()
+                                    }
+                                } else if (delta != Offset.Zero) {
                                     currentOnDragDelta(delta.x, delta.y)
                                     change.consume()
                                 }
