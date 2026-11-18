@@ -7,9 +7,6 @@ enum class ToolType {
     PEN,
     FINE_MARKER,
     HIGHLIGHTER,
-    BRUSH,
-    CALLIGRAPHY,
-    AIRBRUSH,
     LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
@@ -28,16 +25,9 @@ enum class StrokeBrushType(
     FOUNTAIN_PEN("Pluma / Estilógrafo", 0.35f, 1.0f),
     FINE_MARKER("Marcador fino", 0.68f, 1.0f),
     HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
-    SOFT_BRUSH("Pincel (cerdas)", 0.32f, 0.44f),
-    CALLIGRAPHY("Pluma caligráfica 45°", 0.42f, 0.96f),
-    AIRBRUSH("Aerógrafo", 0.25f, 0.85f)
 }
 
-enum class StrokeCategory(val displayName: String) {
-    PATTERNS("Patrones"),
-    PRESSURE("Presión"),
-    TEXTURE_LIGHT("Efectos")
-}
+enum class StrokeStyle { SOLID }
 
 enum class LineCapStyle(val displayName: String, val symbol: String) {
     NONE("Sin flechas", "—"),
