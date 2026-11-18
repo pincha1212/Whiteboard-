@@ -92,23 +92,11 @@ internal fun computeNodeBounds(nodes: List<BrushNode>, padding: Float): RectF {
 }
 
 internal fun computeNodeWidthMultiplier(node: BrushNode, style: StrokeStyle): Float {
-    return when (style) {
-        StrokeStyle.TAPERED -> {
-            if (node.isClosed) {
-                (0.62f + 0.45f * sin(node.progress * 2f * PI.toFloat()) + 0.08f * sin(node.progress * 6f * PI.toFloat()))
-                    .coerceIn(0.24f, 1.18f)
-            } else {
-                val arch = sin(node.progress * PI.toFloat()).coerceIn(0f, 1f)
-                val speedFactor = (1.12f - 0.32f * node.velocity).coerceIn(0.7f, 1.15f)
-                (0.24f + 0.84f * arch * speedFactor).coerceIn(0.20f, 1.20f)
-            }
-        }
-        else -> 1f
-    }
+    return 1f
 }
 
 internal fun buildDynamicShaderIfNeeded(nodes: List<BrushNode>, config: BrushConfig): Shader? {
-    if (!config.isRainbow && config.strokeStyle != StrokeStyle.DYNAMIC_GRADIENT) return null
+    if (!config.isRainbow) return null
     if (nodes.isEmpty()) return null
     var minX = Float.MAX_VALUE
     var maxX = -Float.MAX_VALUE
@@ -295,302 +283,15 @@ class HighlighterBrush(
     }
 }
 
-/**
- * 2. Pincel de Cerdas / Óleo ([BristleBrush]):
- * Computes the normal vector perpendicular to each [BrushNode.angle] and distributes a balanced fan
- * of [bristleCount] (default 20) parallel organic micro-strands inside an offscreen layer so
- * overlapping central bristles never create a dark central stripe.
- */
-class BristleBrush(
-    private val bristleCount: Int = DEFAULT_BRISTLE_COUNT
-) : BrushEngine {
-    override val brushId: String = "bristle"
-
-    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
-        val contours = splitNodeContours(nodes)
-        if (contours.isEmpty()) return
-
-        val count = bristleCount.coerceAtLeast(4)
-        val totalWidth = (config.strokeWidth * 1.24f).coerceAtLeast(3f)
-        val layerAlpha = (config.alpha.coerceIn(0.18f, 0.96f) * 255f).roundToInt()
-        val shader = buildDynamicShaderIfNeeded(nodes, config)
-
-        // Precompute balanced characteristics across all 20 bristles (uniform coverage, no dark core band)
-        val strandOffsets = FloatArray(count)
-        val strandWidths = FloatArray(count)
-        val strandAlphas = IntArray(count)
-
-        var rng = (config.seed * 747796405 + 2891336453L).toInt()
-        for (b in 0 until count) {
-            rng = nextHash(rng)
-            val normIdx = (b / (count - 1).coerceAtLeast(1).toFloat()) - 0.5f // -0.5..0.5
-            val microOffset = (((rng and 0xFF) / 255f) - 0.5f) * 0.04f
-            strandOffsets[b] = normIdx + microOffset
-
-            rng = nextHash(rng)
-            val widthJitter = 0.72f + ((rng and 0xFF) / 255f) * 0.56f
-            strandWidths[b] = ((totalWidth / count.toFloat()) * 1.18f * widthJitter).coerceAtLeast(0.75f)
-
-            rng = nextHash(rng)
-            val radialWeight = (1f - abs(normIdx) * 0.24f).coerceIn(0.76f, 1f)
-            val alphaJitter = 0.72f + ((rng and 0xFF) / 255f) * 0.28f
-            strandAlphas[b] = (242f * radialWeight * alphaJitter).roundToInt().coerceIn(130, 250)
-
-        }
-
-        val layerBounds = computeNodeBounds(nodes, totalWidth * 0.9f + 6f)
-        val layerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            alpha = layerAlpha
-        }
-
-        val bristlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = config.color
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            this.shader = shader
-        }
-
-        val saveCount = canvas.saveLayer(layerBounds, layerPaint)
-        try {
-            val strandPath = Path()
-            for (contour in contours) {
-                if (contour.size < 2) continue
-
-                for (b in 0 until count) {
-                    strandPath.reset()
-                    val offsetFrac = strandOffsets[b]
-                    var hasMove = false
-
-                    for (i in contour.indices) {
-                        val n = contour[i]
-                        val nx = -sin(n.angle)
-                        val ny = cos(n.angle)
-                        val widthMod = computeNodeWidthMultiplier(n, config.strokeStyle)
-                        val endSplay = if (n.isClosed) {
-                            1f
-                        } else {
-                            1f + 0.28f * (1f - sin(n.progress * PI.toFloat()).coerceIn(0f, 1f))
-                        }
-                        // Keep strand spacing spatially stable; no synthetic lateral wobble.
-                        val latDist = totalWidth * offsetFrac * widthMod * endSplay
-                        val px = n.x + nx * latDist
-                        val py = n.y + ny * latDist
-                        if (!hasMove) {
-                            strandPath.moveTo(px, py)
-                            hasMove = true
-                        } else {
-                            strandPath.lineTo(px, py)
-                        }
-                    }
-                    if (contour[0].isClosed) strandPath.close()
-
-                    bristlePaint.strokeWidth = strandWidths[b]
-                    bristlePaint.alpha = strandAlphas[b]
-                    canvas.drawPath(strandPath, bristlePaint)
-                }
-            }
-        } finally {
-            canvas.restoreToCount(saveCount)
-        }
-    }
-
-    companion object {
-        const val DEFAULT_BRISTLE_COUNT = 10
-    }
-}
 
 
-/**
- * 4. Pluma Caligráfica ([CalligraphyBrush]):
- * Fixed flat chisel nib rotated at 45° (configurable [nibAngleDegrees]) generating closed polygon quads
- * whose cross-sectional thickness varies dramatically with the angle between stroke motion and nib orientation.
- */
-class CalligraphyBrush(
-    private val nibAngleDegrees: Float = 45f,
-    private val minThicknessRatio: Float = 0.16f,
-    private val velocityModulation: Boolean = true
-) : BrushEngine {
-    override val brushId: String = "calligraphy"
 
-    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
-        val contours = splitNodeContours(nodes)
-        if (contours.isEmpty()) return
 
-        val baseHalfW = (config.strokeWidth * 0.72f).coerceAtLeast(1.8f)
-        val nibRad = nibAngleDegrees * (PI.toFloat() / 180f)
-        val nibCos = cos(nibRad)
-        val nibSin = sin(nibRad)
 
-        val shader = buildDynamicShaderIfNeeded(nodes, config)
-        val alphaInt = (config.alpha.coerceIn(0.18f, 1.0f) * 255f).roundToInt()
 
-        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = config.color
-            alpha = alphaInt
-            this.shader = shader
-        }
 
-        val hairlinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            color = config.color
-            alpha = alphaInt
-            strokeWidth = (baseHalfW * minThicknessRatio * 1.4f).coerceAtLeast(1.0f)
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            this.shader = shader
-        }
 
-        val quadPath = Path()
-        val hairlinePath = Path()
 
-        for (contour in contours) {
-            if (contour.isEmpty()) continue
-            if (contour.size == 1) {
-                val p = contour[0]
-                val kx = nibCos * baseHalfW
-                val ky = nibSin * baseHalfW
-                val px = -nibSin * baseHalfW * minThicknessRatio
-                val py = nibCos * baseHalfW * minThicknessRatio
-                quadPath.reset()
-                quadPath.moveTo(p.x - kx - px, p.y - ky - py)
-                quadPath.lineTo(p.x + kx - px, p.y + ky - py)
-                quadPath.lineTo(p.x + kx + px, p.y + ky + py)
-                quadPath.lineTo(p.x - kx + px, p.y - ky + py)
-                quadPath.close()
-                canvas.drawPath(quadPath, fillPaint)
-                continue
-            }
-
-            // Fine ink spine ensures clean joins even where direction aligns with 45° nib axis
-            hairlinePath.reset()
-            hairlinePath.moveTo(contour[0].x, contour[0].y)
-            for (i in 1 until contour.size) {
-                hairlinePath.lineTo(contour[i].x, contour[i].y)
-            }
-            if (contour[0].isClosed) hairlinePath.close()
-            canvas.drawPath(hairlinePath, hairlinePaint)
-
-            // Batch quad ribbons per contour for fast sharp calligraphy edges
-            val segCount = if (contour[0].isClosed) contour.size else contour.lastIndex
-            for (i in 0 until segCount) {
-                val n0 = contour[i]
-                val n1 = contour[(i + 1) % contour.size]
-
-                val w0 = computeCalligraphyHalfNib(n0, baseHalfW, config.strokeStyle)
-                val w1 = computeCalligraphyHalfNib(n1, baseHalfW, config.strokeStyle)
-
-                val kx0 = nibCos * w0
-                val ky0 = nibSin * w0
-                val kx1 = nibCos * w1
-                val ky1 = nibSin * w1
-
-                quadPath.reset()
-                quadPath.moveTo(n0.x - kx0, n0.y - ky0)
-                quadPath.lineTo(n0.x + kx0, n0.y + ky0)
-                quadPath.lineTo(n1.x + kx1, n1.y + ky1)
-                quadPath.lineTo(n1.x - kx1, n1.y - ky1)
-                quadPath.close()
-                canvas.drawPath(quadPath, fillPaint)
-            }
-        }
-    }
-
-    private fun computeCalligraphyHalfNib(
-        node: BrushNode,
-        baseHalfW: Float,
-        style: StrokeStyle
-    ): Float {
-        val styleMul = computeNodeWidthMultiplier(node, style)
-        val velScale = if (velocityModulation) (1.06f - 0.24f * node.velocity).coerceIn(0.75f, 1.08f) else 1f
-        return (baseHalfW * styleMul * velScale).coerceAtLeast(0.8f)
-    }
-}
-
-/**
- * 5. Aerógrafo ([Airbrush]):
- * Sprays radial mist particles around each [BrushNode] with true Box-Muller Gaussian distribution,
- * velocity-modulated density, and deterministic seeded PRNG so redraws never shimmer randomly.
- */
-class Airbrush(
-    private val particlesPerNode: Int = DEFAULT_PARTICLES_PER_NODE
-) : BrushEngine {
-    override val brushId: String = "airbrush"
-
-    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
-        if (nodes.isEmpty()) return
-
-        val baseRadius = (config.strokeWidth * 1.45f).coerceAtLeast(4f)
-        val sigma = baseRadius * 0.48f
-        val maxSprayRadius = baseRadius * 1.45f
-        val baseAlpha = config.alpha.coerceIn(0.18f, 1.0f)
-        val shader = buildDynamicShaderIfNeeded(nodes, config)
-
-        val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = config.color
-            this.shader = shader
-        }
-
-        // Core soft mist halo behind crisp Gaussian spray dots
-        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = config.color
-            this.shader = shader
-        }
-
-        val dotRadiusBase = (config.strokeWidth * 0.14f).coerceIn(0.8f, 2.8f)
-
-        for (nodeIdx in nodes.indices) {
-            val n = nodes[nodeIdx]
-            val styleMul = computeNodeWidthMultiplier(n, config.strokeStyle)
-            val nodeSigma = sigma * styleMul
-            val nodeMaxR = maxSprayRadius * styleMul
-
-            // Slight translucent mist center every ~2 nodes
-            if (nodeIdx % 2 == 0) {
-                corePaint.alpha = (baseAlpha * (0.08f - 0.03f * n.velocity) * 255f).roundToInt().coerceIn(4, 34)
-                canvas.drawCircle(n.x, n.y, nodeSigma * 0.9f, corePaint)
-            }
-
-            // Deterministic per-node PRNG seed for flicker-free Gaussian droplets
-            var rng = nextHash(config.seed xor (nodeIdx * 1597334677) xor (n.contourIndex * 381201580))
-            val speedFactor = (1.12f - 0.45f * n.velocity).coerceIn(0.45f, 1.15f)
-            val count = (particlesPerNode * speedFactor).roundToInt().coerceIn(6, 36)
-
-            for (p in 0 until count) {
-                rng = nextHash(rng)
-                val u1 = (((rng ushr 8) and 0xFFFFFF) / 16777216f).coerceIn(0.0001f, 0.9999f)
-                rng = nextHash(rng)
-                val u2 = ((rng ushr 8) and 0xFFFFFF) / 16777216f
-
-                // Box-Muller Gaussian transform
-                val mag = nodeSigma * sqrt(-2f * ln(u1))
-                val theta = 2f * PI.toFloat() * u2
-                val dx = (mag * cos(theta)).coerceIn(-nodeMaxR, nodeMaxR)
-                val dy = (mag * sin(theta)).coerceIn(-nodeMaxR, nodeMaxR)
-
-                val distSq = dx * dx + dy * dy
-                val gaussianFalloff = exp(-distSq / (2f * nodeSigma * nodeSigma).coerceAtLeast(0.1f))
-
-                rng = nextHash(rng)
-                val sizeVar = 0.65f + ((rng and 0xFF) / 255f) * 0.95f
-                val dropRadius = (dotRadiusBase * sizeVar).coerceIn(0.6f, 3.2f)
-                val dropAlpha = (baseAlpha * 0.34f * gaussianFalloff * speedFactor * 255f)
-                    .roundToInt()
-                    .coerceIn(10, 145)
-
-                dotPaint.alpha = dropAlpha
-                canvas.drawCircle(n.x + dx, n.y + dy, dropRadius, dotPaint)
-            }
-        }
-    }
-
-    companion object {
-        const val DEFAULT_PARTICLES_PER_NODE = 8
-    }
-}
 
 /**
  * 6. Pluma Estilográfica Orgánica ([FountainPenBrush]):
@@ -761,30 +462,18 @@ private fun nextHash(state: Int): Int {
  */
 object BrushEngineRegistry {
     private val highlighter = HighlighterBrush()
-    private val bristle = BristleBrush()
-    private val calligraphy = CalligraphyBrush(nibAngleDegrees = 45f)
-    private val airbrush = Airbrush()
     private val fountainPen = FountainPenBrush()
     private val fineMarker = FineMarkerBrush()
 
     fun forBrushType(brushType: StrokeBrushType, strokeStyle: StrokeStyle = StrokeStyle.SOLID): BrushEngine {
-        if (strokeStyle == StrokeStyle.CALLIGRAPHIC && brushType == StrokeBrushType.FOUNTAIN_PEN) {
-            return calligraphy
-        }
         return when (brushType) {
             StrokeBrushType.FOUNTAIN_PEN -> fountainPen
             StrokeBrushType.FINE_MARKER -> fineMarker
             StrokeBrushType.HIGHLIGHTER -> highlighter
-            StrokeBrushType.SOFT_BRUSH -> bristle
-            StrokeBrushType.CALLIGRAPHY -> calligraphy
-            StrokeBrushType.AIRBRUSH -> airbrush
         }
     }
 
     fun allCoreBrushes(): List<BrushEngine> = listOf(
-        highlighter,
-        bristle,
-        calligraphy,
-        airbrush
+        highlighter
     )
 }

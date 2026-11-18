@@ -34,35 +34,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
-import com.example.model.CustomBoardTemplate
-import com.example.model.TemplateType
-
-@Composable
-fun TemplatePickerModal(
-    onSelectTemplate: (TemplateType) -> Unit,
-    onDismiss: () -> Unit,
-    showOnNewBoard: Boolean = false,
-    onToggleShowOnNewBoard: (Boolean) -> Unit = {},
-    onStartBlankCanvas: () -> Unit = onDismiss,
-    customTemplates: List<CustomBoardTemplate> = emptyList(),
-    currentBoardTitle: String = "",
-    onSaveCurrentAsTemplate: ((title: String, description: String) -> Unit)? = null,
-    onSelectCustomTemplate: (CustomBoardTemplate) -> Unit = {},
-    onDeleteCustomTemplate: (String) -> Unit = {}
-) {
-    IdeationTemplatesDialog(
-        showOnNewBoard = showOnNewBoard,
-        onToggleShowOnNewBoard = onToggleShowOnNewBoard,
-        onStartBlankCanvas = onStartBlankCanvas,
-        onSelectTemplate = onSelectTemplate,
-        onDismiss = onDismiss,
-        customTemplates = customTemplates,
-        currentBoardTitle = currentBoardTitle,
-        onSaveCurrentAsTemplate = onSaveCurrentAsTemplate,
-        onSelectCustomTemplate = onSelectCustomTemplate,
-        onDeleteCustomTemplate = onDeleteCustomTemplate
-    )
-}
 
 @Composable
 fun BackgroundSettingsModal(

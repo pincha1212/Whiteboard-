@@ -7,6 +7,7 @@ on:
       - feat/unified-notes-whiteboard
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
+      - release/2.3.0-lite
 
 permissions:
   contents: read

@@ -168,7 +168,9 @@ object UnifiedBrushPipeline {
         if (stroke.points.size < 2) return
         val safeScale = scale.coerceAtLeast(0.05f)
         val worldWidth = stroke.width.coerceAtLeast(1.5f)
-        if (viewportW > 0f && viewportH > 0f) {
+        // A live preview wraps a mutable point list. Its bounds would require an O(n)
+        // rescan on every pointer update, while the preview is already known to be active.
+        if (!preserveInputPoints && viewportW > 0f && viewportH > 0f) {
             val bounds = stroke.geometryMetrics
             if (bounds.hasPoints) {
                 val sMinX = bounds.minX * safeScale + panX
@@ -185,10 +187,8 @@ object UnifiedBrushPipeline {
         val engine = BrushEngineRegistry.forBrushType(effectiveBrushType, stroke.strokeStyle)
         val colorInt = safeParseColor(stroke.colorHex, Color.BLACK)
 
-        val effectiveHandDrawn = when {
-            effectiveBrushType == StrokeBrushType.FINE_MARKER -> min(handDrawnFactor, 0.16f)
-            else -> handDrawnFactor
-        }
+        // Freehand strokes must stay on the captured pointer path; no organic offset or lag.
+        val effectiveHandDrawn = 0f
 
         val config = BrushConfig(
             color = colorInt,
@@ -203,13 +203,26 @@ object UnifiedBrushPipeline {
             seed = stroke.id.hashCode()
         )
 
-        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}:${if (preserveInputPoints) "RAW" else "SIMPLIFIED"}"
-        val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
-            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = !preserveInputPoints)
+        val buildNodes = {
+            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = false)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
-            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed, stableOpenContours = preserveInputPoints)
-            if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
-            built
+            PathHumanizer.humanizePath(
+                styledPath,
+                effectiveHandDrawn,
+                PathHumanizer.DEFAULT_STEP_PX,
+                config.seed,
+                stableOpenContours = preserveInputPoints
+            )
+        }
+        // The live preview changes on every pointer event. Caching every intermediate
+        // geometry only churns the LRU and evicts useful committed strokes.
+        val nodes: List<BrushNode> = if (preserveInputPoints) {
+            buildNodes()
+        } else {
+            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            nodeCache.get(cacheKey) ?: buildNodes().also { built ->
+                if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
+            }
         }
         if (nodes.isEmpty()) return
 
@@ -308,7 +321,6 @@ object UnifiedBrushPipeline {
         // Cached in shape-local world coordinates (0f, 0f at scale = 1f) so pan, zoom, and move keep 100% cache hits
         val engine = BrushEngineRegistry.forBrushType(shape.brushType, shape.strokeStyle)
         val effectiveHandDrawn = when {
-            shape.strokeStyle == StrokeStyle.SKETCH -> max(handDrawnFactor, 0.48f)
             shape.brushType == StrokeBrushType.FINE_MARKER -> min(handDrawnFactor, 0.16f)
             else -> handDrawnFactor
         }
@@ -367,52 +379,14 @@ object UnifiedBrushPipeline {
         canvas.restore()
     }
 
-    /**
-     * Composes atmospheric & specialty [StrokeStyle] passes (Neon Glow, Animated Pulse, Chalk dabs)
-     * seamlessly around the polymorphic [BrushEngine.render] execution.
-     */
+    /** Render every remaining stroke style as a plain solid pass. */
     fun renderNodesWithDecorators(
         canvas: Canvas,
         nodes: List<BrushNode>,
         brushEngine: BrushEngine,
         config: BrushConfig
     ) {
-        when (config.strokeStyle) {
-            StrokeStyle.NEON_GLOW -> {
-                val outerHalo = config.copy(
-                    strokeWidth = config.strokeWidth * 3.1f,
-                    alpha = if (config.isDarkBackground) 0.22f else 0.15f,
-                    strokeStyle = StrokeStyle.SOLID
-                )
-                val midHalo = config.copy(
-                    strokeWidth = config.strokeWidth * 1.85f,
-                    alpha = if (config.isDarkBackground) 0.44f else 0.30f,
-                    strokeStyle = StrokeStyle.SOLID
-                )
-                brushEngine.render(canvas, nodes, outerHalo)
-                brushEngine.render(canvas, nodes, midHalo)
-                brushEngine.render(canvas, nodes, config.copy(alpha = (config.alpha * 0.92f).coerceIn(0.4f, 1f)))
-
-                val corePaint = neonCorePaint.get()!!
-                corePaint.strokeWidth = (config.strokeWidth * 0.30f).coerceAtLeast(1.2f)
-                drawNodeSpine(canvas, nodes, corePaint)
-            }
-            StrokeStyle.CHALK_TEXTURE -> {
-                brushEngine.render(
-                    canvas,
-                    nodes,
-                    config.copy(
-                        strokeWidth = config.strokeWidth * 1.55f,
-                        alpha = (config.alpha * 0.25f).coerceIn(0.10f, 0.40f)
-                    )
-                )
-                brushEngine.render(canvas, nodes, config.copy(alpha = (config.alpha * 0.72f).coerceIn(0.20f, 0.85f)))
-                renderChalkSpeckles(canvas, nodes, config)
-            }
-            else -> {
-                brushEngine.render(canvas, nodes, config)
-            }
-        }
+        brushEngine.render(canvas, nodes, config)
     }
 
     private fun drawNodeSpine(canvas: Canvas, nodes: List<BrushNode>, paint: Paint) {

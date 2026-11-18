@@ -7,9 +7,6 @@ enum class ToolType {
     PEN,
     FINE_MARKER,
     HIGHLIGHTER,
-    BRUSH,
-    CALLIGRAPHY,
-    AIRBRUSH,
     LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
@@ -28,46 +25,15 @@ enum class StrokeBrushType(
     FOUNTAIN_PEN("Pluma / Estilógrafo", 0.35f, 1.0f),
     FINE_MARKER("Marcador fino", 0.68f, 1.0f),
     HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
-    SOFT_BRUSH("Pincel (cerdas)", 0.32f, 0.44f),
-    CALLIGRAPHY("Pluma caligráfica 45°", 0.42f, 0.96f),
-    AIRBRUSH("Aerógrafo", 0.25f, 0.85f)
 }
 
-enum class StrokeCategory(val displayName: String) {
-    PATTERNS("Patrones"),
-    PRESSURE("Presión"),
-    TEXTURE_LIGHT("Efectos")
-}
+enum class StrokeStyle { SOLID }
 
 enum class LineCapStyle(val displayName: String, val symbol: String) {
     NONE("Sin flechas", "—"),
     END_ARROW("Flecha final", "→"),
     BOTH_ARROWS("Doble flecha", "↔"),
     START_ARROW("Flecha inicio", "←")
-}
-
-enum class StrokeStyle(
-    val displayName: String,
-    val category: StrokeCategory = StrokeCategory.PATTERNS
-) {
-    SOLID("Sólida", StrokeCategory.PATTERNS),
-    DASHED("Discontinua", StrokeCategory.PATTERNS),
-    DOTTED("Punteada", StrokeCategory.PATTERNS),
-    DASH_DOT("Punto y raya", StrokeCategory.PATTERNS),
-    DOUBLE("Doble / Paralela", StrokeCategory.PATTERNS),
-    ZIGZAG("Zigzag / Dentada", StrokeCategory.PATTERNS),
-    WAVY("Ondulada", StrokeCategory.PATTERNS),
-    SQUARE_WAVE("Almena / Onda cuadrada", StrokeCategory.PATTERNS),
-    RAILWAY("Vías de tren", StrokeCategory.PATTERNS),
-    ARROW_PATTERN("Flechas continuas", StrokeCategory.PATTERNS),
-
-    TAPERED("Presión / Tapered", StrokeCategory.PRESSURE),
-    CALLIGRAPHIC("Caligráfico / Biselado", StrokeCategory.PRESSURE),
-    SKETCH("Multilínea / Boceto", StrokeCategory.PRESSURE),
-
-    NEON_GLOW("Neón / Resplandor", StrokeCategory.TEXTURE_LIGHT),
-    DYNAMIC_GRADIENT("Degradado dinámico", StrokeCategory.TEXTURE_LIGHT),
-    CHALK_TEXTURE("Tiza / Acuarela", StrokeCategory.TEXTURE_LIGHT)
 }
 
 enum class CanvasGridType(val title: String) {
@@ -105,84 +71,6 @@ enum class ShapeType(val displayName: String, val category: String) {
 val ShapeType.isLineLike: Boolean
     get() = this == ShapeType.LINE || this == ShapeType.ARROW || this == ShapeType.DOUBLE_ARROW
 
-
-enum class TemplateCategory(val title: String) {
-    RECOMMENDED("Recomendado"),
-    MY_TEMPLATES("Mis plantillas"),
-    BRAINSTORMING("Lluvia de ideas"),
-    STRATEGY("Estrategia"),
-    LEARNING("Aprendizaje"),
-    PROCESS("Procesos y flujos"),
-    PLANNING("Planificación"),
-    PROBLEM_SOLVING("Solución de problemas")
-}
-
-enum class TemplateType(
-    val title: String,
-    val iconName: String,
-    val description: String,
-    val category: TemplateCategory,
-    val isRecommended: Boolean = true,
-    val badgeText: String? = null
-) {
-    BRAINSTORM_CLUSTER(
-        title = "Lluvia de Ideas (Cluster)",
-        iconName = "lightbulb",
-        description = "Nodo central editable, conectores y 5 notas radiales independientes",
-        category = TemplateCategory.BRAINSTORMING,
-        isRecommended = true,
-        badgeText = "Ligera"
-    ),
-    IMPACT_EFFORT(
-        title = "Matriz Impacto / Esfuerzo",
-        iconName = "grid_view",
-        description = "Ejes vectoriales 2×2, encabezados y 4 notas editables",
-        category = TemplateCategory.STRATEGY,
-        isRecommended = true
-    ),
-    CONCEPT_MAP(
-        title = "Mapa Mental / Conceptual",
-        iconName = "account_tree",
-        description = "Nodos jerárquicos, flechas conectoras y notas editables",
-        category = TemplateCategory.LEARNING,
-        isRecommended = true
-    ),
-    USER_FLOW(
-        title = "Flujo de Proceso",
-        iconName = "schema",
-        description = "Nodos de inicio, acción, decisión y conectores editables",
-        category = TemplateCategory.PROCESS,
-        isRecommended = true
-    ),
-    RETROSPECTIVE(
-        title = "Retrospectiva de Equipo",
-        iconName = "history_edu",
-        description = "3 columnas con divisores y notas adhesivas independientes",
-        category = TemplateCategory.PLANNING,
-        isRecommended = true
-    ),
-    KANBAN(
-        title = "Tablero Kanban",
-        iconName = "view_kanban",
-        description = "Columnas Por hacer, Haciendo y Hecho con tarjetas movibles",
-        category = TemplateCategory.PLANNING,
-        isRecommended = true
-    ),
-    ISHIKAWA(
-        title = "Diagrama de Ishikawa",
-        iconName = "polyline",
-        description = "Espina central, ramas de causa y notas editables",
-        category = TemplateCategory.PROBLEM_SOLVING,
-        isRecommended = true
-    ),
-    SWOT(
-        title = "Análisis DAFO / FODA",
-        iconName = "grid_view",
-        description = "Cuadrantes de Fortalezas, Oportunidades, Debilidades y Amenazas",
-        category = TemplateCategory.STRATEGY,
-        isRecommended = false
-    )
-}
 
 data class StrokePoint(
     val x: Float,
@@ -378,18 +266,6 @@ data class BoardVersionSnapshot(
     val strokeCount: Int,
     val noteCount: Int,
     val shapeCount: Int,
-    val serializedData: String
-)
-
-data class CustomBoardTemplate(
-    val id: String = UUID.randomUUID().toString(),
-    val title: String,
-    val description: String = "",
-    val createdAt: Long = System.currentTimeMillis(),
-    val strokeCount: Int = 0,
-    val shapeCount: Int = 0,
-    val noteCount: Int = 0,
-    val textCount: Int = 0,
     val serializedData: String
 )
 

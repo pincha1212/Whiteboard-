@@ -54,6 +54,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -117,18 +118,16 @@ private enum class CanvasGestureMode {
     LASER
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun WhiteboardCanvasScreen(
     viewModel: WhiteboardViewModel,
     onSwitchToNotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    CanvasPerformanceProbe("screen")
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
-    var showShapePicker by remember { mutableStateOf(false) }
-    var showTemplatePicker by remember { mutableStateOf(false) }
     var showBackgroundSettings by remember { mutableStateOf(false) }
     var showBoardsManager by remember { mutableStateOf(false) }
     var showExportModal by remember { mutableStateOf(false) }
@@ -140,12 +139,6 @@ fun WhiteboardCanvasScreen(
     var canvasSizePx by remember { mutableStateOf(IntSize(1080, 1920)) }
     val density = LocalDensity.current
 
-    LaunchedEffect(state.shouldAutoOpenTemplatePicker) {
-        if (state.shouldAutoOpenTemplatePicker) {
-            showTemplatePicker = true
-            viewModel.consumeAutoOpenTemplatePicker()
-        }
-    }
 
     var pendingDragStart by remember { mutableStateOf<StrokePoint?>(null) }
     var pendingDragEnd by remember { mutableStateOf<StrokePoint?>(null) }
@@ -154,6 +147,30 @@ fun WhiteboardCanvasScreen(
 
     val localActivePoints = remember { mutableStateListOf<StrokePoint>() }
     val localLassoPoints = remember { mutableStateListOf<StrokePoint>() }
+
+    // Keep one preview stroke wrapper while its backing point list changes in place.
+    // The live renderer reads the current points directly and does not cache its geometry.
+    val activePreviewBrush = viewModel.brushTypeForTool(state.currentTool)
+    val livePreviewStroke = remember(
+        localActivePoints,
+        state.currentTool,
+        state.penColorHex,
+        state.penWidth,
+        state.isRainbowPen,
+    ) {
+        WhiteboardStroke(
+            id = "live_active_stroke",
+            points = localActivePoints,
+            colorHex = viewModel.effectiveColorForBrush(activePreviewBrush, state.penColorHex),
+            width = viewModel.effectiveStrokeWidthForBrush(activePreviewBrush, state.penWidth),
+            isHighlighter = activePreviewBrush == StrokeBrushType.HIGHLIGHTER,
+            isRainbow = state.isRainbowPen && activePreviewBrush != StrokeBrushType.HIGHLIGHTER,
+            strokeStyle = StrokeStyle.SOLID,
+            capStyle = LineCapStyle.NONE,
+            brushType = activePreviewBrush,
+            opacity = activePreviewBrush.defaultOpacity
+        )
+    }
 
     var isDrawingGestureActive by remember { mutableStateOf(false) }
 
@@ -224,8 +241,12 @@ fun WhiteboardCanvasScreen(
                         awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val activePointers = event.changes.filter { it.pressed }
-                            if (activePointers.size >= 2) {
+                            // Count pressed pointers without allocating a filtered list on every event.
+                            var activePointerCount = 0
+                            for (change in event.changes) {
+                                if (change.pressed) activePointerCount++
+                            }
+                            if (activePointerCount >= 2) {
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
                                 val centroid = event.calculateCentroid(useCurrent = true)
@@ -239,7 +260,6 @@ fun WhiteboardCanvasScreen(
                 }
         ) {
             // Main Drawing Canvas
-            CanvasPerformanceProbe("canvas-layer")
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -264,10 +284,7 @@ fun WhiteboardCanvasScreen(
 
                         val isDrawingTool = curState.currentTool == ToolType.PEN ||
                             curState.currentTool == ToolType.FINE_MARKER ||
-                            curState.currentTool == ToolType.HIGHLIGHTER ||
-                            curState.currentTool == ToolType.BRUSH ||
-                            curState.currentTool == ToolType.CALLIGRAPHY ||
-                            curState.currentTool == ToolType.AIRBRUSH
+                            curState.currentTool == ToolType.HIGHLIGHTER
 
                         val activeShape = curState.board.shapes.find { it.id == curState.selectedShapeId && !it.isLocked && !it.isHiddenByCollapse }
                         val activeStroke = curState.board.strokes.find { it.id == curState.selectedStrokeId }
@@ -406,16 +423,24 @@ fun WhiteboardCanvasScreen(
                             if (gestureMode == CanvasGestureMode.DRAW_STROKE && drawPointerChange != null) {
                                 lastDrawPointerPosition = drawPointerChange.position
                             }
-                            val activePointers = event.changes.filter { it.pressed }
+                            // Avoid allocating a new List<PointerInputChange> for every move event.
+                            var activePointerCount = 0
+                            var activePointer = null as androidx.compose.ui.input.pointer.PointerInputChange?
+                            for (change in event.changes) {
+                                if (change.pressed) {
+                                    activePointerCount++
+                                    if (activePointerCount == 1) activePointer = change
+                                }
+                            }
 
-                            if (activePointers.size >= 2) {
+                            if (activePointerCount >= 2) {
                                 isMultiTouch = true
                                 isDrawingGestureActive = false
                                 localActivePoints.clear()
                                 localLassoPoints.clear()
                                 pixelEraserCursorWorld = null
-                            } else if (activePointers.size == 1 && !isMultiTouch) {
-                                val change = activePointers.first()
+                            } else if (activePointerCount == 1 && !isMultiTouch) {
+                                val change = activePointer!!
                                 val liveState = viewModel.uiState.value
                                 val liveCamera = viewModel.cameraState.value
 
@@ -529,20 +554,21 @@ fun WhiteboardCanvasScreen(
                                         change.consume()
                                     }
                                     CanvasGestureMode.DRAW_STROKE -> {
+                                        // Replay historical stylus samples that Android batches into a pointer event.
+                                        for (historical in change.historical) {
+                                            val hx = (historical.position.x - liveCamera.panX) / liveCamera.scale
+                                            val hy = (historical.position.y - liveCamera.panY) / liveCamera.scale
+                                            val rawHistorical = StrokePoint(hx, hy)
+                                            val historicalPoint = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawHistorical, liveState.rulerState) else rawHistorical
+                                            val previous = localActivePoints.lastOrNull()
+                                            if (previous == null || previous.x != historicalPoint.x || previous.y != historicalPoint.y) localActivePoints.add(historicalPoint)
+                                        }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
                                         val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
-                                        val rawPt = StrokePoint(nwX, nwY)
-                                        val pt = if (liveState.isRulerActive) {
-                                            StrokeStabilizer.projectPointToRulerIfNear(rawPt, liveState.rulerState)
-                                        } else {
-                                            rawPt
-                                        }
-                                        val prevPt = localActivePoints.lastOrNull()
-                                        // Sample much more closely so slow, curved finger movement is not
-                                        // discarded as a sequence of sub-threshold straight segments.
-                                        if (prevPt == null || hypot(pt.x - prevPt.x, pt.y - prevPt.y) >= 0.65f / liveCamera.scale) {
-                                            localActivePoints.add(pt)
-                                        }
+                                        val rawPoint = StrokePoint(nwX, nwY)
+                                        val point = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawPoint, liveState.rulerState) else rawPoint
+                                        val previous = localActivePoints.lastOrNull()
+                                        if (previous == null || previous.x != point.x || previous.y != point.y) localActivePoints.add(point)
                                         change.consume()
                                     }
                                     CanvasGestureMode.LASER -> {
@@ -675,24 +701,10 @@ fun WhiteboardCanvasScreen(
             }
 
             if (localActivePoints.size >= 2) {
-                val activeBrush = viewModel.brushTypeForTool(state.currentTool)
                 // Show the captured pointer path directly. Stabilization is applied once on release,
                 // so the live tip never lags behind the user's actual movement.
-                val previewPoints = localActivePoints.toList()
-                val tempStroke = WhiteboardStroke(
-                    id = "live_active_stroke",
-                    points = previewPoints,
-                    colorHex = viewModel.effectiveColorForBrush(activeBrush, state.penColorHex),
-                    width = viewModel.effectiveStrokeWidthForBrush(activeBrush, state.penWidth),
-                    isHighlighter = activeBrush == StrokeBrushType.HIGHLIGHTER,
-                    isRainbow = state.isRainbowPen && activeBrush != StrokeBrushType.HIGHLIGHTER && activeBrush != StrokeBrushType.SOFT_BRUSH,
-                    strokeStyle = state.penStyle,
-                    capStyle = state.penCapStyle,
-                    brushType = activeBrush,
-                    opacity = activeBrush.defaultOpacity
-                )
                 drawStrokeVector(
-                    stroke = tempStroke,
+                    stroke = livePreviewStroke,
                     panX = camera.panX,
                     panY = camera.panY,
                     scale = camera.scale,
@@ -845,7 +857,6 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
-        CanvasPerformanceProbe("text-label-layer")
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
@@ -1004,8 +1015,11 @@ fun WhiteboardCanvasScreen(
                             awaitFirstDown(requireUnconsumed = false)
                             do {
                                 val event = awaitPointerEvent()
-                                val activePointers = event.changes.filter { it.pressed }
-                                if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                                var activePointerCount = 0
+                                for (change in event.changes) {
+                                    if (change.pressed) activePointerCount++
+                                }
+                                if (activePointerCount >= 2 || event.changes.any { it.isConsumed }) {
                                     break
                                 }
                                 val pan = event.calculatePan()
@@ -1022,7 +1036,6 @@ fun WhiteboardCanvasScreen(
         } // End Global Viewport Box
 
         // Interactive Ruler
-        CanvasPerformanceProbe("interactive-ruler")
         InteractiveRulerView(
             rulerState = state.rulerState,
             cameraState = cameraState,
@@ -1076,8 +1089,6 @@ fun WhiteboardCanvasScreen(
                     },
                     onUpdateShapeWidth = { viewModel.updateSelectedShape(width = it) },
                     onUpdateShapeStyle = { viewModel.updateSelectedShape(style = it) },
-                    onUpdateShapeCapStyle = { viewModel.updateSelectedShape(capStyle = it) },
-                    onUpdateShapeBrushType = { viewModel.updateSelectedShapeBrushType(it) },
                     onScaleShape = { viewModel.scaleSelectedShape(it) },
                     onRotateShape = { viewModel.rotateSelectedShape(it) },
                     onResetShapeRotation = { viewModel.resetSelectedShapeRotation() },
@@ -1088,8 +1099,6 @@ fun WhiteboardCanvasScreen(
                     onUpdateStrokeColor = { viewModel.updateSelectedStrokeColor(it) },
                     onUpdateStrokeWidth = { viewModel.updateSelectedStrokeWidth(it) },
                     onUpdateStrokeStyle = { viewModel.updateSelectedStrokeStyle(it) },
-                    onUpdateStrokeCapStyle = { viewModel.updateSelectedStrokeCapStyle(it) },
-                    onUpdateStrokeBrushType = { viewModel.updateSelectedStrokeBrushType(it) },
                     onScaleStroke = { viewModel.scaleSelectedStroke(it) },
                     onRotateStroke = { viewModel.rotateSelectedStroke(it) },
                     onConvertStrokeToShape = { viewModel.convertSelectedStrokeToShape() },
@@ -1122,9 +1131,6 @@ fun WhiteboardCanvasScreen(
                     currentTool = state.currentTool,
                     currentPenColor = state.penColorHex,
                     currentPenWidth = state.penWidth,
-                    currentPenStyle = state.penStyle,
-                    currentPenCapStyle = state.penCapStyle,
-                    currentHandDrawnFactor = state.handDrawnFactor,
                     isRainbowPen = state.isRainbowPen,
                     autoShapeRecognition = state.autoShapeRecognition,
                     isRulerActive = state.isRulerActive,
@@ -1135,15 +1141,10 @@ fun WhiteboardCanvasScreen(
                     },
                     onUpdatePenColor = { col, isRainbow -> viewModel.setPenColor(col, isRainbow) },
                     onUpdatePenWidth = { viewModel.setPenWidth(it) },
-                    onUpdatePenStyle = { viewModel.setPenStyle(it) },
-                    onUpdatePenCapStyle = { viewModel.setPenCapStyle(it) },
-                    onUpdateHandDrawnFactor = { viewModel.setHandDrawnFactor(it) },
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
-                    onOpenShapePicker = { showShapePicker = true },
                     onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
                     onAddText = { viewModel.requestAddStickyNote("#FFF275") },
-                    onOpenTemplates = { showTemplatePicker = true },
                     onClearBoard = { viewModel.clearBoard() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1245,61 +1246,6 @@ fun WhiteboardCanvasScreen(
             )
         }
 
-        if (showShapePicker) {
-            ShapePickerBottomSheet(
-                initialColorHex = state.penColorHex,
-                initialStrokeStyle = state.penStyle,
-                initialCapStyle = state.penCapStyle,
-                initialBrushType = viewModel.brushTypeForTool(state.currentTool),
-                onSelectBrushType = { viewModel.setPendingBrushType(it) },
-                onSelectShapeType = { shapeType, isFilled, strokeColor, fillColor, style, capStyle ->
-                    viewModel.requestAddCustomShape(
-                        type = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor,
-                        style = style,
-                        capStyle = capStyle,
-                        brushType = viewModel.uiState.value.pendingBrushType
-                    )
-                },
-                onDismiss = { showShapePicker = false }
-            )
-        }
-
-        if (showTemplatePicker) {
-            TemplatePickerModal(
-                showOnNewBoard = state.showTemplatesOnNewBoard,
-                onToggleShowOnNewBoard = { viewModel.toggleShowTemplatesOnNewBoard(it) },
-                onStartBlankCanvas = {
-                    val hasAny = state.board.strokes.isNotEmpty() ||
-                        state.board.shapes.isNotEmpty() ||
-                        state.board.stickyNotes.isNotEmpty() ||
-                        state.board.textItems.isNotEmpty()
-                    if (hasAny) {
-                        viewModel.clearBoard()
-                    }
-                    showTemplatePicker = false
-                },
-                onSelectTemplate = { viewModel.applyTemplate(it, screenWidthPx, screenHeightPx) },
-                onDismiss = { showTemplatePicker = false },
-                customTemplates = state.customTemplates,
-                currentBoardTitle = state.board.title,
-                onSaveCurrentAsTemplate = { title, desc ->
-                    val saved = viewModel.saveCurrentBoardAsTemplate(title, desc)
-                    Toast.makeText(context, "Plantilla '${saved.title}' guardada", Toast.LENGTH_SHORT).show()
-                },
-                onSelectCustomTemplate = { tmpl ->
-                    val ok = viewModel.applyCustomTemplate(tmpl)
-                    if (!ok) {
-                        Toast.makeText(context, "No se pudo aplicar esta plantilla", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDeleteCustomTemplate = { templateId ->
-                    viewModel.deleteCustomTemplate(templateId)
-                }
-            )
-        }
 
         if (showBackgroundSettings) {
             BackgroundSettingsModal(
@@ -1432,7 +1378,6 @@ private fun CameraStateHost(
     content: @Composable (State<ViewportTransform>) -> Unit
 ) {
     val cameraState = viewModel.cameraState.collectAsState()
-    CanvasPerformanceProbe("camera-viewport")
     content(cameraState)
 }
 
@@ -1453,7 +1398,6 @@ private fun CameraAwareWhiteboardTopBar(
     // The zoom read is isolated to this small component; the screen and tool docks
     // do not subscribe to camera changes.
     val camera by viewModel.cameraState.collectAsState()
-    CanvasPerformanceProbe("topbar")
     if (!state.isZenMode) {
         WhiteboardTopBar(
             boardTitle = state.board.title,
@@ -1513,7 +1457,6 @@ private fun StickyNoteLayer(
     onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
     onRotate: (String, Float) -> Unit
 ) {
-    CanvasPerformanceProbe("sticky-note-layer")
     // Re-evaluate visibility as the camera moves, but only recompose this layer
     // when the actual set/order of visible notes changes. Note transforms themselves
     // remain in each note's graphicsLayer phase.

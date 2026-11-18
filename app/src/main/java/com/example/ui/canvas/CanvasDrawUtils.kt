@@ -35,14 +35,8 @@ fun parseColor(hex: String, default: Color = Color.Black): Color {
 }
 
 fun getPathEffect(style: StrokeStyle, width: Float): PathEffect? {
-    return when (style) {
-        StrokeStyle.SOLID -> null
-        StrokeStyle.DASHED -> PathEffect.dashPathEffect(floatArrayOf(width * 3f, width * 2f), 0f)
-        StrokeStyle.DOTTED -> PathEffect.dashPathEffect(floatArrayOf(width, width * 1.5f), 0f)
-        StrokeStyle.DASH_DOT -> PathEffect.dashPathEffect(floatArrayOf(width * 4f, width * 1.6f, width * 1.2f, width * 1.6f), 0f)
-        else -> null
+        return null
     }
-}
 
 fun DrawScope.drawCanvasBackgroundAndGrid(
     gridType: CanvasGridType,
@@ -156,14 +150,27 @@ internal fun buildGridLineSegments(
     return segments
 }
 
-private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
-    if (segments.isEmpty()) return
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color.toArgb()
+// Grid drawing runs on every canvas redraw. Reuse per-thread Paint instances instead
+// of allocating and configuring new native Paint objects for every frame.
+private val gridLinePaint = ThreadLocal.withInitial {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
         strokeWidth = 1f
         strokeCap = Paint.Cap.BUTT
         style = Paint.Style.STROKE
     }
+}
+
+private val gridPointPaint = ThreadLocal.withInitial {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+}
+
+private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
+    if (segments.isEmpty()) return
+    val paint = gridLinePaint.get()!!
+    paint.color = color.toArgb()
     drawIntoCanvas { canvas ->
         canvas.nativeCanvas.drawLines(segments, paint)
     }
@@ -171,12 +178,9 @@ private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
 
 private fun DrawScope.drawGridPointsBatched(points: FloatArray, color: Color, radius: Float) {
     if (points.isEmpty() || radius <= 0f) return
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color.toArgb()
-        strokeWidth = radius * 2f
-        strokeCap = Paint.Cap.ROUND
-        style = Paint.Style.STROKE
-    }
+    val paint = gridPointPaint.get()!!
+    paint.color = color.toArgb()
+    paint.strokeWidth = radius * 2f
     drawIntoCanvas { canvas ->
         canvas.nativeCanvas.drawPoints(points, paint)
     }
@@ -196,8 +200,32 @@ fun DrawScope.drawStrokeVector(
     viewportH: Float = size.height,
     preserveInputPoints: Boolean = false
 ) {
-    AdvancedLineEffects.run {
-        drawAdvancedStroke(
+    if (preserveInputPoints && !stroke.isRainbow) {
+        val livePath = Path().apply {
+            val first = stroke.points.first()
+            moveTo(first.x * scale + panX, first.y * scale + panY)
+            for (index in 1 until stroke.points.size) {
+                val point = stroke.points[index]
+                lineTo(point.x * scale + panX, point.y * scale + panY)
+            }
+        }
+        val liveColor = parseColor(stroke.colorHex).copy(
+            alpha = (parseColor(stroke.colorHex).alpha * stroke.opacity).coerceIn(0f, 1f)
+        )
+        drawPath(
+            path = livePath,
+            color = liveColor,
+            style = Stroke(
+                width = (stroke.width * scale).coerceAtLeast(1f),
+                cap = androidx.compose.ui.graphics.StrokeCap.Round,
+                join = androidx.compose.ui.graphics.StrokeJoin.Round
+            )
+        )
+        return
+    }
+    drawIntoCanvas { composeCanvas ->
+        com.example.ink.engine.UnifiedBrushPipeline.renderStroke(
+            canvas = composeCanvas.nativeCanvas,
             stroke = stroke,
             panX = panX,
             panY = panY,

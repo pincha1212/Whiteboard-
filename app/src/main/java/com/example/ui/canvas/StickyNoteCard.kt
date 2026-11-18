@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -316,13 +317,23 @@ fun StickyNoteView(
 
                     do {
                         val event = awaitPointerEvent()
-                        val activePointers = event.changes.filter { it.pressed }
-                        if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                        var activePointer: PointerInputChange? = null
+                        var hasMultipleActivePointers = false
+                        for (pointerChange in event.changes) {
+                            if (pointerChange.pressed) {
+                                if (activePointer != null) {
+                                    hasMultipleActivePointers = true
+                                    break
+                                }
+                                activePointer = pointerChange
+                            }
+                        }
+                        if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
                             // Yield immediately to multi-touch canvas pan/pinch-to-zoom
                             isDragging = false
                             break
                         }
-                        val change = activePointers.firstOrNull() ?: break
+                        val change = activePointer ?: break
                         val delta = change.positionChange()
                         if (!isDragging) {
                             totalDragPx += hypot(delta.x, delta.y)
@@ -615,11 +626,21 @@ fun StickyNoteView(
                                 var beganResize = false
                                 do {
                                     val event = awaitPointerEvent()
-                                    val activePointers = event.changes.filter { it.pressed }
-                                    if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                                    var activePointer: PointerInputChange? = null
+                                    var hasMultipleActivePointers = false
+                                    for (pointerChange in event.changes) {
+                                        if (pointerChange.pressed) {
+                                            if (activePointer != null) {
+                                                hasMultipleActivePointers = true
+                                                break
+                                            }
+                                            activePointer = pointerChange
+                                        }
+                                    }
+                                    if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
                                         break
                                     }
-                                    val change = activePointers.firstOrNull() ?: break
+                                    val change = activePointer ?: break
                                     val delta = change.positionChange()
                                     if (delta.x != 0f || delta.y != 0f) {
                                         if (!beganResize) {
@@ -726,11 +747,21 @@ fun StickyNoteView(
 
                             do {
                                 val event = awaitPointerEvent()
-                                val activePointers = event.changes.filter { it.pressed }
-                                if (activePointers.size >= 2 || event.changes.any { it.isConsumed }) {
+                                var activePointer: PointerInputChange? = null
+                                var hasMultipleActivePointers = false
+                                for (pointerChange in event.changes) {
+                                    if (pointerChange.pressed) {
+                                        if (activePointer != null) {
+                                            hasMultipleActivePointers = true
+                                            break
+                                        }
+                                        activePointer = pointerChange
+                                    }
+                                }
+                                if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
                                     break
                                 }
-                                val change = activePointers.firstOrNull() ?: break
+                                val change = activePointer ?: break
                                 val moveDelta = change.positionChange()
                                 if (moveDelta.x != 0f || moveDelta.y != 0f) {
                                     if (!beganRotation) {

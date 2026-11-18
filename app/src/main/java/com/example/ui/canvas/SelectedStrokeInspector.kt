@@ -60,12 +60,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StickyNote
 import com.example.model.StrokeStyle
-import com.example.model.StrokeBrushType
 import com.example.model.WhiteboardStroke
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -90,8 +88,6 @@ fun SelectionEditDock(
     onToggleShapeFilled: () -> Unit,
     onUpdateShapeWidth: (Float) -> Unit,
     onUpdateShapeStyle: (StrokeStyle) -> Unit,
-    onUpdateShapeCapStyle: (LineCapStyle) -> Unit = {},
-    onUpdateShapeBrushType: (StrokeBrushType) -> Unit = {},
     onScaleShape: (Float) -> Unit,
     onRotateShape: (Float) -> Unit,
     onResetShapeRotation: () -> Unit,
@@ -102,8 +98,6 @@ fun SelectionEditDock(
     onUpdateStrokeColor: (String) -> Unit,
     onUpdateStrokeWidth: (Float) -> Unit,
     onUpdateStrokeStyle: (StrokeStyle) -> Unit,
-    onUpdateStrokeCapStyle: (LineCapStyle) -> Unit = {},
-    onUpdateStrokeBrushType: (StrokeBrushType) -> Unit = {},
     onScaleStroke: (Float) -> Unit,
     onRotateStroke: (Float) -> Unit = {},
     onConvertStrokeToShape: () -> Unit,
@@ -121,8 +115,6 @@ fun SelectionEditDock(
     var showMoreMenu by remember(selectedShape?.id, selectedStroke?.id, selectedNote?.id, totalSelectedCount) {
         mutableStateOf(false)
     }
-    var showShapeBrushMenu by remember(selectedShape?.id) { mutableStateOf(false) }
-    var showStrokeBrushMenu by remember(selectedStroke?.id) { mutableStateOf(false) }
 
     val strokeColors = listOf(
         "#0F172A" to "Pizarra",
@@ -365,97 +357,6 @@ fun SelectionEditDock(
                                 )
                             }
 
-                            // 2. Quick Brush Type pill (1-tap access right from SelectionEditDock)
-                            Box {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .heightIn(min = 34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (showShapeBrushMenu) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (showShapeBrushMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { showShapeBrushMenu = true }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                        .testTag("edit_dock_shape_brush_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Brush,
-                                        contentDescription = "Tipo de trazo",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = shortBrushLabel(selectedShape.brushType),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = showShapeBrushMenu,
-                                    onDismissRequest = { showShapeBrushMenu = false },
-                                    containerColor = MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = "TIPO DE TRAZO",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        StrokeBrushType.values().forEach { brush ->
-                                            val isSel = selectedShape.brushType == brush
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(
-                                                        if (isSel) MaterialTheme.colorScheme.primaryContainer
-                                                        else Color.Transparent
-                                                    )
-                                                    .clickable {
-                                                        onUpdateShapeBrushType(brush)
-                                                        showShapeBrushMenu = false
-                                                    }
-                                                    .padding(horizontal = 10.dp, vertical = 9.dp)
-                                                    .testTag("quick_shape_brush_${brush.name}"),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = shortBrushLabel(brush),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                )
-                                                if (isSel) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
 
                             // 3. Quick Thickness Stepper (- / px / +)
                             QuickStepperPill(
@@ -622,29 +523,9 @@ fun SelectionEditDock(
                                     Spacer(modifier = Modifier.height(10.dp))
 
                                     // Line Style (available across all preset and freeform shapes)
-                                    LineStyleSelectorPanel(
-                                        selectedStyle = selectedShape.strokeStyle,
-                                        previewColorHex = selectedShape.strokeColorHex,
-                                        onSelectStyle = onUpdateShapeStyle,
-                                        availableStyles = StrokeStyle.values().toList()
-                                    )
 
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    BrushTypeSelectorRow(
-                                        selectedBrush = selectedShape.brushType,
-                                        onSelectBrush = onUpdateShapeBrushType,
-                                        testTagPrefix = "inspector_shape_brush"
-                                    )
-
-                                    if (selectedShape.shapeType == ShapeType.LINE) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        LineCapSelectorRow(
-                                            selectedCapStyle = selectedShape.capStyle,
-                                            onSelectCapStyle = onUpdateShapeCapStyle
-                                        )
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     Spacer(modifier = Modifier.height(10.dp))
 
@@ -820,97 +701,8 @@ fun SelectionEditDock(
                                 )
                             }
 
-                            // Quick Brush Type pill for stroke
-                            Box {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .heightIn(min = 34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (showStrokeBrushMenu) MaterialTheme.colorScheme.primaryContainer
-                                            else MaterialTheme.colorScheme.surfaceVariant
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = if (showStrokeBrushMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { showStrokeBrushMenu = true }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                                        .testTag("edit_dock_stroke_brush_btn")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Brush,
-                                        contentDescription = "Tipo de trazo",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = shortBrushLabel(selectedStroke.brushType),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = showStrokeBrushMenu,
-                                    onDismissRequest = { showStrokeBrushMenu = false },
-                                    containerColor = MaterialTheme.colorScheme.surface,
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier
-                                        .width(240.dp)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                                ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Text(
-                                            text = "TIPO DE TRAZO",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        StrokeBrushType.values().forEach { brush ->
-                                            val isSel = selectedStroke.brushType == brush
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(
-                                                        if (isSel) MaterialTheme.colorScheme.primaryContainer
-                                                        else Color.Transparent
-                                                    )
-                                                    .clickable {
-                                                        onUpdateStrokeBrushType(brush)
-                                                        showStrokeBrushMenu = false
-                                                    }
-                                                    .padding(horizontal = 10.dp, vertical = 9.dp)
-                                                    .testTag("quick_stroke_brush_${brush.name}"),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = shortBrushLabel(brush),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
-                                                    color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                )
-                                                if (isSel) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Check,
-                                                        contentDescription = null,
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            
+                            
 
                             QuickStepperPill(
                                 icon = Icons.Default.LineWeight,
@@ -1003,23 +795,9 @@ fun SelectionEditDock(
                                         modifier = Modifier.height(28.dp)
                                     )
                                     Spacer(modifier = Modifier.height(6.dp))
-                                    LineStyleSelectorPanel(
-                                        selectedStyle = selectedStroke.strokeStyle,
-                                        previewColorHex = selectedStroke.colorHex,
-                                        onSelectStyle = onUpdateStrokeStyle
-                                    )
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    BrushTypeSelectorRow(
-                                        selectedBrush = selectedStroke.brushType,
-                                        onSelectBrush = onUpdateStrokeBrushType,
-                                        testTagPrefix = "inspector_stroke_brush"
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    LineCapSelectorRow(
-                                        selectedCapStyle = selectedStroke.capStyle,
-                                        onSelectCapStyle = onUpdateStrokeCapStyle
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
+Spacer(modifier = Modifier.height(10.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1313,63 +1091,6 @@ private fun shortShapeLabel(type: ShapeType): String = when (type) {
     else -> type.displayName
 }
 
-private fun shortBrushLabel(brush: StrokeBrushType): String = when (brush) {
-    StrokeBrushType.FOUNTAIN_PEN -> "Pluma"
-    StrokeBrushType.FINE_MARKER -> "Marcador"
-    StrokeBrushType.HIGHLIGHTER -> "Resaltador"
-    StrokeBrushType.SOFT_BRUSH -> "Cerdas"
-    StrokeBrushType.CALLIGRAPHY -> "Caligrafía"
-    StrokeBrushType.AIRBRUSH -> "Aerógrafo"
-}
 
-@Composable
-private fun BrushTypeSelectorRow(
-    selectedBrush: StrokeBrushType,
-    onSelectBrush: (StrokeBrushType) -> Unit,
-    testTagPrefix: String
-) {
-    Column {
-        Text(
-            text = "Tipo de Trazo",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            StrokeBrushType.values().forEach { brush ->
-                val isSel = selectedBrush == brush
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .heightIn(min = 38.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (isSel) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .border(
-                            width = if (isSel) 1.5.dp else 1.dp,
-                            color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .clickable { onSelectBrush(brush) }
-                        .padding(horizontal = 10.dp, vertical = 7.dp)
-                        .testTag("${testTagPrefix}_${brush.name}")
-                ) {
-                    Text(
-                        text = shortBrushLabel(brush),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
-                    )
-                }
-            }
-        }
-    }
-}
+
+

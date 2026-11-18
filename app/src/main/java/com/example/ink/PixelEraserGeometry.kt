@@ -277,7 +277,6 @@ object PixelEraserGeometry {
         val isHighlighter = shape.opacity < 0.41f
         val brushType = when {
             shape.opacity < 0.41f -> StrokeBrushType.HIGHLIGHTER
-            shape.opacity < 0.65f -> StrokeBrushType.SOFT_BRUSH
             else -> StrokeBrushType.FOUNTAIN_PEN
         }
 
