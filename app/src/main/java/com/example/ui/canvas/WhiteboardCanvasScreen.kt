@@ -123,7 +123,6 @@ fun WhiteboardCanvasScreen(
     onSwitchToNotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    CanvasPerformanceProbe("screen")
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
 
@@ -239,7 +238,6 @@ fun WhiteboardCanvasScreen(
                 }
         ) {
             // Main Drawing Canvas
-            CanvasPerformanceProbe("canvas-layer")
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
@@ -845,7 +843,6 @@ fun WhiteboardCanvasScreen(
         }
 
         // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
-        CanvasPerformanceProbe("text-label-layer")
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
@@ -1022,7 +1019,6 @@ fun WhiteboardCanvasScreen(
         } // End Global Viewport Box
 
         // Interactive Ruler
-        CanvasPerformanceProbe("interactive-ruler")
         InteractiveRulerView(
             rulerState = state.rulerState,
             cameraState = cameraState,
@@ -1432,7 +1428,6 @@ private fun CameraStateHost(
     content: @Composable (State<ViewportTransform>) -> Unit
 ) {
     val cameraState = viewModel.cameraState.collectAsState()
-    CanvasPerformanceProbe("camera-viewport")
     content(cameraState)
 }
 
@@ -1453,7 +1448,6 @@ private fun CameraAwareWhiteboardTopBar(
     // The zoom read is isolated to this small component; the screen and tool docks
     // do not subscribe to camera changes.
     val camera by viewModel.cameraState.collectAsState()
-    CanvasPerformanceProbe("topbar")
     if (!state.isZenMode) {
         WhiteboardTopBar(
             boardTitle = state.board.title,
@@ -1513,7 +1507,6 @@ private fun StickyNoteLayer(
     onResizeHandle: (String, StickyNoteResizeHandle, Float, Float) -> Unit,
     onRotate: (String, Float) -> Unit
 ) {
-    CanvasPerformanceProbe("sticky-note-layer")
     // Re-evaluate visibility as the camera moves, but only recompose this layer
     // when the actual set/order of visible notes changes. Note transforms themselves
     // remain in each note's graphicsLayer phase.
