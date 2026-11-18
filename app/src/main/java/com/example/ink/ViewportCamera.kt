@@ -462,8 +462,20 @@ object StickyNoteGeometry {
         // Top handle points straight up (-90° in screen space), which corresponds to 0° note rotation
         val unadjusted = rawAngleDeg + 90f
         val normalized = ((unadjusted % 360f) + 360f) % 360f
-        return snapAngle(normalized, snapThresholdDegrees)
+        return snapAngle45(normalized, snapThresholdDegrees)
     }
+
+    fun snapAngle45(angle: Float, threshold: Float = 3f): Float {
+        val normalized = ((angle % 360f) + 360f) % 360f
+        val nearest = kotlin.math.round(normalized / 45f) * 45f
+        val circularDistance = kotlin.math.min(
+            kotlin.math.abs(normalized - nearest),
+            360f - kotlin.math.abs(normalized - nearest)
+        )
+        return if (circularDistance <= threshold) normalizeAngle(nearest) else normalized
+    }
+
+    private fun normalizeAngle(angle: Float): Float = ((angle % 360f) + 360f) % 360f
 
     fun snapAngle(angle: Float, threshold: Float = 3f): Float {
         val norm = ((angle % 360f) + 360f) % 360f
