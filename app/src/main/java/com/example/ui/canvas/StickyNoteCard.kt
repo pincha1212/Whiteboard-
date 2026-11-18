@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitPointerEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +59,8 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
@@ -75,8 +79,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.TransformPoint
 import com.example.model.StickyNote
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
@@ -194,6 +200,7 @@ fun StickyNoteView(
     onDragDelta: (Float, Float) -> Unit,
     onResizeHandle: (StickyNoteResizeHandle, Float, Float) -> Unit = { _, _, _ -> },
     onRotate: (Float) -> Unit = {},
+    onTransformGesture: (TransformPoint, TransformPoint, Float, Float) -> Unit = { _, _, _, _ -> },
     isSelected: Boolean = false,
     isPanOnlyMode: Boolean = false,
     modifier: Modifier = Modifier
@@ -208,6 +215,7 @@ fun StickyNoteView(
     val currentOnDragDelta by rememberUpdatedState(onDragDelta)
     val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
     val currentOnRotate by rememberUpdatedState(onRotate)
+    val currentOnTransformGesture by rememberUpdatedState(onTransformGesture)
     val currentNoteRotation by rememberUpdatedState(note.rotation)
 
     val noteBg = try {
@@ -274,7 +282,10 @@ fun StickyNoteView(
     val activeSelectionHandles = isSelected && !note.isLocked && !isPanOnlyMode
 
     var cardCenterRoot by remember { mutableStateOf(Offset.Zero) }
+    var cardCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var activeResizeHandle by remember { mutableStateOf<StickyNoteResizeHandle?>(null) }
+    val hapticFeedback = LocalHapticFeedback.current
     var isRotating by remember { mutableStateOf(false) }
 
     Box(
@@ -309,60 +320,93 @@ fun StickyNoteView(
         } else {
             Modifier.pointerInput(note.id, note.isLocked) {
                 awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    var isDragging = false
-                    var beganSnapshot = false
-                    var totalDragPx = 0f
-                    val touchSlop = viewConfiguration.touchSlop
+                    val down = awaitFirstDown(requireUnconsumed = true)
+                    val coordinates = cardCoords
+                    val firstRoot = coordinates?.localToRoot(down.position) ?: down.position
+                    val previous = mutableMapOf(down.id to firstRoot)
+                    var previousPointerCount = 1
+                    var totalDrag = 0f
+                    var beganTransform = false
 
                     do {
                         val event = awaitPointerEvent()
-                        var activePointer: PointerInputChange? = null
-                        var hasMultipleActivePointers = false
-                        for (pointerChange in event.changes) {
-                            if (pointerChange.pressed) {
-                                if (activePointer != null) {
-                                    hasMultipleActivePointers = true
-                                    break
-                                }
-                                activePointer = pointerChange
-                            }
+                        val pressed = event.changes.filter { it.pressed }
+                        if (pressed.isEmpty()) break
+                        if (event.changes.any { it.isConsumed } && !beganTransform) break
+
+                        val current = pressed.associate { change ->
+                            change.id to (cardCoords?.localToRoot(change.position) ?: change.position)
                         }
-                        if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                            // Yield immediately to multi-touch canvas pan/pinch-to-zoom
-                            isDragging = false
-                            break
+
+                        if (current.size != previousPointerCount) {
+                            previous.clear()
+                            previous.putAll(current)
+                            previousPointerCount = current.size
+                            continue
                         }
-                        val change = activePointer ?: break
-                        val delta = change.positionChange()
-                        if (!isDragging) {
-                            totalDragPx += hypot(delta.x, delta.y)
-                            if (totalDragPx > touchSlop) {
-                                isDragging = true
-                                currentOnSelect()
-                                if (!note.isLocked && !beganSnapshot) {
-                                    beganSnapshot = true
+
+                        if (current.size >= 2) {
+                            val ids = current.keys.take(2)
+                            val oldA = previous[ids[0]]
+                            val oldB = previous[ids[1]]
+                            val newA = current[ids[0]]
+                            val newB = current[ids[1]]
+                            if (oldA != null && oldB != null && newA != null && newB != null) {
+                                val previousCentroid = Offset((oldA.x + oldB.x) * 0.5f, (oldA.y + oldB.y) * 0.5f)
+                                val currentCentroid = Offset((newA.x + newB.x) * 0.5f, (newA.y + newB.y) * 0.5f)
+                                val oldDx = oldB.x - oldA.x
+                                val oldDy = oldB.y - oldA.y
+                                val newDx = newB.x - newA.x
+                                val newDy = newB.y - newA.y
+                                val oldDistance = hypot(oldDx, oldDy).coerceAtLeast(1f)
+                                val newDistance = hypot(newDx, newDy)
+                                val zoomChange = (newDistance / oldDistance).coerceIn(0.05f, 20f)
+                                var rotationDelta = Math.toDegrees(
+                                    (atan2(newDy, newDx) - atan2(oldDy, oldDx)).toDouble()
+                                ).toFloat()
+                                if (rotationDelta > 180f) rotationDelta -= 360f
+                                if (rotationDelta < -180f) rotationDelta += 360f
+
+                                if (!beganTransform && !note.isLocked) {
+                                    beganTransform = true
+                                    currentOnSelect()
                                     currentOnBeginTransform()
                                 }
+                                if (beganTransform) {
+                                    currentOnTransformGesture(
+                                        TransformPoint(previousCentroid.x, previousCentroid.y),
+                                        TransformPoint(currentCentroid.x, currentCentroid.y),
+                                        zoomChange,
+                                        rotationDelta
+                                    )
+                                    event.changes.forEach { if (it.pressed) it.consume() }
+                                }
+                            }
+                        } else {
+                            val change = pressed.first()
+                            val oldPosition = previous[change.id]
+                            val newPosition = current[change.id]
+                            if (oldPosition != null && newPosition != null) {
+                                val delta = newPosition - oldPosition
+                                totalDrag += hypot(delta.x, delta.y)
+                                if (!beganTransform && totalDrag > viewConfiguration.touchSlop && !note.isLocked) {
+                                    beganTransform = true
+                                    currentOnSelect()
+                                    currentOnBeginTransform()
+                                }
+                                if (beganTransform && (delta.x != 0f || delta.y != 0f)) {
+                                    currentOnDragDelta(delta.x, delta.y)
+                                    change.consume()
+                                }
                             }
                         }
-                        if (isDragging && !note.isLocked && (delta.x != 0f || delta.y != 0f)) {
-                            val angleRad = currentNoteRotation * (PI.toFloat() / 180f)
-                            val cosA = cos(angleRad)
-                            val sinA = sin(angleRad)
-                            val screenDx = delta.x * cosA - delta.y * sinA
-                            val screenDy = delta.x * sinA + delta.y * cosA
-                            currentOnDragDelta(screenDx, screenDy)
-                            change.consume()
-                        }
+
+                        previous.clear()
+                        previous.putAll(current)
                     } while (event.changes.any { it.pressed })
 
-                    if (!isDragging) {
-                        currentOnSelect()
-                    }
-                    if (beganSnapshot) {
-                        currentOnEndTransform()
-                    }
+                    if (!beganTransform) currentOnSelect()
+                    if (beganTransform) currentOnEndTransform()
                 }
             }
         }
@@ -378,15 +422,10 @@ fun StickyNoteView(
                 modifier = Modifier
                     .padding(sideGutterDp)
                     .fillMaxSize()
-                    .then(
-                        if (activeSelectionHandles) {
-                            Modifier.onGloballyPositioned { coords ->
-                                cardCenterRoot = coords.boundsInRoot().center
-                            }
-                        } else {
-                            Modifier
-                        }
-                    )
+                    .onGloballyPositioned { coords ->
+                        cardCoords = coords
+                        if (activeSelectionHandles) cardCenterRoot = coords.boundsInRoot().center
+                    }
                     .clip(RoundedCornerShape(cornerRadiusDp))
                     .background(noteBg)
                     .border(
@@ -616,45 +655,48 @@ fun StickyNoteView(
                 val isHorizontalEdge = handle == StickyNoteResizeHandle.TOP ||
                     handle == StickyNoteResizeHandle.BOTTOM
 
+                var handleCoordinates by remember(note.id, handle) { mutableStateOf<LayoutCoordinates?>(null) }
+                val handleScale by animateFloatAsState(
+                    targetValue = if (activeResizeHandle == handle) 1.18f else 1f,
+                    label = "sticky-note-handle-scale"
+                )
                 Box(
                     modifier = Modifier
                         .align(alignment)
                         .size(handleTargetDp)
+                        .graphicsLayer {
+                            val inverseZoom = 1f / cameraState.value.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+                            scaleX = inverseZoom
+                            scaleY = inverseZoom
+                        }
+                        .onGloballyPositioned { handleCoordinates = it }
                         .pointerInput(note.id, handle, note.isLocked) {
                             awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var previousRoot = handleCoordinates?.localToRoot(down.position) ?: down.position
                                 var beganResize = false
+                                activeResizeHandle = handle
                                 do {
                                     val event = awaitPointerEvent()
-                                    var activePointer: PointerInputChange? = null
-                                    var hasMultipleActivePointers = false
-                                    for (pointerChange in event.changes) {
-                                        if (pointerChange.pressed) {
-                                            if (activePointer != null) {
-                                                hasMultipleActivePointers = true
-                                                break
-                                            }
-                                            activePointer = pointerChange
-                                        }
-                                    }
-                                    if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                        break
-                                    }
-                                    val change = activePointer ?: break
-                                    val delta = change.positionChange()
-                                    if (delta.x != 0f || delta.y != 0f) {
-                                        if (!beganResize) {
+                                    val change = event.changes.firstOrNull { it.id == down.id && it.pressed } ?: break
+                                    if (event.changes.any { it.isConsumed } && !beganResize) break
+                                    val currentRoot = handleCoordinates?.localToRoot(change.position) ?: change.position
+                                    val delta = currentRoot - previousRoot
+                                    if (delta != Offset.Zero) {
+                                        if (!beganResize && !note.isLocked) {
                                             beganResize = true
                                             currentOnSelect()
                                             currentOnBeginTransform()
                                         }
-                                        currentOnResizeHandle(handle, delta.x, delta.y)
-                                        change.consume()
+                                        if (beganResize) {
+                                            currentOnResizeHandle(handle, delta.x, delta.y)
+                                            change.consume()
+                                        }
                                     }
+                                    previousRoot = currentRoot
                                 } while (event.changes.any { it.pressed })
-                                if (beganResize) {
-                                    currentOnEndTransform()
-                                }
+                                activeResizeHandle = null
+                                if (beganResize) currentOnEndTransform()
                             }
                         }
                         .testTag("sticky_note_handle_${handle.name}_${note.id}"),
@@ -665,38 +707,18 @@ fun StickyNoteView(
                     } else {
                         MaterialTheme.colorScheme.primary
                     }
-                    when {
-                        isCorner -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(13.dp)
-                                    .shadow(3.dp, CircleShape)
-                                    .clip(CircleShape)
-                                    .background(Color.White)
-                                    .border(2.5.dp, accentColor, CircleShape)
-                            )
-                        }
-                        isHorizontalEdge -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 22.dp, height = 7.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                        else -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 7.dp, height = 22.dp)
-                                    .shadow(2.dp, RoundedCornerShape(4.dp))
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(Color.White)
-                                    .border(1.8.dp, accentColor, RoundedCornerShape(4.dp))
-                            )
-                        }
-                    }
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = handleScale
+                                scaleY = handleScale
+                            }
+                            .size(9.dp)
+                            .shadow(2.dp, CircleShape)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .border(1.25.dp, accentColor, CircleShape)
+                    )
                 }
             }
         }
