@@ -37,7 +37,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,19 +61,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.model.LineCapStyle
 import com.example.model.ShapeType
 import com.example.model.ToolType
-import com.example.model.StrokeStyle
 
 @Composable
 fun WhiteboardPenDock(
     currentTool: ToolType,
     currentPenColor: String,
     currentPenWidth: Float,
-    currentPenStyle: StrokeStyle,
-    currentPenCapStyle: LineCapStyle = LineCapStyle.NONE,
-    currentHandDrawnFactor: Float = 0.24f,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -82,9 +76,6 @@ fun WhiteboardPenDock(
     onSelectTool: (ToolType) -> Unit,
     onUpdatePenColor: (String, isRainbow: Boolean) -> Unit,
     onUpdatePenWidth: (Float) -> Unit,
-    onUpdatePenStyle: (StrokeStyle) -> Unit,
-    onUpdatePenCapStyle: (LineCapStyle) -> Unit = {},
-    onUpdateHandDrawnFactor: (Float) -> Unit = {},
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onAddStickyNote: () -> Unit,
@@ -532,40 +523,6 @@ fun WhiteboardPenDock(
 
                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 4.dp))
 
-                                // Organic hand-drawn factor control (0% geometric .. 100% sketched)
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 4.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text(
-                                            text = "Trazo orgánico",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        Text(
-                                            text = "${(currentHandDrawnFactor * 100).toInt()}%",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    Slider(
-                                        value = currentHandDrawnFactor,
-                                        onValueChange = onUpdateHandDrawnFactor,
-                                        valueRange = 0f..1f,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(28.dp)
-                                            .testTag("dock_hand_drawn_slider")
-                                    )
-                                }
                             }
                         }
                     }
