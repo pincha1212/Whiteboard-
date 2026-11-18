@@ -8,6 +8,7 @@ on:
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
       - release/2.3.0-lite
+      - feat/precision-transform-bounds
 
 permissions:
   contents: read
