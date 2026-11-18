@@ -1260,6 +1260,7 @@ class WhiteboardViewModel(
                 currentTool = ToolType.SELECT_LASSO
             )
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun addCustomShape(
@@ -2722,7 +2723,9 @@ class WhiteboardViewModel(
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val board = _uiState.value.board
-        val serialized = BoardSnapshotSerializer.serializeBoard(board)
+        // A snapshot stores board content, not the snapshot history itself.
+        // Excluding history prevents recursive JSON growth on every new snapshot.
+        val serialized = BoardSnapshotSerializer.serializeBoard(board.copy(snapshots = emptyList()))
         val cleanName = versionName.trim().ifBlank { "v${board.snapshots.size + 1}.0" }
         val snapshot = BoardVersionSnapshot(
             boardId = board.id,
