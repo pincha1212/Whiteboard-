@@ -156,14 +156,27 @@ internal fun buildGridLineSegments(
     return segments
 }
 
-private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
-    if (segments.isEmpty()) return
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color.toArgb()
+// Grid drawing runs on every canvas redraw. Reuse per-thread Paint instances instead
+// of allocating and configuring new native Paint objects for every frame.
+private val gridLinePaint = ThreadLocal.withInitial {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
         strokeWidth = 1f
         strokeCap = Paint.Cap.BUTT
         style = Paint.Style.STROKE
     }
+}
+
+private val gridPointPaint = ThreadLocal.withInitial {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        strokeCap = Paint.Cap.ROUND
+        style = Paint.Style.STROKE
+    }
+}
+
+private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
+    if (segments.isEmpty()) return
+    val paint = gridLinePaint.get()!!
+    paint.color = color.toArgb()
     drawIntoCanvas { canvas ->
         canvas.nativeCanvas.drawLines(segments, paint)
     }
@@ -171,12 +184,9 @@ private fun DrawScope.drawGridLinesBatched(segments: FloatArray, color: Color) {
 
 private fun DrawScope.drawGridPointsBatched(points: FloatArray, color: Color, radius: Float) {
     if (points.isEmpty() || radius <= 0f) return
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        this.color = color.toArgb()
-        strokeWidth = radius * 2f
-        strokeCap = Paint.Cap.ROUND
-        style = Paint.Style.STROKE
-    }
+    val paint = gridPointPaint.get()!!
+    paint.color = color.toArgb()
+    paint.strokeWidth = radius * 2f
     drawIntoCanvas { canvas ->
         canvas.nativeCanvas.drawPoints(points, paint)
     }
