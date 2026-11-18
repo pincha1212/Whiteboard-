@@ -203,13 +203,26 @@ object UnifiedBrushPipeline {
             seed = stroke.id.hashCode()
         )
 
-        val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}:${if (preserveInputPoints) "RAW" else "SIMPLIFIED"}"
-        val nodes: List<BrushNode> = nodeCache.get(cacheKey) ?: run {
+        val buildNodes = {
             val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = !preserveInputPoints)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
-            val built = PathHumanizer.humanizePath(styledPath, effectiveHandDrawn, PathHumanizer.DEFAULT_STEP_PX, config.seed, stableOpenContours = preserveInputPoints)
-            if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
-            built
+            PathHumanizer.humanizePath(
+                styledPath,
+                effectiveHandDrawn,
+                PathHumanizer.DEFAULT_STEP_PX,
+                config.seed,
+                stableOpenContours = preserveInputPoints
+            )
+        }
+        // The live preview changes on every pointer event. Caching every intermediate
+        // geometry only churns the LRU and evicts useful committed strokes.
+        val nodes: List<BrushNode> = if (preserveInputPoints) {
+            buildNodes()
+        } else {
+            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            nodeCache.get(cacheKey) ?: buildNodes().also { built ->
+                if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
+            }
         }
         if (nodes.isEmpty()) return
 
