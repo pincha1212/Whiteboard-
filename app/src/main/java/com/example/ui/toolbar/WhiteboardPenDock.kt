@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.PanTool
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -78,13 +79,15 @@ fun WhiteboardPenDock(
     onUpdatePenWidth: (Float) -> Unit,
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
-    onAddStickyNote: () -> Unit,
-    onAddText: () -> Unit,
-    onClearBoard: () -> Unit,
+    onAddStickyNote: (String) -> Unit = {},
+    onAddText: () -> Unit = {},
+    onOpenShapePicker: () -> Unit = {},
+    onClearBoard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMoreMenu by remember { mutableStateOf(false) }
     var isInkingTrayOpen by remember { mutableStateOf(true) }
+    var showStickyPalette by remember { mutableStateOf(false) }
 
     val parsedPenColor = try {
         Color(android.graphics.Color.parseColor(currentPenColor))
@@ -322,14 +325,88 @@ fun WhiteboardPenDock(
                         )
                     }
 
-                    // Sticky Note
+                    // Sticky Note with Palette Dropdown
+                    Box {
+                        CompactDockActionButton(
+                            isSelected = showStickyPalette,
+                            description = "Agregar nota adhesiva",
+                            onClick = { showStickyPalette = !showStickyPalette },
+                            testTag = "dock_action_sticky_note"
+                        ) {
+                            PhysicalStickyNoteIcon(modifier = Modifier.size(22.dp))
+                        }
+
+                        DropdownMenu(
+                            expanded = showStickyPalette,
+                            onDismissRequest = { showStickyPalette = false },
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                                .testTag("sticky_note_palette_menu")
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text(
+                                    text = "Color de nota adhesiva",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    listOf(
+                                        "#FFF275" to "Amarillo",
+                                        "#CCFF90" to "Verde",
+                                        "#A7FFEB" to "Azul",
+                                        "#FDCFE8" to "Rosa",
+                                        "#D7AEFB" to "Púrpura",
+                                        "#FFE0B2" to "Naranja"
+                                    ).forEach { (hex, name) ->
+                                        val c = Color(android.graphics.Color.parseColor(hex))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(c)
+                                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+                                                .clickable {
+                                                    onAddStickyNote(hex)
+                                                    showStickyPalette = false
+                                                }
+                                                .testTag("sticky_color_$name")
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Floating Text Tool
                     CompactDockActionButton(
                         isSelected = false,
-                        description = "Agregar nota adhesiva",
-                        onClick = onAddStickyNote,
-                        testTag = "dock_action_sticky_note"
+                        description = "Insertar texto en lienzo",
+                        onClick = onAddText,
+                        testTag = "dock_action_add_text"
                     ) {
-                        PhysicalStickyNoteIcon(modifier = Modifier.size(22.dp))
+                        Icon(
+                            imageVector = Icons.Default.TextFields,
+                            contentDescription = "Texto",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    // Geometric Shapes Tool
+                    CompactDockActionButton(
+                        isSelected = pendingShapeType != null,
+                        description = "Insertar formas geométricas",
+                        onClick = onOpenShapePicker,
+                        testTag = "dock_action_shapes"
+                    ) {
+                        PhysicalShapesIcon(
+                            tint = if (pendingShapeType != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(22.dp)
+                        )
                     }
 
                     // Color and thickness properties (...)

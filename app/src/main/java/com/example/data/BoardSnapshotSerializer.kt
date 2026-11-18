@@ -1,5 +1,7 @@
 package com.example.data
 
+import com.example.model.AuditLogEntry
+import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.LineCapStyle
@@ -146,6 +148,34 @@ object BoardSnapshotSerializer {
             })
         }
         root.put("stickers", stickersArr)
+
+        val auditLogsArr = JSONArray()
+        board.auditLogs.forEach { log ->
+            auditLogsArr.put(JSONObject().apply {
+                put("id", log.id)
+                put("timestamp", log.timestamp)
+                put("actionName", log.actionName)
+                put("details", log.details)
+                put("category", log.category)
+            })
+        }
+        root.put("auditLogs", auditLogsArr)
+
+        val snapshotsArr = JSONArray()
+        board.snapshots.forEach { snap ->
+            snapshotsArr.put(JSONObject().apply {
+                put("versionId", snap.versionId)
+                put("boardId", snap.boardId)
+                put("versionName", snap.versionName)
+                put("description", snap.description)
+                put("timestamp", snap.timestamp)
+                put("strokeCount", snap.strokeCount)
+                put("noteCount", snap.noteCount)
+                put("shapeCount", snap.shapeCount)
+                put("serializedData", snap.serializedData)
+            })
+        }
+        root.put("snapshots", snapshotsArr)
 
         return root.toString()
     }
@@ -323,6 +353,44 @@ object BoardSnapshotSerializer {
                 }
             }
 
+            val auditLogs = mutableListOf<AuditLogEntry>()
+            val auditLogsArr = root.optJSONArray("auditLogs")
+            if (auditLogsArr != null) {
+                for (i in 0 until auditLogsArr.length()) {
+                    val obj = auditLogsArr.getJSONObject(i)
+                    auditLogs.add(
+                        AuditLogEntry(
+                            id = obj.getString("id"),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            actionName = obj.optString("actionName", "ACTION"),
+                            details = obj.optString("details", ""),
+                            category = obj.optString("category", "CANVAS")
+                        )
+                    )
+                }
+            }
+
+            val snapshots = mutableListOf<BoardVersionSnapshot>()
+            val snapshotsArr = root.optJSONArray("snapshots")
+            if (snapshotsArr != null) {
+                for (i in 0 until snapshotsArr.length()) {
+                    val obj = snapshotsArr.getJSONObject(i)
+                    snapshots.add(
+                        BoardVersionSnapshot(
+                            versionId = obj.getString("versionId"),
+                            boardId = obj.optString("boardId", currentBoard.id),
+                            versionName = obj.optString("versionName", "v1.0"),
+                            description = obj.optString("description", ""),
+                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
+                            strokeCount = obj.optInt("strokeCount", 0),
+                            noteCount = obj.optInt("noteCount", 0),
+                            shapeCount = obj.optInt("shapeCount", 0),
+                            serializedData = obj.optString("serializedData", "")
+                        )
+                    )
+                }
+            }
+
             currentBoard.copy(
                 updatedAt = System.currentTimeMillis(),
                 gridType = gridType,
@@ -331,7 +399,9 @@ object BoardSnapshotSerializer {
                 shapes = shapes,
                 stickyNotes = notes,
                 textItems = texts,
-                stickers = stickers
+                stickers = stickers,
+                auditLogs = if (auditLogs.isNotEmpty()) auditLogs else currentBoard.auditLogs,
+                snapshots = if (snapshots.isNotEmpty()) snapshots else currentBoard.snapshots
             )
         } catch (_: Exception) {
             null

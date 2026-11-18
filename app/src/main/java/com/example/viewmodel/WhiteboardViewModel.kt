@@ -10,6 +10,7 @@ import com.example.ink.StickyNoteBounds
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.ViewportTransform
+import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
@@ -416,15 +417,35 @@ class WhiteboardViewModel(
         }
 
         if (recognized != null && recognized.confidence >= 0.80f && recognized.shapeType != ShapeType.LINE) {
+            val log = AuditLogEntry(
+                actionName = "AUTO_SHAPE_RECOGNIZED",
+                details = "Forma ${recognized.shapeType.displayName} reconocida (${(recognized.confidence * 100).toInt()}%)",
+                category = "SHAPES"
+            )
             _uiState.update {
-                it.withUpdatedBoard { b -> b.copy(shapes = b.shapes + recognized.shapeItem) }.copy(
+                it.withUpdatedBoard { b ->
+                    b.copy(
+                        shapes = b.shapes + recognized.shapeItem,
+                        auditLogs = (b.auditLogs + log).takeLast(100)
+                    )
+                }.copy(
                     activeStroke = null,
                     shapeRecognitionProposal = null
                 )
             }
         } else {
+            val log = AuditLogEntry(
+                actionName = "STROKE_DRAWN",
+                details = "Trazo ${newStroke.brushType.displayName} (${newStroke.points.size} pts)",
+                category = "INK"
+            )
             _uiState.update {
-                it.withUpdatedBoard { b -> b.copy(strokes = b.strokes + newStroke) }.copy(
+                it.withUpdatedBoard { b ->
+                    b.copy(
+                        strokes = b.strokes + newStroke,
+                        auditLogs = (b.auditLogs + log).takeLast(100)
+                    )
+                }.copy(
                     activeStroke = null,
                     shapeRecognitionProposal = null
                 )
@@ -2395,12 +2416,30 @@ class WhiteboardViewModel(
     }
 
     fun setGridType(grid: CanvasGridType) {
-        _uiState.update { it.withUpdatedBoard { b -> b.copy(gridType = grid) } }
+        val log = AuditLogEntry(
+            actionName = "GRID_CHANGED",
+            details = "Cuadrícula cambiada a ${grid.title}",
+            category = "CANVAS"
+        )
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(gridType = grid, auditLogs = (b.auditLogs + log).takeLast(100))
+            }
+        }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun setColorTheme(theme: CanvasColorTheme) {
-        _uiState.update { it.withUpdatedBoard { b -> b.copy(colorTheme = theme) } }
+        val log = AuditLogEntry(
+            actionName = "THEME_CHANGED",
+            details = "Color de lienzo cambiado a ${theme.title}",
+            category = "CANVAS"
+        )
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(colorTheme = theme, auditLogs = (b.auditLogs + log).takeLast(100))
+            }
+        }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
@@ -2410,13 +2449,19 @@ class WhiteboardViewModel(
 
     fun clearBoard() {
         saveUndoSnapshot()
+        val log = AuditLogEntry(
+            actionName = "BOARD_CLEARED",
+            details = "Lienzo limpiado (elementos eliminados)",
+            category = "BOARD"
+        )
         _uiState.update {
             it.withUpdatedBoard { b ->
                 b.copy(
                     strokes = emptyList(),
                     stickyNotes = emptyList(),
                     shapes = emptyList(),
-                    textItems = emptyList()
+                    textItems = emptyList(),
+                    auditLogs = (b.auditLogs + log).takeLast(100)
                 )
             }.copy(
                 selectedStrokeId = null,
@@ -2428,6 +2473,168 @@ class WhiteboardViewModel(
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
+    }
+
+    fun logAudit(actionName: String, details: String, category: String = "CANVAS") {
+        val entry = AuditLogEntry(
+            actionName = actionName,
+            details = details,
+            category = category
+        )
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val updatedLogs = (b.auditLogs + entry).takeLast(100)
+                b.copy(auditLogs = updatedLogs)
+            }
+        }
+    }
+
+    fun clearAuditLogs() {
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(auditLogs = emptyList())
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun insertShapeAtCenter(
+        shapeType: ShapeType,
+        isFilled: Boolean = false,
+        strokeColor: String = "#2563EB",
+        fillColor: String = "#DBEAFE"
+    ) {
+        val camera = _cameraState.value
+        val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
+        val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
+
+        val width = if (shapeType.isLineLike) 240f else 220f
+        val height = if (shapeType == ShapeType.CIRCLE) 220f else if (shapeType.isLineLike) 80f else 150f
+
+        val x = worldCenterX - width / 2f
+        val y = worldCenterY - height / 2f
+
+        val vertices = if (shapeType.isLineLike) {
+            listOf(StrokePoint(x, y + height / 2f), StrokePoint(x + width, y + height / 2f))
+        } else {
+            emptyList()
+        }
+
+        val capStyle = when (shapeType) {
+            ShapeType.ARROW -> LineCapStyle.END_ARROW
+            ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
+            else -> LineCapStyle.NONE
+        }
+
+        saveUndoSnapshot()
+        val shape = ShapeItem(
+            shapeType = shapeType,
+            x = x,
+            y = y,
+            width = width,
+            height = height,
+            strokeColorHex = strokeColor,
+            fillColorHex = fillColor,
+            strokeWidth = _uiState.value.penWidth.coerceIn(2f, 16f),
+            isFilled = isFilled && !shapeType.isLineLike,
+            capStyle = capStyle,
+            vertices = vertices,
+            brushType = _uiState.value.pendingBrushType
+        )
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val log = AuditLogEntry(
+                    actionName = "SHAPE_INSERTED",
+                    details = "Forma ${shapeType.displayName} insertada en centro",
+                    category = "SHAPES"
+                )
+                b.copy(shapes = b.shapes + shape, auditLogs = (b.auditLogs + log).takeLast(100))
+            }.copy(
+                selectedShapeId = shape.id,
+                pendingShapeType = null
+            )
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun insertTextAtCenter(
+        initialText: String = "Texto",
+        colorHex: String = "#0F172A",
+        fontSize: Float = 22f
+    ) {
+        val camera = _cameraState.value
+        val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
+        val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
+
+        val item = TextItem(
+            text = initialText,
+            x = worldCenterX - 95f,
+            y = worldCenterY - 24f,
+            fontSize = fontSize,
+            colorHex = colorHex,
+            width = 190f
+        )
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val log = AuditLogEntry(
+                    actionName = "TEXT_INSERTED",
+                    details = "Elemento de texto flotante insertado",
+                    category = "TEXT"
+                )
+                b.copy(textItems = b.textItems + item, auditLogs = (b.auditLogs + log).takeLast(100))
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun deleteTextItem(id: String) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val log = AuditLogEntry(
+                    actionName = "TEXT_DELETED",
+                    details = "Elemento de texto eliminado",
+                    category = "TEXT"
+                )
+                b.copy(
+                    textItems = b.textItems.filter { it.id != id },
+                    auditLogs = (b.auditLogs + log).takeLast(100)
+                )
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun insertStickyNoteAtCenter(
+        colorHex: String = "#FFF275"
+    ) {
+        val camera = _cameraState.value
+        val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
+        val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
+
+        saveUndoSnapshot()
+        val note = StickyNote(
+            title = "",
+            text = "",
+            x = worldCenterX - 110f,
+            y = worldCenterY - 100f,
+            colorHex = colorHex
+        )
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val log = AuditLogEntry(
+                    actionName = "NOTE_CREATED",
+                    details = "Nota adhesiva creada en centro ($colorHex)",
+                    category = "NOTES"
+                )
+                b.copy(stickyNotes = b.stickyNotes + note, auditLogs = (b.auditLogs + log).takeLast(100))
+            }.copy(
+                selectedNoteId = note.id,
+                pendingStickyNoteColor = null
+            )
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     fun createSnapshot(versionName: String, description: String) {
@@ -2443,9 +2650,17 @@ class WhiteboardViewModel(
             shapeCount = board.shapes.size,
             serializedData = serialized
         )
+        val log = AuditLogEntry(
+            actionName = "SNAPSHOT_SAVED",
+            details = "Snapshot $cleanName creado (${board.strokes.size} trazos, ${board.shapes.size} formas, ${board.stickyNotes.size} notas)",
+            category = "VERSION"
+        )
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(snapshots = b.snapshots + snapshot)
+                b.copy(
+                    snapshots = b.snapshots + snapshot,
+                    auditLogs = (b.auditLogs + log).takeLast(100)
+                )
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
@@ -2456,8 +2671,19 @@ class WhiteboardViewModel(
         val restored = BoardSnapshotSerializer.deserializeIntoBoard(snapshot.serializedData, current)
             ?: return false
         saveUndoSnapshot()
+        val log = AuditLogEntry(
+            actionName = "SNAPSHOT_RESTORED",
+            details = "Restaurada versión ${snapshot.versionName}",
+            category = "VERSION"
+        )
         _uiState.update {
-            it.withUpdatedBoard { restored }.copy(
+            it.withUpdatedBoard { b ->
+                val updatedLogs = (restored.auditLogs + log).takeLast(100)
+                restored.copy(
+                    snapshots = b.snapshots,
+                    auditLogs = updatedLogs
+                )
+            }.copy(
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
@@ -2471,9 +2697,17 @@ class WhiteboardViewModel(
     }
 
     fun deleteSnapshot(versionId: String) {
+        val log = AuditLogEntry(
+            actionName = "SNAPSHOT_DELETED",
+            details = "Snapshot eliminado",
+            category = "VERSION"
+        )
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(snapshots = b.snapshots.filter { s -> s.versionId != versionId })
+                b.copy(
+                    snapshots = b.snapshots.filter { s -> s.versionId != versionId },
+                    auditLogs = (b.auditLogs + log).takeLast(100)
+                )
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)

@@ -132,6 +132,8 @@ fun WhiteboardCanvasScreen(
     var showBoardsManager by remember { mutableStateOf(false) }
     var showExportModal by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
+    var showSnapshotsModal by remember { mutableStateOf(false) }
+    var showShapePickerModal by remember { mutableStateOf(false) }
     var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
     var editingLabelText by remember { mutableStateOf("") }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
@@ -905,22 +907,39 @@ fun WhiteboardCanvasScreen(
                         .border(1.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
                         .testTag("editable_text_item_${tItem.id}")
                 ) {
-                    BasicTextField(
-                        value = tItem.text,
-                        onValueChange = { viewModel.updateTextItem(tItem.id, it) },
-                        enabled = !isPanOnlyMode,
-                        readOnly = isPanOnlyMode,
-                        textStyle = TextStyle(
-                            color = tColor,
-                            fontSize = fontSizeSp,
-                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
-                        ),
-                        cursorBrush = SolidColor(tColor),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .testTag("editable_text_input_${tItem.id}")
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    ) {
+                        BasicTextField(
+                            value = tItem.text,
+                            onValueChange = { viewModel.updateTextItem(tItem.id, it) },
+                            enabled = !isPanOnlyMode,
+                            readOnly = isPanOnlyMode,
+                            textStyle = TextStyle(
+                                color = tColor,
+                                fontSize = fontSizeSp,
+                                fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
+                            ),
+                            cursorBrush = SolidColor(tColor),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .testTag("editable_text_input_${tItem.id}")
+                        )
+                        if (!isPanOnlyMode) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Eliminar texto",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clip(CircleShape)
+                                    .clickable { viewModel.deleteTextItem(tItem.id) }
+                                    .testTag("btn_delete_text_${tItem.id}")
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1058,6 +1077,7 @@ fun WhiteboardCanvasScreen(
                 newTitleInput = state.board.title
                 showRenameDialog = true
             },
+            onOpenSnapshotsAndAudit = { showSnapshotsModal = true },
             onSwitchToNotes = onSwitchToNotes,
             modifier = Modifier.align(Alignment.TopCenter)
         )
@@ -1143,8 +1163,9 @@ fun WhiteboardCanvasScreen(
                     onUpdatePenWidth = { viewModel.setPenWidth(it) },
                     onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
                     onToggleRuler = { viewModel.toggleRuler() },
-                    onAddStickyNote = { viewModel.requestAddStickyNote("#FFF275") },
-                    onAddText = { viewModel.requestAddStickyNote("#FFF275") },
+                    onAddStickyNote = { color -> viewModel.insertStickyNoteAtCenter(color) },
+                    onAddText = { viewModel.insertTextAtCenter() },
+                    onOpenShapePicker = { showShapePickerModal = true },
                     onClearBoard = { viewModel.clearBoard() },
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -1261,6 +1282,52 @@ fun WhiteboardCanvasScreen(
             ExportBoardModal(
                 board = state.board,
                 onDismiss = { showExportModal = false }
+            )
+        }
+
+        if (showSnapshotsModal) {
+            SnapshotsModal(
+                board = state.board,
+                onCreateSnapshot = { versionName, description ->
+                    viewModel.createSnapshot(versionName, description)
+                },
+                onRestoreSnapshot = { snapshot ->
+                    val ok = viewModel.restoreSnapshot(snapshot)
+                    if (!ok) {
+                        Toast.makeText(context, "No se pudo restaurar el snapshot", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDeleteSnapshot = { versionId ->
+                    viewModel.deleteSnapshot(versionId)
+                },
+                onClearAuditLogs = {
+                    viewModel.clearAuditLogs()
+                },
+                onDismiss = { showSnapshotsModal = false }
+            )
+        }
+
+        if (showShapePickerModal) {
+            ShapePickerModal(
+                onInsertCenter = { shapeType, isFilled, strokeColor, fillColor ->
+                    viewModel.insertShapeAtCenter(
+                        shapeType = shapeType,
+                        isFilled = isFilled,
+                        strokeColor = strokeColor,
+                        fillColor = fillColor
+                    )
+                },
+                onStartDragPlacement = { shapeType, isFilled, strokeColor, fillColor ->
+                    viewModel.requestAddCustomShape(
+                        type = shapeType,
+                        isFilled = isFilled,
+                        strokeColor = strokeColor,
+                        fillColor = fillColor,
+                        style = state.pendingStrokeStyle,
+                        capStyle = state.pendingCapStyle
+                    )
+                },
+                onDismiss = { showShapePickerModal = false }
             )
         }
 
@@ -1392,6 +1459,7 @@ private fun CameraAwareWhiteboardTopBar(
     onClearBoard: () -> Unit,
     onExportBoard: () -> Unit,
     onRenameBoard: () -> Unit,
+    onOpenSnapshotsAndAudit: () -> Unit,
     onSwitchToNotes: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
@@ -1419,6 +1487,7 @@ private fun CameraAwareWhiteboardTopBar(
             onClearBoard = onClearBoard,
             onExportBoard = onExportBoard,
             onRenameBoard = onRenameBoard,
+            onOpenSnapshotsAndAudit = onOpenSnapshotsAndAudit,
             onBackToHome = { viewModel.closeBoardToHome() },
             onSwitchToNotes = onSwitchToNotes,
             modifier = modifier
