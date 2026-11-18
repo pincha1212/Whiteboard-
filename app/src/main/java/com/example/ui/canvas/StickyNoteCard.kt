@@ -86,6 +86,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
+import kotlin.math.round
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -749,12 +750,21 @@ fun StickyNoteView(
             )
 
             // 3. Rotation handle (48x48.dp touch target) positioned cleanly inside Outer Box top gutter (y = 0..48.dp).
+            val rotationHandleScale by animateFloatAsState(
+                targetValue = if (isRotating) 1.2f else 1f,
+                label = "sticky-note-rotation-handle-scale"
+            )
             Box(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .offset(y = 0.dp)
                     .zIndex(2f)
                     .size(handleTargetDp)
+                    .graphicsLayer {
+                        val inverseZoom = 1f / cameraState.value.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
+                        scaleX = inverseZoom
+                        scaleY = inverseZoom
+                    }
                     .onGloballyPositioned { handleCoords = it }
                     .pointerInput(note.id, note.isLocked) {
                         awaitEachGesture {
@@ -762,57 +772,59 @@ fun StickyNoteView(
                             down.consume()
                             currentOnSelect()
                             var beganRotation = false
+                            var lastSnappedAngle: Float? = null
 
                             val currentCamera = cameraState.value
                             val fallbackCenterX = currentCamera.worldToScreenX(note.x + note.width / 2f)
                             val fallbackCenterY = currentCamera.worldToScreenY(note.y + note.height / 2f)
+                            var previousRoot = handleCoords?.localToRoot(down.position) ?: down.position
 
                             do {
                                 val event = awaitPointerEvent()
-                                var activePointer: PointerInputChange? = null
-                                var hasMultipleActivePointers = false
-                                for (pointerChange in event.changes) {
-                                    if (pointerChange.pressed) {
-                                        if (activePointer != null) {
-                                            hasMultipleActivePointers = true
-                                            break
-                                        }
-                                        activePointer = pointerChange
-                                    }
-                                }
-                                if (hasMultipleActivePointers || event.changes.any { it.isConsumed }) {
-                                    break
-                                }
-                                val change = activePointer ?: break
-                                val moveDelta = change.positionChange()
-                                if (moveDelta.x != 0f || moveDelta.y != 0f) {
-                                    if (!beganRotation) {
+                                val change = event.changes.firstOrNull { it.id == down.id && it.pressed } ?: break
+                                if (event.changes.any { it.isConsumed } && !beganRotation) break
+                                val pointerRoot = handleCoords?.localToRoot(change.position) ?: change.position
+                                val delta = pointerRoot - previousRoot
+                                if (delta != Offset.Zero) {
+                                    if (!beganRotation && !note.isLocked) {
                                         beganRotation = true
                                         isRotating = true
                                         currentOnBeginTransform()
                                     }
-                                    val pointerRoot = handleCoords?.localToRoot(change.position)
-                                    val pX = pointerRoot?.x ?: (fallbackCenterX + change.position.x)
-                                    val pY = pointerRoot?.y ?: (fallbackCenterY + change.position.y)
-
-                                    val cX = if (cardCenterRoot != Offset.Zero) cardCenterRoot.x else fallbackCenterX
-                                    val cY = if (cardCenterRoot != Offset.Zero) cardCenterRoot.y else fallbackCenterY
-
-                                    val targetDegrees = StickyNoteGeometry.calculateRotationDegrees(
-                                        centerX = cX,
-                                        centerY = cY,
-                                        pointerX = pX,
-                                        pointerY = pY,
-                                        snapThresholdDegrees = 3f
-                                    )
-                                    currentOnRotate(targetDegrees)
-                                    change.consume()
+                                    if (beganRotation) {
+                                        val pX = pointerRoot.x
+                                        val pY = pointerRoot.y
+                                        val cX = if (cardCenterRoot != Offset.Zero) cardCenterRoot.x else fallbackCenterX
+                                        val cY = if (cardCenterRoot != Offset.Zero) cardCenterRoot.y else fallbackCenterY
+                                        val targetDegrees = StickyNoteGeometry.calculateRotationDegrees(
+                                            centerX = cX,
+                                            centerY = cY,
+                                            pointerX = pX,
+                                            pointerY = pY,
+                                            snapThresholdDegrees = 3f
+                                        )
+                                        val normalized = ((targetDegrees % 360f) + 360f) % 360f
+                                        val nearest = (round(normalized / 45f) * 45f) % 360f
+                                        val distance = minOf(
+                                            kotlin.math.abs(normalized - nearest),
+                                            360f - kotlin.math.abs(normalized - nearest)
+                                        )
+                                        if (distance <= 3f) {
+                                            if (lastSnappedAngle != nearest) {
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                            lastSnappedAngle = nearest
+                                        } else {
+                                            lastSnappedAngle = null
+                                        }
+                                        currentOnRotate(targetDegrees)
+                                        change.consume()
+                                    }
                                 }
+                                previousRoot = pointerRoot
                             } while (event.changes.any { it.pressed })
                             isRotating = false
-                            if (beganRotation) {
-                                currentOnEndTransform()
-                            }
+                            if (beganRotation) currentOnEndTransform()
                         }
                     }
                     .semantics {
@@ -823,20 +835,16 @@ fun StickyNoteView(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(22.dp)
-                        .shadow(4.dp, CircleShape)
+                        .graphicsLayer {
+                            scaleX = rotationHandleScale
+                            scaleY = rotationHandleScale
+                        }
+                        .size(10.dp)
+                        .shadow(2.dp, CircleShape)
                         .clip(CircleShape)
                         .background(Color.White)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.RotateRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
+                        .border(1.25.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                )
             }
 
             if (isRotating) {
