@@ -52,6 +52,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -199,6 +201,8 @@ fun StickyNoteView(
     onTransformGesture: (TransformPoint, TransformPoint, Float, Float) -> Unit = { _, _, _, _ -> },
     isSelected: Boolean = false,
     isPanOnlyMode: Boolean = false,
+    stylusModeEnabled: Boolean = false,
+    onPanViewport: (Float, Float) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -212,6 +216,7 @@ fun StickyNoteView(
     val currentOnResizeHandle by rememberUpdatedState(onResizeHandle)
     val currentOnRotate by rememberUpdatedState(onRotate)
     val currentOnTransformGesture by rememberUpdatedState(onTransformGesture)
+    val currentOnPanViewport by rememberUpdatedState(onPanViewport)
 
     val noteBg = try {
         Color(android.graphics.Color.parseColor(note.colorHex))
@@ -283,8 +288,39 @@ fun StickyNoteView(
     val hapticFeedback = LocalHapticFeedback.current
     var isRotating by remember { mutableStateOf(false) }
 
+    val stylusTouchPanModifier = if (stylusModeEnabled) {
+        Modifier.pointerInput(note.id, stylusModeEnabled) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val isStylusInput = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+                if (!isStylusInput) {
+                    var lastPosition = down.position
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id }
+                        if (change != null && change.pressed) {
+                            val delta = change.position - lastPosition
+                            if (delta.x != 0f || delta.y != 0f) {
+                                currentOnPanViewport(delta.x, delta.y)
+                            }
+                            lastPosition = change.position
+                            change.consume()
+                        }
+                    } while (event.changes.any { it.id == down.id && it.pressed })
+                } else {
+                    do {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                    } while (event.changes.any { it.id == down.id && it.pressed })
+                }
+            }
+        }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
+            .then(stylusTouchPanModifier)
             .zIndex(if (isSelected) 10f else 0f)
             .offset {
                 // The layout position is outside the graphics layer, so graphicsLayer.scale
