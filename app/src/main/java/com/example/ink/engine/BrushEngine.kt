@@ -92,19 +92,7 @@ internal fun computeNodeBounds(nodes: List<BrushNode>, padding: Float): RectF {
 }
 
 internal fun computeNodeWidthMultiplier(node: BrushNode, style: StrokeStyle): Float {
-    return when (style) {
-        StrokeStyle.TAPERED -> {
-            if (node.isClosed) {
-                (0.62f + 0.45f * sin(node.progress * 2f * PI.toFloat()) + 0.08f * sin(node.progress * 6f * PI.toFloat()))
-                    .coerceIn(0.24f, 1.18f)
-            } else {
-                val arch = sin(node.progress * PI.toFloat()).coerceIn(0f, 1f)
-                val speedFactor = (1.12f - 0.32f * node.velocity).coerceIn(0.7f, 1.15f)
-                (0.24f + 0.84f * arch * speedFactor).coerceIn(0.20f, 1.20f)
-            }
-        }
-        else -> 1f
-    }
+    return 1f
 }
 
 internal fun buildDynamicShaderIfNeeded(nodes: List<BrushNode>, config: BrushConfig): Shader? {
