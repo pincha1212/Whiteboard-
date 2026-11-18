@@ -106,84 +106,6 @@ val ShapeType.isLineLike: Boolean
     get() = this == ShapeType.LINE || this == ShapeType.ARROW || this == ShapeType.DOUBLE_ARROW
 
 
-enum class TemplateCategory(val title: String) {
-    RECOMMENDED("Recomendado"),
-    MY_TEMPLATES("Mis plantillas"),
-    BRAINSTORMING("Lluvia de ideas"),
-    STRATEGY("Estrategia"),
-    LEARNING("Aprendizaje"),
-    PROCESS("Procesos y flujos"),
-    PLANNING("Planificación"),
-    PROBLEM_SOLVING("Solución de problemas")
-}
-
-enum class TemplateType(
-    val title: String,
-    val iconName: String,
-    val description: String,
-    val category: TemplateCategory,
-    val isRecommended: Boolean = true,
-    val badgeText: String? = null
-) {
-    BRAINSTORM_CLUSTER(
-        title = "Lluvia de Ideas (Cluster)",
-        iconName = "lightbulb",
-        description = "Nodo central editable, conectores y 5 notas radiales independientes",
-        category = TemplateCategory.BRAINSTORMING,
-        isRecommended = true,
-        badgeText = "Ligera"
-    ),
-    IMPACT_EFFORT(
-        title = "Matriz Impacto / Esfuerzo",
-        iconName = "grid_view",
-        description = "Ejes vectoriales 2×2, encabezados y 4 notas editables",
-        category = TemplateCategory.STRATEGY,
-        isRecommended = true
-    ),
-    CONCEPT_MAP(
-        title = "Mapa Mental / Conceptual",
-        iconName = "account_tree",
-        description = "Nodos jerárquicos, flechas conectoras y notas editables",
-        category = TemplateCategory.LEARNING,
-        isRecommended = true
-    ),
-    USER_FLOW(
-        title = "Flujo de Proceso",
-        iconName = "schema",
-        description = "Nodos de inicio, acción, decisión y conectores editables",
-        category = TemplateCategory.PROCESS,
-        isRecommended = true
-    ),
-    RETROSPECTIVE(
-        title = "Retrospectiva de Equipo",
-        iconName = "history_edu",
-        description = "3 columnas con divisores y notas adhesivas independientes",
-        category = TemplateCategory.PLANNING,
-        isRecommended = true
-    ),
-    KANBAN(
-        title = "Tablero Kanban",
-        iconName = "view_kanban",
-        description = "Columnas Por hacer, Haciendo y Hecho con tarjetas movibles",
-        category = TemplateCategory.PLANNING,
-        isRecommended = true
-    ),
-    ISHIKAWA(
-        title = "Diagrama de Ishikawa",
-        iconName = "polyline",
-        description = "Espina central, ramas de causa y notas editables",
-        category = TemplateCategory.PROBLEM_SOLVING,
-        isRecommended = true
-    ),
-    SWOT(
-        title = "Análisis DAFO / FODA",
-        iconName = "grid_view",
-        description = "Cuadrantes de Fortalezas, Oportunidades, Debilidades y Amenazas",
-        category = TemplateCategory.STRATEGY,
-        isRecommended = false
-    )
-}
-
 data class StrokePoint(
     val x: Float,
     val y: Float
@@ -378,18 +300,6 @@ data class BoardVersionSnapshot(
     val strokeCount: Int,
     val noteCount: Int,
     val shapeCount: Int,
-    val serializedData: String
-)
-
-data class CustomBoardTemplate(
-    val id: String = UUID.randomUUID().toString(),
-    val title: String,
-    val description: String = "",
-    val createdAt: Long = System.currentTimeMillis(),
-    val strokeCount: Int = 0,
-    val shapeCount: Int = 0,
-    val noteCount: Int = 0,
-    val textCount: Int = 0,
     val serializedData: String
 )
 
