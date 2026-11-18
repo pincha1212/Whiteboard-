@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.BuildConfig
 import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
 import com.example.model.WhiteboardBoard
@@ -80,8 +81,11 @@ fun SnapshotsModal(
     onDismiss: () -> Unit
 ) {
     var currentTab by remember { mutableStateOf(AuditModalTab.SNAPSHOTS) }
-    val suggestedVersion = remember(board.snapshots.size) {
-        "v2.4.${board.snapshots.size + 1}"
+    val versionPrefix = remember {
+        BuildConfig.VERSION_NAME.substringBeforeLast('.').ifBlank { BuildConfig.VERSION_NAME }
+    }
+    val suggestedVersion = remember(board.snapshots.size, versionPrefix) {
+        "v$versionPrefix.${board.snapshots.size + 1}"
     }
     var versionName by remember(suggestedVersion) { mutableStateOf(suggestedVersion) }
     var description by remember { mutableStateOf("") }
@@ -130,7 +134,7 @@ fun SnapshotsModal(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${board.title} · v2.4.0 (Build 10)",
+                                text = "${board.title} · v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -673,7 +677,7 @@ private fun SystemInfoTabContent(board: WhiteboardBoard) {
                 Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "Whiteboard v2.4.0 (Build 10)",
+                        text = "Whiteboard v${BuildConfig.VERSION_NAME} (Build ${BuildConfig.VERSION_CODE})",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold
                     )

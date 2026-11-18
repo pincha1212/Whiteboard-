@@ -14,8 +14,10 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -90,6 +92,7 @@ import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
 import com.example.model.ToolType
 import com.example.model.WhiteboardStroke
+import com.example.ui.toolbar.DockLayoutMode
 import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
@@ -1082,96 +1085,44 @@ fun WhiteboardCanvasScreen(
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
-        // Bottom Dock: Versatile Precision Editor when an item is selected, otherwise Pen Dock
+        // Adaptive Dock Overlay: Selection Inspector when selected, otherwise Adaptive WhiteboardPenDock
         if (!state.isZenMode) {
             val totalSelectedCount = state.selectedStrokeIds.size + state.selectedShapeIds.size + state.selectedNoteIds.size
             val hasSelection = totalSelectedCount > 0 || state.selectedShapeId != null || state.selectedStrokeId != null || state.selectedNoteId != null
-            val selectedShape = state.board.shapes.find { it.id == state.selectedShapeId }
-            val selectedStroke = state.board.strokes.find { it.id == state.selectedStrokeId }
-            val selectedNote = state.board.stickyNotes.find { it.id == state.selectedNoteId }
-
-            if (hasSelection) {
-                SelectionEditDock(
-                    selectedShape = selectedShape,
-                    selectedStroke = selectedStroke,
-                    selectedNote = selectedNote,
-                    totalSelectedCount = totalSelectedCount.coerceAtLeast(1),
-                    onDeleteAll = { viewModel.deleteCurrentSelection() },
-                    onDuplicateAll = { viewModel.duplicateCurrentSelection() },
-                    onScaleAll = { factor -> viewModel.scaleCurrentSelection(factor) },
-                    onRotateAll = { delta -> viewModel.rotateCurrentSelection(delta) },
-                    onUpdateAllColor = { col -> viewModel.updateCurrentSelectionColor(col) },
-                    onUpdateShapeColor = { viewModel.updateSelectedShape(strokeColor = it) },
-                    onUpdateShapeFillColor = { viewModel.updateSelectedShape(fillColor = it, isFilled = true) },
-                    onToggleShapeFilled = {
-                        val cur = selectedShape?.isFilled ?: false
-                        viewModel.updateSelectedShape(isFilled = !cur)
-                    },
-                    onUpdateShapeWidth = { viewModel.updateSelectedShape(width = it) },
-                    onUpdateShapeStyle = { viewModel.updateSelectedShape(style = it) },
-                    onScaleShape = { viewModel.scaleSelectedShape(it) },
-                    onRotateShape = { viewModel.rotateSelectedShape(it) },
-                    onResetShapeRotation = { viewModel.resetSelectedShapeRotation() },
-                    onBringShapeToFront = { viewModel.bringSelectedShapeToFront() },
-                    onSendShapeToBack = { viewModel.sendSelectedShapeToBack() },
-                    onDuplicateShape = { viewModel.duplicateSelectedShape() },
-                    onDeleteShape = { viewModel.deleteSelectedShape() },
-                    onUpdateStrokeColor = { viewModel.updateSelectedStrokeColor(it) },
-                    onUpdateStrokeWidth = { viewModel.updateSelectedStrokeWidth(it) },
-                    onUpdateStrokeStyle = { viewModel.updateSelectedStrokeStyle(it) },
-                    onScaleStroke = { viewModel.scaleSelectedStroke(it) },
-                    onRotateStroke = { viewModel.rotateSelectedStroke(it) },
-                    onConvertStrokeToShape = { viewModel.convertSelectedStrokeToShape() },
-                    onDuplicateStroke = { viewModel.duplicateSelectedStroke() },
-                    onDeleteStroke = { viewModel.deleteSelectedStroke() },
-                    onUpdateNoteColor = { hex ->
-                        selectedNote?.let { viewModel.updateStickyNoteColor(it.id, hex) }
-                    },
-                    onToggleNotePin = {
-                        selectedNote?.let { viewModel.toggleStickyNotePin(it.id) }
-                    },
-                    onToggleNoteAspectRatioLock = {
-                        selectedNote?.let { viewModel.toggleStickyNoteAspectRatioLock(it.id) }
-                    },
-                    onDeleteNote = {
-                        val target = selectedNote
-                        if (target != null && (target.text.isNotBlank() || !target.title.isNullOrBlank())) {
-                            notePendingRemoval = target
-                        } else {
-                            viewModel.deleteSelectedNote()
-                        }
-                    },
-                    onDone = { viewModel.clearSelection() },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                )
-            } else {
-                WhiteboardPenDock(
-                    currentTool = state.currentTool,
-                    currentPenColor = state.penColorHex,
-                    currentPenWidth = state.penWidth,
-                    isRainbowPen = state.isRainbowPen,
-                    autoShapeRecognition = state.autoShapeRecognition,
-                    isRulerActive = state.isRulerActive,
-                    pendingShapeType = state.pendingShapeType,
-                    onSelectTool = {
-                        viewModel.cancelPendingPlacement()
-                        viewModel.setTool(it)
-                    },
-                    onUpdatePenColor = { col, isRainbow -> viewModel.setPenColor(col, isRainbow) },
-                    onUpdatePenWidth = { viewModel.setPenWidth(it) },
-                    onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
-                    onToggleRuler = { viewModel.toggleRuler() },
-                    onAddStickyNote = { color -> viewModel.insertStickyNoteAtCenter(color) },
-                    onAddText = { viewModel.insertTextAtCenter() },
-                    onOpenShapePicker = { showShapePickerModal = true },
-                    onClearBoard = { viewModel.clearBoard() },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                )
+            val selectedShape = remember(state.board.shapes, state.selectedShapeId) {
+                state.selectedShapeId?.let { id -> state.board.shapes.find { it.id == id } }
             }
+            val selectedStroke = remember(state.board.strokes, state.selectedStrokeId) {
+                state.selectedStrokeId?.let { id -> state.board.strokes.find { it.id == id } }
+            }
+            val selectedNote = remember(state.board.stickyNotes, state.selectedNoteId) {
+                state.selectedNoteId?.let { id -> state.board.stickyNotes.find { it.id == id } }
+            }
+
+            CanvasDockOverlay(
+                viewModel = viewModel,
+                hasSelection = hasSelection,
+                selectedShape = selectedShape,
+                selectedStroke = selectedStroke,
+                selectedNote = selectedNote,
+                totalSelectedCount = totalSelectedCount.coerceAtLeast(1),
+                currentTool = state.currentTool,
+                penColorHex = state.penColorHex,
+                penWidth = state.penWidth,
+                isRainbowPen = state.isRainbowPen,
+                autoShapeRecognition = state.autoShapeRecognition,
+                isRulerActive = state.isRulerActive,
+                pendingShapeType = state.pendingShapeType,
+                pendingStickyNoteColor = state.pendingStickyNoteColor,
+                onRequestDeleteNote = { target ->
+                    if (target.text.isNotBlank() || !target.title.isNullOrBlank()) {
+                        notePendingRemoval = target
+                    } else {
+                        viewModel.deleteSelectedNote()
+                    }
+                },
+                onOpenShapePicker = { showShapePickerModal = true }
+            )
         }
 
         // Pending Placement Banner
@@ -1183,7 +1134,8 @@ fun WhiteboardCanvasScreen(
                 shadowElevation = 3.dp,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 74.dp)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp, start = 16.dp, end = 16.dp)
                     .testTag("pending_placement_banner")
             ) {
                 Row(
@@ -1492,6 +1444,156 @@ private fun CameraAwareWhiteboardTopBar(
             onSwitchToNotes = onSwitchToNotes,
             modifier = modifier
         )
+    }
+}
+
+@Composable
+private fun CanvasDockOverlay(
+    viewModel: WhiteboardViewModel,
+    hasSelection: Boolean,
+    selectedShape: ShapeItem?,
+    selectedStroke: WhiteboardStroke?,
+    selectedNote: StickyNote?,
+    totalSelectedCount: Int,
+    currentTool: ToolType,
+    penColorHex: String,
+    penWidth: Float,
+    isRainbowPen: Boolean,
+    autoShapeRecognition: Boolean,
+    isRulerActive: Boolean,
+    pendingShapeType: ShapeType?,
+    pendingStickyNoteColor: String?,
+    onRequestDeleteNote: (StickyNote) -> Unit,
+    onOpenShapePicker: () -> Unit
+) {
+    val onSelectTool = remember(viewModel) {
+        { tool: ToolType ->
+            viewModel.cancelPendingPlacement()
+            viewModel.setTool(tool)
+        }
+    }
+    val onUpdatePenColor = remember(viewModel) {
+        { col: String, isRainbow: Boolean -> viewModel.setPenColor(col, isRainbow) }
+    }
+    val onUpdatePenWidth = remember(viewModel) {
+        { w: Float -> viewModel.setPenWidth(w) }
+    }
+    val onToggleAutoShape = remember(viewModel) {
+        { viewModel.toggleAutoShapeRecognition() }
+    }
+    val onToggleRuler = remember(viewModel) {
+        { viewModel.toggleRuler() }
+    }
+    val onAddStickyNote = remember(viewModel) {
+        { color: String -> viewModel.insertStickyNoteAtCenter(color) }
+    }
+    val onRequestPlaceStickyNote = remember(viewModel) {
+        { color: String -> viewModel.requestAddStickyNote(color) }
+    }
+    val onAddText = remember(viewModel) {
+        { viewModel.insertTextAtCenter() }
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val layoutMode = when {
+            maxHeight < 500.dp -> DockLayoutMode.COMPACT_LANDSCAPE_RAIL
+            maxWidth >= 740.dp -> DockLayoutMode.EXPANDED_TABLET
+            else -> DockLayoutMode.COMPACT_PORTRAIT
+        }
+
+        if (hasSelection) {
+            SelectionEditDock(
+                selectedShape = selectedShape,
+                selectedStroke = selectedStroke,
+                selectedNote = selectedNote,
+                totalSelectedCount = totalSelectedCount,
+                onDeleteAll = { viewModel.deleteCurrentSelection() },
+                onDuplicateAll = { viewModel.duplicateCurrentSelection() },
+                onScaleAll = { factor -> viewModel.scaleCurrentSelection(factor) },
+                onRotateAll = { delta -> viewModel.rotateCurrentSelection(delta) },
+                onUpdateAllColor = { col -> viewModel.updateCurrentSelectionColor(col) },
+                onUpdateShapeColor = { viewModel.updateSelectedShape(strokeColor = it) },
+                onUpdateShapeFillColor = { viewModel.updateSelectedShape(fillColor = it, isFilled = true) },
+                onToggleShapeFilled = {
+                    val cur = selectedShape?.isFilled ?: false
+                    viewModel.updateSelectedShape(isFilled = !cur)
+                },
+                onUpdateShapeWidth = { viewModel.updateSelectedShape(width = it) },
+                onUpdateShapeStyle = { viewModel.updateSelectedShape(style = it) },
+                onScaleShape = { viewModel.scaleSelectedShape(it) },
+                onRotateShape = { viewModel.rotateSelectedShape(it) },
+                onResetShapeRotation = { viewModel.resetSelectedShapeRotation() },
+                onBringShapeToFront = { viewModel.bringSelectedShapeToFront() },
+                onSendShapeToBack = { viewModel.sendSelectedShapeToBack() },
+                onDuplicateShape = { viewModel.duplicateSelectedShape() },
+                onDeleteShape = { viewModel.deleteSelectedShape() },
+                onUpdateStrokeColor = { viewModel.updateSelectedStrokeColor(it) },
+                onUpdateStrokeWidth = { viewModel.updateSelectedStrokeWidth(it) },
+                onUpdateStrokeStyle = { viewModel.updateSelectedStrokeStyle(it) },
+                onScaleStroke = { viewModel.scaleSelectedStroke(it) },
+                onRotateStroke = { viewModel.rotateSelectedStroke(it) },
+                onConvertStrokeToShape = { viewModel.convertSelectedStrokeToShape() },
+                onDuplicateStroke = { viewModel.duplicateSelectedStroke() },
+                onDeleteStroke = { viewModel.deleteSelectedStroke() },
+                onUpdateNoteColor = { hex ->
+                    selectedNote?.let { viewModel.updateStickyNoteColor(it.id, hex) }
+                },
+                onToggleNotePin = {
+                    selectedNote?.let { viewModel.toggleStickyNotePin(it.id) }
+                },
+                onToggleNoteAspectRatioLock = {
+                    selectedNote?.let { viewModel.toggleStickyNoteAspectRatioLock(it.id) }
+                },
+                onDeleteNote = {
+                    val target = selectedNote
+                    if (target != null) {
+                        onRequestDeleteNote(target)
+                    } else {
+                        viewModel.deleteSelectedNote()
+                    }
+                },
+                onDone = { viewModel.clearSelection() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+            )
+        } else {
+            val dockModifier = if (layoutMode == DockLayoutMode.COMPACT_LANDSCAPE_RAIL) {
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+            } else {
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+            }
+
+            WhiteboardPenDock(
+                currentTool = currentTool,
+                currentPenColor = penColorHex,
+                currentPenWidth = penWidth,
+                isRainbowPen = isRainbowPen,
+                autoShapeRecognition = autoShapeRecognition,
+                isRulerActive = isRulerActive,
+                pendingShapeType = pendingShapeType,
+                pendingStickyNoteColor = pendingStickyNoteColor,
+                layoutMode = layoutMode,
+                onSelectTool = onSelectTool,
+                onUpdatePenColor = onUpdatePenColor,
+                onUpdatePenWidth = onUpdatePenWidth,
+                onToggleAutoShape = onToggleAutoShape,
+                onToggleRuler = onToggleRuler,
+                onAddStickyNote = onAddStickyNote,
+                onRequestPlaceStickyNote = onRequestPlaceStickyNote,
+                onAddText = onAddText,
+                onOpenShapePicker = onOpenShapePicker,
+                modifier = dockModifier
+            )
+        }
     }
 }
 

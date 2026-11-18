@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,6 +69,36 @@ import com.example.model.WhiteboardStroke
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
+private val SelectionStrokeColors = listOf(
+    "#0F172A" to "Pizarra",
+    "#2563EB" to "Azul",
+    "#DC2626" to "Rojo",
+    "#16A34A" to "Verde",
+    "#7C3AED" to "Violeta",
+    "#EA580C" to "Naranja",
+    "#0891B2" to "Cian",
+    "#FFFFFF" to "Blanco"
+)
+
+private val SelectionFillColors = listOf(
+    "#DBEAFE" to "Azul claro",
+    "#FEE2E2" to "Rojo claro",
+    "#DCFCE7" to "Verde claro",
+    "#FEF9C3" to "Amarillo claro",
+    "#EDE9FE" to "Violeta claro",
+    "#F1F5F9" to "Gris claro"
+)
+
+private val SelectionNoteColors = listOf(
+    "#FFF275" to "Amarillo",
+    "#86E3CE" to "Cian",
+    "#A1F0A6" to "Menta",
+    "#FF9AA2" to "Rosa",
+    "#D5AAFF" to "Lavanda",
+    "#FFB347" to "Naranja",
+    "#2D3139" to "Pizarra"
+)
+
 /**
  * Modern Minimal Dock-style Precision Editor for selected shapes, lines, strokes, and sticky notes.
  * Mirrors the WhiteboardPenDock visual language and provides 1-tap controls plus a detailed 3-dots inspector menu.
@@ -116,35 +147,9 @@ fun SelectionEditDock(
         mutableStateOf(false)
     }
 
-    val strokeColors = listOf(
-        "#0F172A" to "Pizarra",
-        "#2563EB" to "Azul",
-        "#DC2626" to "Rojo",
-        "#16A34A" to "Verde",
-        "#7C3AED" to "Violeta",
-        "#EA580C" to "Naranja",
-        "#0891B2" to "Cian",
-        "#FFFFFF" to "Blanco"
-    )
-
-    val fillColors = listOf(
-        "#DBEAFE" to "Azul claro",
-        "#FEE2E2" to "Rojo claro",
-        "#DCFCE7" to "Verde claro",
-        "#FEF9C3" to "Amarillo claro",
-        "#EDE9FE" to "Violeta claro",
-        "#F1F5F9" to "Gris claro"
-    )
-
-    val noteColors = listOf(
-        "#FFF275" to "Amarillo",
-        "#86E3CE" to "Cian",
-        "#A1F0A6" to "Menta",
-        "#FF9AA2" to "Rosa",
-        "#D5AAFF" to "Lavanda",
-        "#FFB347" to "Naranja",
-        "#2D3139" to "Pizarra"
-    )
+    val strokeColors = SelectionStrokeColors
+    val fillColors = SelectionFillColors
+    val noteColors = SelectionNoteColors
 
     Column(
         modifier = modifier
@@ -154,11 +159,12 @@ fun SelectionEditDock(
     ) {
         Surface(
             shape = RoundedCornerShape(16.dp),
-            tonalElevation = 0.dp,
-            shadowElevation = 4.dp,
+            tonalElevation = 2.dp,
+            shadowElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
+                .widthIn(max = 760.dp)
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
                 .testTag("selection_edit_dock")
         ) {
@@ -522,13 +528,6 @@ fun SelectionEditDock(
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     Spacer(modifier = Modifier.height(10.dp))
 
-                                    // Line Style (available across all preset and freeform shapes)
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-Spacer(modifier = Modifier.height(10.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                    Spacer(modifier = Modifier.height(10.dp))
-
                                     // Size & Rotation Controls
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -794,10 +793,9 @@ Spacer(modifier = Modifier.height(10.dp))
                                         valueRange = 1f..28f,
                                         modifier = Modifier.height(28.dp)
                                     )
-                                    Spacer(modifier = Modifier.height(6.dp))
                                     Spacer(modifier = Modifier.height(10.dp))
-Spacer(modifier = Modifier.height(10.dp))
-Spacer(modifier = Modifier.height(10.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                    Spacer(modifier = Modifier.height(10.dp))
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -857,74 +855,92 @@ Spacer(modifier = Modifier.height(10.dp))
 
                 selectedNote != null -> {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        noteColors.take(5).forEach { (hex, _) ->
-                            val c = parseColor(hex)
-                            val isSel = selectedNote.colorHex.equals(hex, ignoreCase = true)
+                        Row(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            noteColors.forEach { (hex, label) ->
+                                val c = parseColor(hex)
+                                val isSel = selectedNote.colorHex.equals(hex, ignoreCase = true)
+                                Box(
+                                    modifier = Modifier
+                                        .size(28.dp)
+                                        .clip(CircleShape)
+                                        .background(c)
+                                        .border(
+                                            width = if (isSel) 2.5.dp else 1.dp,
+                                            color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                            shape = CircleShape
+                                        )
+                                        .clickable { onUpdateNoteColor(hex) }
+                                        .testTag("edit_note_color_$label")
+                                )
+                            }
+
                             Box(
                                 modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(c)
-                                    .border(
-                                        width = if (isSel) 2.dp else 1.dp,
-                                        color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { onUpdateNoteColor(hex) }
+                                    .width(1.dp)
+                                    .height(24.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant)
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.AspectRatio,
+                                contentDescription = if (selectedNote.isAspectRatioLocked) {
+                                    "Proporción cuadrada 1:1 activada (toca para libre)"
+                                } else {
+                                    "Redimensionamiento libre (toca para proporción cuadrada 1:1)"
+                                },
+                                tint = if (selectedNote.isAspectRatioLocked) {
+                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                bgColor = if (selectedNote.isAspectRatioLocked) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant
+                                },
+                                onClick = onToggleNoteAspectRatioLock,
+                                testTag = "note_aspect_lock_button"
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.PushPin,
+                                contentDescription = "Fijar nota",
+                                tint = if (selectedNote.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                bgColor = if (selectedNote.isPinned) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = onToggleNotePin
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.Delete,
+                                contentDescription = "Eliminar nota",
+                                tint = MaterialTheme.colorScheme.error,
+                                bgColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                onClick = onDeleteNote
                             )
                         }
 
-                        DockMiniIconButton(
-                            icon = Icons.Default.AspectRatio,
-                            contentDescription = if (selectedNote.isAspectRatioLocked) {
-                                "Proporción cuadrada 1:1 activada (toca para libre)"
-                            } else {
-                                "Redimensionamiento libre (toca para proporción cuadrada 1:1)"
-                            },
-                            tint = if (selectedNote.isAspectRatioLocked) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            bgColor = if (selectedNote.isAspectRatioLocked) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceVariant
-                            },
-                            onClick = onToggleNoteAspectRatioLock,
-                            testTag = "note_aspect_lock_button"
-                        )
-
-                        DockMiniIconButton(
-                            icon = Icons.Default.PushPin,
-                            contentDescription = "Fijar nota",
-                            tint = if (selectedNote.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            onClick = onToggleNotePin
-                        )
-
-                        DockMiniIconButton(
-                            icon = Icons.Default.Delete,
-                            contentDescription = "Eliminar nota",
-                            tint = MaterialTheme.colorScheme.error,
-                            bgColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                            onClick = onDeleteNote
-                        )
-
                         Box(
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(38.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone),
+                                .clickable(onClick = onDone)
+                                .testTag("edit_note_done"),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar",
+                                contentDescription = "Terminar edición de nota",
                                 tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
