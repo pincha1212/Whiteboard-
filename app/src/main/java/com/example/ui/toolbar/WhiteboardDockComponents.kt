@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.ToolType
+import com.example.model.PenToolSlot
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -1071,6 +1073,191 @@ internal fun StickyNoteDropdownMenu(
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+            }
+        }
+    }
+}
+
+
+@Composable
+internal fun ConfigurablePenSlots(
+    slots: List<PenToolSlot>,
+    activeIndex: Int,
+    onSelectSlot: (Int) -> Unit,
+    onConfigureSlot: (Int, ToolType) -> Unit,
+    onUpdateColor: (String) -> Unit,
+    onUpdateWidth: (Float) -> Unit,
+    onUpdateOpacity: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
+    val normalizedSlots = (slots.take(3) + PenToolSlot.EMPTY_SLOTS.drop(slots.take(3).size)).take(3)
+    Surface(
+        modifier = modifier.testTag("configurable_pen_slots"),
+        shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        shadowElevation = 3.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            normalizedSlots.forEachIndexed { index, slot ->
+                Box {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .size(width = 48.dp, height = 48.dp)
+                            .clip(RoundedCornerShape(WhiteboardUiMetrics.groupCorner))
+                            .background(
+                                if (activeIndex == index && slot.isConfigured) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            )
+                            .border(
+                                if (activeIndex == index && slot.isConfigured) 1.dp else 0.dp,
+                                if (activeIndex == index && slot.isConfigured) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                RoundedCornerShape(WhiteboardUiMetrics.groupCorner)
+                            )
+                            .clickable {
+                                if (slot.isConfigured) onSelectSlot(index) else editingIndex = index
+                            }
+                            .testTag("pen_slot_$index")
+                    ) {
+                        if (slot.isConfigured) {
+                            ActiveDrawingToolGlyph(
+                                tool = slot.tool!!,
+                                tint = parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.onSurface),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Box(
+                                Modifier
+                                    .padding(top = 3.dp)
+                                    .size(width = 18.dp, height = 3.dp)
+                                    .clip(CircleShape)
+                                    .background(parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.primary).copy(alpha = slot.opacity))
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text("+", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 12.sp)
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable { editingIndex = index }
+                            .testTag("pen_slot_edit_$index"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("⋯", fontSize = 12.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
+                    DropdownMenu(
+                        expanded = editingIndex == index,
+                        onDismissRequest = { editingIndex = null },
+                        modifier = Modifier.widthIn(min = 210.dp, max = 280.dp)
+                    ) {
+                        Text(
+                            text = "RANURA ${index + 1}",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Bold
+                        )
+                        listOf(
+                            ToolType.PEN to "Lápiz",
+                            ToolType.FINE_MARKER to "Marcador",
+                            ToolType.HIGHLIGHTER to "Resaltador"
+                        ).forEach { (tool, label) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onConfigureSlot(index, tool)
+                                        editingIndex = null
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                ActiveDrawingToolGlyph(tool, MaterialTheme.colorScheme.onSurface, Modifier.size(18.dp))
+                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                        if (slot.isConfigured) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Text(
+                                "COLOR",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                DockPenColorPalette.forEach { option ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(CircleShape)
+                                            .background(parseDockColorSafe(option.hex, Color.Black))
+                                            .border(
+                                                if (slot.colorHex.equals(option.hex, true)) 2.dp else 1.dp,
+                                                if (slot.colorHex.equals(option.hex, true)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                                CircleShape
+                                            )
+                                            .clickable {
+                                                onSelectSlot(index)
+                                                onUpdateColor(option.hex)
+                                            }
+                                            .testTag("pen_slot_color_${index}_${option.label.lowercase()}")
+                                    )
+                                }
+                            }
+                            Text(
+                                "GROSOR",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = slot.width.coerceIn(1f, 48f),
+                                onValueChange = {
+                                    onSelectSlot(index)
+                                    onUpdateWidth(it)
+                                },
+                                valueRange = 1f..48f,
+                                modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
+                            )
+                            Text(
+                                "OPACIDAD ${(slot.opacity * 100).roundToInt()}%",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Slider(
+                                value = slot.opacity.coerceIn(0.05f, 1f),
+                                onValueChange = {
+                                    onSelectSlot(index)
+                                    onUpdateOpacity(it)
+                                },
+                                valueRange = 0.05f..1f,
+                                modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
