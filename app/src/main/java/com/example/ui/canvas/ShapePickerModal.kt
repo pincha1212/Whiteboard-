@@ -100,27 +100,6 @@ fun ShapePickerModal(
     val categories = listOf("Todas", "Básica", "Líneas", "Avanzada")
     var selectedCategory by remember { mutableStateOf("Todas") }
     var selectedShape by remember { mutableStateOf(ShapeType.RECTANGLE) }
-    var isFilled by remember { mutableStateOf(false) }
-    var selectedStrokeColor by remember { mutableStateOf("#2563EB") }
-    var selectedFillColor by remember { mutableStateOf("#DBEAFE") }
-
-    val strokeColors = listOf(
-        "#0F172A" to "Negro",
-        "#2563EB" to "Azul",
-        "#DC2626" to "Rojo",
-        "#16A34A" to "Verde",
-        "#7C3AED" to "Violeta",
-        "#EA580C" to "Naranja"
-    )
-
-    val fillColors = listOf(
-        "#DBEAFE" to "Azul claro",
-        "#FEF08A" to "Amarillo claro",
-        "#DCFCE7" to "Verde claro",
-        "#FCE7F3" to "Rosa claro",
-        "#EDE9FE" to "Violeta claro",
-        "#F1F5F9" to "Gris claro"
-    )
 
     val filteredPresets = remember(selectedCategory) {
         if (selectedCategory == "Todas") presets else presets.filter { it.category == selectedCategory }
@@ -263,119 +242,12 @@ fun ShapePickerModal(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Style Controls: Outline/Fill + Colors
-                if (!selectedShape.isLineLike) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Relleno interior:",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (!isFilled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { isFilled = false }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "Solo borde",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (!isFilled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isFilled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable { isFilled = true }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "Con relleno",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = if (isFilled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                // Stroke Color Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Color de trazo:",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.width(95.dp)
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        strokeColors.forEach { (hex, name) ->
-                            val c = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { Color.Black }
-                            val isSel = hex.equals(selectedStrokeColor, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(c)
-                                    .border(
-                                        width = if (isSel) 2.5.dp else 1.dp,
-                                        color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                        shape = CircleShape
-                                    )
-                                    .clickable { selectedStrokeColor = hex }
-                            )
-                        }
-                    }
-                }
-
-                if (isFilled && !selectedShape.isLineLike) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Color de relleno:",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.width(95.dp)
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            fillColors.forEach { (hex, name) ->
-                                val c = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Exception) { Color.LightGray }
-                                val isSel = hex.equals(selectedFillColor, ignoreCase = true)
-                                Box(
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(c)
-                                        .border(
-                                            width = if (isSel) 2.5.dp else 1.dp,
-                                            color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { selectedFillColor = hex }
-                                )
-                            }
-                        }
-                    }
-                }
+                // La personalización se realiza únicamente desde SelectionEditDock.
+                Text(
+                    text = "Elige una forma. Después de insertarla, selecciona el elemento para editar color, relleno, grosor y tamaño desde el dock.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -386,7 +258,7 @@ fun ShapePickerModal(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            onStartDragPlacement(selectedShape, isFilled, selectedStrokeColor, selectedFillColor)
+                            onStartDragPlacement(selectedShape, false, "#2563EB", "#DBEAFE")
                             onDismiss()
                         },
                         shape = RoundedCornerShape(10.dp),
@@ -406,7 +278,7 @@ fun ShapePickerModal(
 
                     Button(
                         onClick = {
-                            onInsertCenter(selectedShape, isFilled, selectedStrokeColor, selectedFillColor)
+                            onInsertCenter(selectedShape, false, "#2563EB", "#DBEAFE")
                             onDismiss()
                         },
                         shape = RoundedCornerShape(10.dp),
