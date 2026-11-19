@@ -686,7 +686,8 @@ fun WhiteboardCanvasScreen(
                     scale = camera.scale,
                     isSelected = isSelected,
                     isDarkBoard = isDarkBoard,
-                    handDrawnFactor = state.handDrawnFactor
+                    handDrawnFactor = state.handDrawnFactor,
+                    preserveInputPoints = true
                 )
             }
 
