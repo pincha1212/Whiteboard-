@@ -1067,7 +1067,6 @@ fun WhiteboardCanvasScreen(
                 currentTool = state.currentTool,
                 penColorHex = state.penColorHex,
                 penWidth = state.penWidth,
-                penOpacity = state.penOpacity,
                 penToolSlots = state.penToolSlots,
                 activePenSlotIndex = state.activePenSlotIndex,
                 isRainbowPen = state.isRainbowPen,
@@ -1419,7 +1418,6 @@ private fun CanvasDockOverlay(
     currentTool: ToolType,
     penColorHex: String,
     penWidth: Float,
-    penOpacity: Float,
     penToolSlots: List<PenToolSlot>,
     activePenSlotIndex: Int,
     isRainbowPen: Boolean,
@@ -1473,9 +1471,6 @@ private fun CanvasDockOverlay(
             viewModel.cancelPendingPlacement()
             viewModel.selectPenToolSlot(index)
         }
-    }
-    val onUpdatePenOpacity = remember(viewModel) {
-        { opacity: Float -> viewModel.setPenOpacity(opacity) }
     }
     val onToggleAutoShape = remember(viewModel) {
         { viewModel.toggleAutoShapeRecognition() }
@@ -1575,13 +1570,11 @@ private fun CanvasDockOverlay(
                 currentTool = currentTool,
                 currentPenColor = penColorHex,
                 currentPenWidth = penWidth,
-                penOpacity = penOpacity,
                 penToolSlots = penToolSlots,
                 activePenSlotIndex = activePenSlotIndex,
                 onConfigurePenSlot = onConfigurePenSlot,
                 onClearPenSlot = onClearPenSlot,
                 onSelectPenSlot = onSelectPenSlot,
-                onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
