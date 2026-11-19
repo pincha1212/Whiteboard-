@@ -1260,22 +1260,23 @@ fun WhiteboardCanvasScreen(
 
         if (showShapePickerModal) {
             ShapePickerModal(
-                onInsertCenter = { shapeType, isFilled, strokeColor, fillColor ->
+                onInsertCenter = { shapeType, _, _, _ ->
                     viewModel.insertShapeAtCenter(
                         shapeType = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor
+                        isFilled = false,
+                        strokeColor = state.penColorHex,
+                        fillColor = state.penColorHex
                     )
                 },
-                onStartDragPlacement = { shapeType, isFilled, strokeColor, fillColor ->
+                onStartDragPlacement = { shapeType, _, _, _ ->
                     viewModel.requestAddCustomShape(
                         type = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor,
-                        style = state.pendingStrokeStyle,
-                        capStyle = state.pendingCapStyle
+                        isFilled = false,
+                        strokeColor = state.penColorHex,
+                        fillColor = state.penColorHex,
+                        style = state.penStyle,
+                        capStyle = state.penCapStyle,
+                        brushType = viewModel.brushTypeForTool(state.currentTool)
                     )
                 },
                 onDismiss = { showShapePickerModal = false }
