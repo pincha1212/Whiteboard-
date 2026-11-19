@@ -92,6 +92,7 @@ import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
 import com.example.model.ToolType
+import com.example.model.PenToolSlot
 import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.DockLayoutMode
 import com.example.ui.toolbar.WhiteboardPenDock
@@ -1066,6 +1067,9 @@ fun WhiteboardCanvasScreen(
                 currentTool = state.currentTool,
                 penColorHex = state.penColorHex,
                 penWidth = state.penWidth,
+                penOpacity = state.penOpacity,
+                penToolSlots = state.penToolSlots,
+                activePenSlotIndex = state.activePenSlotIndex,
                 isRainbowPen = state.isRainbowPen,
                 autoShapeRecognition = state.autoShapeRecognition,
                 isRulerActive = state.isRulerActive,
@@ -1415,6 +1419,9 @@ private fun CanvasDockOverlay(
     currentTool: ToolType,
     penColorHex: String,
     penWidth: Float,
+    penOpacity: Float,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -1454,6 +1461,18 @@ private fun CanvasDockOverlay(
     }
     val onUpdatePenWidth = remember(viewModel) {
         { w: Float -> viewModel.setPenWidth(w) }
+    }
+    val onConfigurePenSlot = remember(viewModel) {
+        { index: Int, tool: ToolType -> viewModel.configurePenToolSlot(index, tool) }
+    }
+    val onSelectPenSlot = remember(viewModel) {
+        { index: Int ->
+            viewModel.cancelPendingPlacement()
+            viewModel.selectPenToolSlot(index)
+        }
+    }
+    val onUpdatePenOpacity = remember(viewModel) {
+        { opacity: Float -> viewModel.setPenOpacity(opacity) }
     }
     val onToggleAutoShape = remember(viewModel) {
         { viewModel.toggleAutoShapeRecognition() }
@@ -1553,6 +1572,12 @@ private fun CanvasDockOverlay(
                 currentTool = currentTool,
                 currentPenColor = penColorHex,
                 currentPenWidth = penWidth,
+                penOpacity = penOpacity,
+                penToolSlots = penToolSlots,
+                activePenSlotIndex = activePenSlotIndex,
+                onConfigurePenSlot = onConfigurePenSlot,
+                onSelectPenSlot = onSelectPenSlot,
+                onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
