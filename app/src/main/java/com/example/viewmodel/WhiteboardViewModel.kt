@@ -2644,7 +2644,10 @@ class WhiteboardViewModel(
     fun insertTextAtCenter(
         initialText: String = "Texto",
         colorHex: String = "#0F172A",
-        fontSize: Float = 22f
+        fontSize: Float = 22f,
+        isBold: Boolean = false,
+        backgroundColorHex: String? = null,
+        width: Float = 260f
     ) {
         val camera = _cameraState.value
         val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
@@ -2652,11 +2655,13 @@ class WhiteboardViewModel(
 
         val item = TextItem(
             text = initialText,
-            x = worldCenterX - 95f,
-            y = worldCenterY - 24f,
-            fontSize = fontSize,
+            x = worldCenterX - width.coerceIn(140f, 420f) / 2f,
+            y = worldCenterY - 30f,
+            fontSize = fontSize.coerceIn(12f, 48f),
             colorHex = colorHex,
-            width = 190f
+            isBold = isBold,
+            backgroundColorHex = backgroundColorHex,
+            width = width.coerceIn(140f, 420f)
         )
         saveUndoSnapshot()
         _uiState.update { state ->
@@ -2667,6 +2672,30 @@ class WhiteboardViewModel(
                     category = "TEXT"
                 )
                 b.copy(textItems = b.textItems + item, auditLogs = (b.auditLogs + log).takeLast(100))
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun updateTextItemStyle(
+        id: String,
+        fontSize: Float? = null,
+        colorHex: String? = null,
+        isBold: Boolean? = null,
+        backgroundColorHex: String? = null,
+        clearBackground: Boolean = false
+    ) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id) item.copy(
+                        fontSize = fontSize?.coerceIn(12f, 48f) ?: item.fontSize,
+                        colorHex = colorHex ?: item.colorHex,
+                        isBold = isBold ?: item.isBold,
+                        backgroundColorHex = if (clearBackground) null else backgroundColorHex ?: item.backgroundColorHex
+                    ) else item
+                })
             }
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
