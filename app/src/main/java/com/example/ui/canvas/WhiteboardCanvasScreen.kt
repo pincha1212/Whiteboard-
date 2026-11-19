@@ -147,7 +147,6 @@ fun WhiteboardCanvasScreen(
     var showBoardsManager by remember { mutableStateOf(false) }
     var showExportModal by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var showSnapshotsModal by remember { mutableStateOf(false) }
     var showShapePickerModal by remember { mutableStateOf(false) }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
     var newTitleInput by remember { mutableStateOf(state.board.title) }
@@ -1080,7 +1079,6 @@ fun WhiteboardCanvasScreen(
                 newTitleInput = state.board.title
                 showRenameDialog = true
             },
-            onOpenSnapshotsAndAudit = { showSnapshotsModal = true },
             onSwitchToNotes = onSwitchToNotes,
             modifier = Modifier.align(Alignment.TopCenter)
         )
@@ -1235,74 +1233,6 @@ fun WhiteboardCanvasScreen(
                 onDismiss = { showExportModal = false }
             )
         }
-
-        if (showSnapshotsModal) {
-            SnapshotsModal(
-                board = state.board,
-                onCreateSnapshot = { versionName, description ->
-                    viewModel.createSnapshot(versionName, description)
-                },
-                onRestoreSnapshot = { snapshot ->
-                    val ok = viewModel.restoreSnapshot(snapshot)
-                    if (!ok) {
-                        Toast.makeText(context, "No se pudo restaurar el snapshot", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onDeleteSnapshot = { versionId ->
-                    viewModel.deleteSnapshot(versionId)
-                },
-                onClearAuditLogs = {
-                    viewModel.clearAuditLogs()
-                },
-                onDismiss = { showSnapshotsModal = false }
-            )
-        }
-
-        if (showShapePickerModal) {
-            ShapePickerModal(
-                onInsertCenter = { shapeType, _, _, _ ->
-                    viewModel.insertShapeAtCenter(
-                        shapeType = shapeType,
-                        isFilled = false,
-                        strokeColor = state.penColorHex,
-                        fillColor = state.penColorHex
-                    )
-                },
-                onStartDragPlacement = { shapeType, _, _, _ ->
-                    viewModel.requestAddCustomShape(
-                        type = shapeType,
-                        isFilled = false,
-                        strokeColor = state.penColorHex,
-                        fillColor = state.penColorHex,
-                        style = state.penStyle,
-                        capStyle = state.penCapStyle,
-                        brushType = viewModel.brushTypeForTool(state.currentTool)
-                    )
-                },
-                onDismiss = { showShapePickerModal = false }
-            )
-        }
-
-        if (showRenameDialog) {
-            AlertDialog(
-                onDismissRequest = { showRenameDialog = false },
-                title = { Text("Renombrar Pizarra") },
-                text = {
-                    OutlinedTextField(
-                        value = newTitleInput,
-                        onValueChange = { newTitleInput = it },
-                        label = { Text("Título de la pizarra") },
-                        modifier = Modifier.fillMaxWidth().testTag("input_rename_board")
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (newTitleInput.isNotBlank()) {
-                                viewModel.renameBoard(newTitleInput.trim())
-                                showRenameDialog = false
-                            }
-                        }
                     ) {
                         Text("Guardar")
                     }
