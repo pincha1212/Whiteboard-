@@ -1233,6 +1233,51 @@ fun WhiteboardCanvasScreen(
                 onDismiss = { showExportModal = false }
             )
         }
+        if (showShapePickerModal) {
+            ShapePickerModal(
+                onInsertCenter = { shapeType, _, _, _ ->
+                    viewModel.insertShapeAtCenter(
+                        shapeType = shapeType,
+                        isFilled = false,
+                        strokeColor = state.penColorHex,
+                        fillColor = state.penColorHex
+                    )
+                },
+                onStartDragPlacement = { shapeType, _, _, _ ->
+                    viewModel.requestAddCustomShape(
+                        type = shapeType,
+                        isFilled = false,
+                        strokeColor = state.penColorHex,
+                        fillColor = state.penColorHex,
+                        style = state.penStyle,
+                        capStyle = state.penCapStyle,
+                        brushType = viewModel.brushTypeForTool(state.currentTool)
+                    )
+                },
+                onDismiss = { showShapePickerModal = false }
+            )
+        }
+
+        if (showRenameDialog) {
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("Renombrar Pizarra") },
+                text = {
+                    OutlinedTextField(
+                        value = newTitleInput,
+                        onValueChange = { newTitleInput = it },
+                        label = { Text("Título de la pizarra") },
+                        modifier = Modifier.fillMaxWidth().testTag("input_rename_board")
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (newTitleInput.isNotBlank()) {
+                                viewModel.renameBoard(newTitleInput.trim())
+                                showRenameDialog = false
+                            }
+                        }
                     ) {
                         Text("Guardar")
                     }
@@ -1308,7 +1353,6 @@ private fun CameraAwareWhiteboardTopBar(
     onClearBoard: () -> Unit,
     onExportBoard: () -> Unit,
     onRenameBoard: () -> Unit,
-    onOpenSnapshotsAndAudit: () -> Unit,
     onSwitchToNotes: (() -> Unit)?,
     modifier: Modifier = Modifier
 ) {
@@ -1336,7 +1380,6 @@ private fun CameraAwareWhiteboardTopBar(
             onClearBoard = onClearBoard,
             onExportBoard = onExportBoard,
             onRenameBoard = onRenameBoard,
-            onOpenSnapshotsAndAudit = onOpenSnapshotsAndAudit,
             onBackToHome = { viewModel.closeBoardToHome() },
             onSwitchToNotes = onSwitchToNotes,
             modifier = modifier
