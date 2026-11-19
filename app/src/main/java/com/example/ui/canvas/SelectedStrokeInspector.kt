@@ -159,14 +159,14 @@ fun SelectionEditDock(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
             tonalElevation = 2.dp,
             shadowElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
                 .widthIn(max = 760.dp)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.dockCorner))
                 .testTag("selection_edit_dock")
         ) {
             when {
@@ -972,13 +972,20 @@ private fun QuickStepperPill(
     ) {
         Box(
             modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(7.dp))
+                .size(WhiteboardUiMetrics.touchTarget)
                 .clickable(onClick = onDecrement)
                 .testTag(decTestTag),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Remove, contentDescription = "Reducir grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Remove, contentDescription = "Reducir grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            }
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -990,13 +997,20 @@ private fun QuickStepperPill(
         }
         Box(
             modifier = Modifier
-                .size(28.dp)
-                .clip(RoundedCornerShape(7.dp))
+                .size(WhiteboardUiMetrics.touchTarget)
                 .clickable(onClick = onIncrement)
                 .testTag(incTestTag),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Aumentar grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "Aumentar grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            }
         }
     }
 }
