@@ -280,14 +280,14 @@ private fun CompactPortraitDock(
             exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Bottom)
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
                 tonalElevation = 2.dp,
                 shadowElevation = 4.dp,
                 color = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .padding(bottom = 6.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.dockCorner))
                     .testTag("inking_tray_card")
             ) {
                 InkingToolsRow(
@@ -310,13 +310,13 @@ private fun CompactPortraitDock(
 
         // Unified Main Bar: [Mode: Draw | Lasso | Hand] | [Insert: Note | Text | Shape] | [Style: Color+Width]
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
             tonalElevation = 2.dp,
             shadowElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.dockCorner))
                 .testTag("dock_main_bar")
         ) {
             Row(
@@ -430,13 +430,13 @@ private fun CompactLandscapeRailDock(
     ) {
         // Primary Vertical Rail
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
             tonalElevation = 2.dp,
             shadowElevation = 6.dp,
             color = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.dockCorner))
                 .testTag("dock_main_bar")
         ) {
             Column(
@@ -510,14 +510,14 @@ private fun CompactLandscapeRailDock(
             exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start)
         ) {
             Surface(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
                 tonalElevation = 2.dp,
                 shadowElevation = 4.dp,
                 color = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier
                     .padding(start = 6.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.dockCorner))
                     .testTag("inking_tray_card")
             ) {
                 InkingToolsRow(
