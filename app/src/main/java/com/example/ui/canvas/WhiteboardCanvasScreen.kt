@@ -149,8 +149,6 @@ fun WhiteboardCanvasScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSnapshotsModal by remember { mutableStateOf(false) }
     var showShapePickerModal by remember { mutableStateOf(false) }
-    var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
-    var editingLabelText by remember { mutableStateOf("") }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
     var newTitleInput by remember { mutableStateOf(state.board.title) }
     var canvasSizePx by remember { mutableStateOf(IntSize(1080, 1920)) }
@@ -221,11 +219,6 @@ fun WhiteboardCanvasScreen(
     }
 
     // Resolve selected objects only when content or selection changes, not on every camera frame.
-    val selectedShapeForLabel = remember(state.board.shapes, state.selectedShapeId) {
-        state.board.shapes.firstOrNull {
-            it.id == state.selectedShapeId && !it.isHiddenByCollapse && !it.shapeType.isLineLike
-        }
-    }
     val selectedStrokeForHandles = remember(state.board.strokes, state.selectedStrokeId) {
         state.board.strokes.firstOrNull { it.id == state.selectedStrokeId }
     }
@@ -1013,42 +1006,6 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Edit label button for the currently selected non-line shape (single global affordance)
-        selectedShapeForLabel?.let { shape ->
-            if (!isPanOnlyMode) {
-                val editHalfW = with(density) { 18.dp.roundToPx() }
-                val editTop = with(density) { 32.dp.roundToPx() }
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    shadowElevation = 2.dp,
-                    modifier = Modifier
-                        .offset {
-                        val camera = cameraState.value
-                        val shapeScreenCenterX = ((shape.x + shape.width / 2f) * camera.scale + camera.panX).roundToInt()
-                        val shapeScreenTop = (shape.y * camera.scale + camera.panY).roundToInt()
-                        IntOffset(shapeScreenCenterX - editHalfW, shapeScreenTop - editTop)
-                    }
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            editingLabelShape = shape
-                            editingLabelText = shape.label
-                        }
-                        .testTag("edit_shape_label_${shape.id}")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Editar etiqueta de forma",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
         // Render Sticky Notes (isolated per-note StateFlow cards + constant-size selection overlay)
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
         val isPlacementPending = state.pendingStickyNoteColor != null || state.pendingShapeType != null
@@ -1359,39 +1316,6 @@ fun WhiteboardCanvasScreen(
                 }
             )
         }
-        if (editingLabelShape != null) {
-            AlertDialog(
-                onDismissRequest = { editingLabelShape = null },
-                title = { Text("Editar texto del nodo") },
-                text = {
-                    OutlinedTextField(
-                        value = editingLabelText,
-                        onValueChange = { editingLabelText = it },
-                        label = { Text("Etiqueta") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("input_shape_label")
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            editingLabelShape?.let { viewModel.updateShapeLabel(it.id, editingLabelText.trim()) }
-                            editingLabelShape = null
-                        }
-                    ) {
-                        Text("Guardar")
-                    }
-                },
-                dismissButton = {
-                    Button(
-                        onClick = { editingLabelShape = null },
-                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
-                    ) {
-                        Text("Cancelar")
-                    }
-                }
-            )
-        }
         if (notePendingRemoval != null) {
             val targetNote = notePendingRemoval!!
             AlertDialog(
@@ -1596,6 +1520,7 @@ private fun CanvasDockOverlay(
                 onRotateAll = { delta -> viewModel.rotateCurrentSelection(delta) },
                 onUpdateAllColor = { col -> viewModel.updateCurrentSelectionColor(col) },
                 onUpdateShapeColor = { viewModel.updateSelectedShape(strokeColor = it) },
+                onUpdateShapeLabel = { selectedShape?.let { shape -> viewModel.updateShapeLabel(shape.id, it) } },
                 onUpdateShapeFillColor = { viewModel.updateSelectedShape(fillColor = it, isFilled = true) },
                 onToggleShapeFilled = {
                     val cur = selectedShape?.isFilled ?: false
