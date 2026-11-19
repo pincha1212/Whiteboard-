@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.ShapeType
+import com.example.model.PenToolSlot
 import com.example.model.ToolType
 
 @Composable
@@ -44,6 +45,12 @@ fun WhiteboardPenDock(
     currentTool: ToolType,
     currentPenColor: String,
     currentPenWidth: Float,
+    penOpacity: Float,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
+    onConfigurePenSlot: (Int, ToolType) -> Unit,
+    onSelectPenSlot: (Int) -> Unit,
+    onUpdatePenOpacity: (Float) -> Unit,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -117,6 +124,12 @@ fun WhiteboardPenDock(
                 currentPenColor = currentPenColor,
                 parsedPenColor = parsedPenColor,
                 currentPenWidth = currentPenWidth,
+                penOpacity = penOpacity,
+                penToolSlots = penToolSlots,
+                activePenSlotIndex = activePenSlotIndex,
+                onConfigurePenSlot = onConfigurePenSlot,
+                onSelectPenSlot = onSelectPenSlot,
+                onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
@@ -156,6 +169,12 @@ fun WhiteboardPenDock(
                 currentPenColor = currentPenColor,
                 parsedPenColor = parsedPenColor,
                 currentPenWidth = currentPenWidth,
+                penOpacity = penOpacity,
+                penToolSlots = penToolSlots,
+                activePenSlotIndex = activePenSlotIndex,
+                onConfigurePenSlot = onConfigurePenSlot,
+                onSelectPenSlot = onSelectPenSlot,
+                onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
@@ -195,6 +214,12 @@ fun WhiteboardPenDock(
                 currentPenColor = currentPenColor,
                 parsedPenColor = parsedPenColor,
                 currentPenWidth = currentPenWidth,
+                penOpacity = penOpacity,
+                penToolSlots = penToolSlots,
+                activePenSlotIndex = activePenSlotIndex,
+                onConfigurePenSlot = onConfigurePenSlot,
+                onSelectPenSlot = onSelectPenSlot,
+                onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
@@ -236,6 +261,12 @@ private fun CompactPortraitDock(
     currentPenColor: String,
     parsedPenColor: Color,
     currentPenWidth: Float,
+    penOpacity: Float,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
+    onConfigurePenSlot: (Int, ToolType) -> Unit,
+    onSelectPenSlot: (Int) -> Unit,
+    onUpdatePenOpacity: (Float) -> Unit,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -357,29 +388,15 @@ private fun CompactPortraitDock(
 
                 DockHairlineDivider(vertical = true)
 
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
+                ConfigurablePenSlots(
+                    slots = penToolSlots,
+                    activeIndex = activePenSlotIndex,
+                    onSelectSlot = onSelectPenSlot,
+                    onConfigureSlot = onConfigurePenSlot,
+                    onUpdateColor = { onUpdatePenColor(it, false) },
+                    onUpdateWidth = onUpdatePenWidth,
+                    onUpdateOpacity = onUpdatePenOpacity
+                )
             }
         }
     }
@@ -391,6 +408,12 @@ private fun CompactLandscapeRailDock(
     currentPenColor: String,
     parsedPenColor: Color,
     currentPenWidth: Float,
+    penOpacity: Float,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
+    onConfigurePenSlot: (Int, ToolType) -> Unit,
+    onSelectPenSlot: (Int) -> Unit,
+    onUpdatePenOpacity: (Float) -> Unit,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -477,29 +500,15 @@ private fun CompactLandscapeRailDock(
 
                 DockHairlineDivider(vertical = false)
 
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
+                ConfigurablePenSlots(
+                    slots = penToolSlots,
+                    activeIndex = activePenSlotIndex,
+                    onSelectSlot = onSelectPenSlot,
+                    onConfigureSlot = onConfigurePenSlot,
+                    onUpdateColor = { onUpdatePenColor(it, false) },
+                    onUpdateWidth = onUpdatePenWidth,
+                    onUpdateOpacity = onUpdatePenOpacity
+                )
             }
         }
 
@@ -546,6 +555,12 @@ private fun ExpandedTabletDock(
     currentPenColor: String,
     parsedPenColor: Color,
     currentPenWidth: Float,
+    penOpacity: Float,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
+    onConfigurePenSlot: (Int, ToolType) -> Unit,
+    onSelectPenSlot: (Int) -> Unit,
+    onUpdatePenOpacity: (Float) -> Unit,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -646,29 +661,15 @@ private fun ExpandedTabletDock(
 
                 DockHairlineDivider(vertical = true)
 
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
+                ConfigurablePenSlots(
+                    slots = penToolSlots,
+                    activeIndex = activePenSlotIndex,
+                    onSelectSlot = onSelectPenSlot,
+                    onConfigureSlot = onConfigurePenSlot,
+                    onUpdateColor = { onUpdatePenColor(it, false) },
+                    onUpdateWidth = onUpdatePenWidth,
+                    onUpdateOpacity = onUpdatePenOpacity
+                )
             }
         }
     }
