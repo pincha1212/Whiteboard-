@@ -68,6 +68,7 @@ data class WhiteboardUiState(
     val selectedStrokeId: String? = null,
     val selectedShapeId: String? = null,
     val selectedNoteId: String? = null,
+    val selectedTextId: String? = null,
     val selectedStrokeIds: Set<String> = emptySet(),
     val selectedShapeIds: Set<String> = emptySet(),
     val selectedNoteIds: Set<String> = emptySet(),
@@ -81,6 +82,7 @@ data class WhiteboardUiState(
     val pendingCapStyle: LineCapStyle = LineCapStyle.NONE,
     val pendingBrushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
     val handDrawnFactor: Float = 0.24f,
+    val isPaintPixelMode: Boolean = true,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
 )
@@ -1087,6 +1089,7 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet()
@@ -1284,7 +1287,8 @@ class WhiteboardViewModel(
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextId = null
             )
         }
     }
@@ -1298,7 +1302,8 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedStrokeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextId = null
             )
         }
     }
@@ -1314,7 +1319,25 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeId = null,
-                selectedShapeIds = emptySet()
+                selectedShapeIds = emptySet(),
+                selectedTextId = null
+            )
+        }
+    }
+
+    fun selectTextItem(id: String?) {
+        if (_uiState.value.selectedNoteId != null) {
+            flushPendingStickyNoteSync(persist = true)
+        }
+        _uiState.update {
+            it.copy(
+                selectedTextId = id,
+                selectedStrokeId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeId = null,
+                selectedShapeIds = emptySet(),
+                selectedNoteId = null,
+                selectedNoteIds = emptySet()
             )
         }
     }
@@ -1326,6 +1349,7 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet()
@@ -1505,6 +1529,78 @@ class WhiteboardViewModel(
             state.withUpdatedBoard { board ->
                 board.copy(textItems = board.textItems.map { item ->
                     if (item.id == id) item.copy(text = newText) else item
+                })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun beginTextItemTransformSnapshot() {
+        saveUndoSnapshot()
+    }
+
+    fun moveTextItem(id: String, dx: Float, dy: Float) {
+        if (dx == 0f && dy == 0f) return
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id && !item.isLocked) {
+                        item.copy(x = item.x + dx, y = item.y + dy)
+                    } else {
+                        item
+                    }
+                })
+            }
+        }
+    }
+
+    fun resizeTextItemWidth(id: String, newWidth: Float) {
+        val clamped = newWidth.coerceIn(140f, 760f)
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id && !item.isLocked) {
+                        item.copy(width = clamped)
+                    } else {
+                        item
+                    }
+                })
+            }
+        }
+    }
+
+    fun commitTextItemTransform() {
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun updateTextItemStyle(
+        id: String,
+        colorHex: String? = null,
+        backgroundColorHex: String? = null,
+        clearBackground: Boolean = false,
+        isBold: Boolean? = null,
+        fontSize: Float? = null,
+        isEditableCard: Boolean? = null
+    ) {
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == id) {
+                        item.copy(
+                            colorHex = colorHex ?: item.colorHex,
+                            backgroundColorHex = when {
+                                clearBackground -> "TRANSPARENT"
+                                backgroundColorHex != null -> backgroundColorHex
+                                else -> item.backgroundColorHex
+                            },
+                            isBold = isBold ?: item.isBold,
+                            fontSize = fontSize?.coerceIn(20f, 72f) ?: item.fontSize,
+                            isEditableCard = isEditableCard ?: item.isEditableCard
+                        )
+                    } else {
+                        item
+                    }
                 })
             }
         }
@@ -2265,6 +2361,7 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
@@ -2330,6 +2427,7 @@ class WhiteboardViewModel(
                 selectedStrokeId = null,
                 selectedShapeId = null,
                 selectedNoteId = null,
+                selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
@@ -2638,20 +2736,34 @@ class WhiteboardViewModel(
 
     fun insertTextAtCenter(
         initialText: String = "Texto",
-        colorHex: String = "#0F172A",
-        fontSize: Float = 22f
+        colorHex: String? = null,
+        fontSize: Float = 34f
     ) {
         val camera = _cameraState.value
         val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
         val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
+        val board = _uiState.value.board
+        val isDark = board.colorTheme.isDark
+        val defaultWidth = 280f
+        val baseX = worldCenterX - defaultWidth * 0.5f
+        val baseY = worldCenterY - 36f
+        val cascadeCount = board.textItems.count { existing ->
+            kotlin.math.abs(existing.x - baseX) < 120f && kotlin.math.abs(existing.y - baseY) < 120f
+        } % 5
+        val cascadeOffset = cascadeCount * 28f
+
+        val resolvedInk = colorHex ?: if (isDark) "#F1F5F9" else "#0F172A"
+        val resolvedSurface = if (isDark) "#1E293B" else "#FFFFFF"
 
         val item = TextItem(
             text = initialText,
-            x = worldCenterX - 95f,
-            y = worldCenterY - 24f,
+            x = baseX + cascadeOffset,
+            y = baseY + cascadeOffset,
             fontSize = fontSize,
-            colorHex = colorHex,
-            width = 190f
+            colorHex = resolvedInk,
+            isEditableCard = true,
+            backgroundColorHex = resolvedSurface,
+            width = defaultWidth
         )
         saveUndoSnapshot()
         _uiState.update { state ->
@@ -2662,7 +2774,15 @@ class WhiteboardViewModel(
                     category = "TEXT"
                 )
                 b.copy(textItems = b.textItems + item, auditLogs = (b.auditLogs + log).takeLast(100))
-            }
+            }.copy(
+                selectedTextId = item.id,
+                selectedStrokeId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeId = null,
+                selectedShapeIds = emptySet(),
+                selectedNoteId = null,
+                selectedNoteIds = emptySet()
+            )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
@@ -2680,7 +2800,9 @@ class WhiteboardViewModel(
                     textItems = b.textItems.filter { it.id != id },
                     auditLogs = (b.auditLogs + log).takeLast(100)
                 )
-            }
+            }.copy(
+                selectedTextId = if (state.selectedTextId == id) null else state.selectedTextId
+            )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
@@ -2889,6 +3011,10 @@ class WhiteboardViewModel(
 
     fun toggleAutoShapeRecognition() {
         _uiState.update { it.copy(autoShapeRecognition = !it.autoShapeRecognition) }
+    }
+
+    fun togglePaintPixelMode() {
+        _uiState.update { it.copy(isPaintPixelMode = !it.isPaintPixelMode) }
     }
 
     /**

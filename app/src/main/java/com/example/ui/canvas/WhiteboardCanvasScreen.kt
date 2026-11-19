@@ -45,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -68,6 +69,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -99,6 +102,7 @@ import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardViewModel
 import com.example.viewmodel.WhiteboardUiState
 import com.example.ink.ViewportTransform
+import com.example.ink.engine.PaintTileRasterCache
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.PI
 import kotlin.math.cos
@@ -224,6 +228,40 @@ fun WhiteboardCanvasScreen(
     // Keep hash sets keyed to selection-list identity to avoid repeated linear scans.
     val selectedStrokeIdSet = remember(state.selectedStrokeIds) { state.selectedStrokeIds.toHashSet() }
     val selectedShapeIdSet = remember(state.selectedShapeIds) { state.selectedShapeIds.toHashSet() }
+
+    val isDarkBoard = state.board.colorTheme.isDark
+    val paintTileCache = remember { PaintTileRasterCache() }
+    DisposableEffect(Unit) {
+        onDispose { paintTileCache.clear() }
+    }
+    val paintSpatialIndex = remember(
+        state.isPaintPixelMode,
+        state.board.id,
+        state.board.strokes,
+        state.board.shapes,
+        state.selectedStrokeId,
+        selectedStrokeIdSet,
+        state.selectedShapeId,
+        selectedShapeIdSet,
+        isDarkBoard,
+        state.handDrawnFactor
+    ) {
+        if (state.isPaintPixelMode) {
+            paintTileCache.buildSpatialIndex(
+                boardId = state.board.id,
+                strokes = state.board.strokes,
+                shapes = state.board.shapes,
+                selectedStrokeId = state.selectedStrokeId,
+                selectedStrokeIds = selectedStrokeIdSet,
+                selectedShapeId = state.selectedShapeId,
+                selectedShapeIds = selectedShapeIdSet,
+                isDarkBoard = isDarkBoard,
+                handDrawnFactor = state.handDrawnFactor
+            )
+        } else {
+            null
+        }
+    }
 
     Box(
         modifier = modifier
@@ -658,34 +696,73 @@ fun WhiteboardCanvasScreen(
                 screenH = size.height
             )
 
-            val isDarkBoard = state.board.colorTheme.isDark
             val safeScale = if (camera.scale > 0.001f) camera.scale else 1.0f
             val visibleWorldLeft = -camera.panX / safeScale
             val visibleWorldTop = -camera.panY / safeScale
             val visibleWorldRight = (size.width - camera.panX) / safeScale
             val visibleWorldBottom = (size.height - camera.panY) / safeScale
+            val usePaintRaster = state.isPaintPixelMode && paintSpatialIndex != null
 
-            state.board.strokes.forEach { stroke ->
-                val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
-                val bounds = stroke.geometryMetrics
-                if (bounds.hasPoints) {
-                    // Include humanization and the widest procedural brush footprint.
-                    // Convert the screen-space safety margin back into board coordinates.
-                    val pad = (stroke.width * 3.5f + 64f) / safeScale
-                    if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
-                        bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom) {
-                        return@forEach
+            if (usePaintRaster) {
+                drawIntoCanvas { composeCanvas ->
+                    paintTileCache.renderVisibleTiles(
+                        canvas = composeCanvas.nativeCanvas,
+                        spatialIndex = paintSpatialIndex!!,
+                        panX = camera.panX,
+                        panY = camera.panY,
+                        scale = camera.scale,
+                        screenW = size.width,
+                        screenH = size.height,
+                        isDarkBoard = isDarkBoard,
+                        handDrawnFactor = state.handDrawnFactor
+                    )
+                }
+                if (state.selectedStrokeId != null || selectedStrokeIdSet.isNotEmpty()) {
+                    state.board.strokes.forEach { stroke ->
+                        val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
+                        if (!isSelected) return@forEach
+                        val bounds = stroke.geometryMetrics
+                        if (bounds.hasPoints) {
+                            val pad = (stroke.width * 3.5f + 64f) / safeScale
+                            if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
+                                bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom) {
+                                return@forEach
+                            }
+                        }
+                        drawStrokeVector(
+                            stroke = stroke,
+                            panX = camera.panX,
+                            panY = camera.panY,
+                            scale = camera.scale,
+                            isSelected = true,
+                            isDarkBoard = isDarkBoard,
+                            handDrawnFactor = state.handDrawnFactor
+                        )
                     }
                 }
-                drawStrokeVector(
-                    stroke = stroke,
-                    panX = camera.panX,
-                    panY = camera.panY,
-                    scale = camera.scale,
-                    isSelected = isSelected,
-                    isDarkBoard = isDarkBoard,
-                    handDrawnFactor = state.handDrawnFactor
-                )
+            } else {
+                state.board.strokes.forEach { stroke ->
+                    val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
+                    val bounds = stroke.geometryMetrics
+                    if (bounds.hasPoints) {
+                        // Include humanization and the widest procedural brush footprint.
+                        // Convert the screen-space safety margin back into board coordinates.
+                        val pad = (stroke.width * 3.5f + 64f) / safeScale
+                        if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
+                            bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom) {
+                            return@forEach
+                        }
+                    }
+                    drawStrokeVector(
+                        stroke = stroke,
+                        panX = camera.panX,
+                        panY = camera.panY,
+                        scale = camera.scale,
+                        isSelected = isSelected,
+                        isDarkBoard = isDarkBoard,
+                        handDrawnFactor = state.handDrawnFactor
+                    )
+                }
             }
 
             if (localActivePoints.size >= 2) {
@@ -747,25 +824,52 @@ fun WhiteboardCanvasScreen(
                 (visibleWorldBottom - visibleWorldTop) / 2f
             ) + 80f / safeScale
 
-            cachedShapeBounds.forEach { cached ->
-                // The enclosing circle remains valid for rotated shapes and custom vertices.
-                if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
-                    cached.radius + viewportRadius
-                ) {
-                    return@forEach
+            if (usePaintRaster) {
+                if (state.selectedShapeId != null || selectedShapeIdSet.isNotEmpty()) {
+                    cachedShapeBounds.forEach { cached ->
+                        val shape = cached.shape
+                        if (shape.isHiddenByCollapse) return@forEach
+                        val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
+                        if (!isSelected) return@forEach
+                        if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
+                            cached.radius + viewportRadius
+                        ) {
+                            return@forEach
+                        }
+                        drawShapeVector(
+                            shape = shape,
+                            panX = camera.panX,
+                            panY = camera.panY,
+                            scale = camera.scale,
+                            isSelected = true,
+                            isDarkBoard = isDarkBoard,
+                            rotStemPx = rotStemPx,
+                            handDrawnFactor = state.handDrawnFactor
+                        )
+                    }
                 }
-                val shape = cached.shape
-                val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
-                drawShapeVector(
-                    shape = shape,
-                    panX = camera.panX,
-                    panY = camera.panY,
-                    scale = camera.scale,
-                    isSelected = isSelected,
-                    isDarkBoard = isDarkBoard,
-                    rotStemPx = rotStemPx,
-                    handDrawnFactor = state.handDrawnFactor
-                )
+            } else {
+                cachedShapeBounds.forEach { cached ->
+                    // The enclosing circle remains valid for rotated shapes and custom vertices.
+                    if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
+                        cached.radius + viewportRadius
+                    ) {
+                        return@forEach
+                    }
+                    val shape = cached.shape
+                    if (shape.isHiddenByCollapse) return@forEach
+                    val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
+                    drawShapeVector(
+                        shape = shape,
+                        panX = camera.panX,
+                        panY = camera.panY,
+                        scale = camera.scale,
+                        isSelected = isSelected,
+                        isDarkBoard = isDarkBoard,
+                        rotStemPx = rotStemPx,
+                        handDrawnFactor = state.handDrawnFactor
+                    )
+                }
             }
 
             if (state.pendingShapeType != null && pendingDragStart != null && pendingDragEnd != null) {
@@ -1181,8 +1285,10 @@ fun WhiteboardCanvasScreen(
             BackgroundSettingsModal(
                 currentGrid = state.board.gridType,
                 currentColorTheme = state.board.colorTheme,
+                isPaintPixelMode = state.isPaintPixelMode,
                 onSelectGrid = { viewModel.setGridType(it) },
                 onSelectColorTheme = { viewModel.setColorTheme(it) },
+                onTogglePaintPixelMode = { viewModel.togglePaintPixelMode() },
                 onDismiss = { showBackgroundSettings = false }
             )
         }

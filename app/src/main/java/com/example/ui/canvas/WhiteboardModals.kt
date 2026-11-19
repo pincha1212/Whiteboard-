@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -39,8 +40,10 @@ import com.example.model.CanvasGridType
 fun BackgroundSettingsModal(
     currentGrid: CanvasGridType,
     currentColorTheme: CanvasColorTheme,
+    isPaintPixelMode: Boolean = true,
     onSelectGrid: (CanvasGridType) -> Unit,
     onSelectColorTheme: (CanvasColorTheme) -> Unit,
+    onTogglePaintPixelMode: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -127,6 +130,40 @@ fun BackgroundSettingsModal(
                                     shape = CircleShape
                                 )
                                 .clickable { onSelectColorTheme(t) }
+                        )
+                    }
+                }
+
+                if (onTogglePaintPixelMode != null) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
+                            .clickable { onTogglePaintPixelMode() }
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .testTag("toggle_paint_pixel_mode"),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            Text(
+                                text = "Modo Paint (Raster rápido)",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Caché por bloques con pixelado al hacer zoom para máxima fluidez",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isPaintPixelMode,
+                            onCheckedChange = { onTogglePaintPixelMode() }
                         )
                     }
                 }
