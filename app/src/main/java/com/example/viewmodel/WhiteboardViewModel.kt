@@ -2901,8 +2901,12 @@ class WhiteboardViewModel(
                 tool = tool,
                 colorHex = if (previous.isConfigured) previous.colorHex else state.penColorHex,
                 width = if (previous.isConfigured) previous.width else state.penWidth.coerceIn(1f, 48f),
-                opacity = if (tool == ToolType.HIGHLIGHTER && !previous.isConfigured) 0.30f else {
-                    if (previous.isConfigured) previous.opacity else state.penOpacity.coerceIn(0.05f, 1f)
+                opacity = if (tool == ToolType.HIGHLIGHTER && previous.tool != ToolType.HIGHLIGHTER) {
+                    0.30f
+                } else if (previous.isConfigured) {
+                    previous.opacity
+                } else {
+                    state.penOpacity.coerceIn(0.05f, 1f)
                 }
             )
         }.take(3)

@@ -1106,19 +1106,19 @@ internal fun ConfigurablePenSlots(
                                     .background(parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.primary).copy(alpha = slot.opacity))
                             )
                         } else {
-                            Icon(
-                                imageVector = Icons.Default.TouchApp,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                            Text(
+                                "+",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 25.sp,
+                                lineHeight = 26.sp,
+                                fontWeight = FontWeight.Normal
                             )
-                            Text("+", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 12.sp)
                         }
                     }
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .size(18.dp)
+                            .size(22.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surface)
                             .clickable { editingIndex = index }
