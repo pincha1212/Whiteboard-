@@ -353,6 +353,18 @@ private fun ActiveDrawingToolGlyph(
     modifier: Modifier = Modifier
 ) {
     when (tool) {
+        ToolType.PEN -> PhysicalPencilIcon(
+            tipColor = tint,
+            modifier = modifier
+        )
+        ToolType.FINE_MARKER -> PhysicalMarkerIcon(
+            markerColor = tint,
+            modifier = modifier
+        )
+        ToolType.HIGHLIGHTER -> PhysicalHighlighterIcon(
+            highlighterColor = tint,
+            modifier = modifier
+        )
         ToolType.ERASER, ToolType.PIXEL_ERASER -> {
             Canvas(modifier = modifier) {
                 val w = size.width
@@ -440,6 +452,14 @@ private fun ModeSegmentButton(
 internal fun InkingToolsRow(
     currentTool: ToolType,
     penColor: Color,
+    penToolSlots: List<PenToolSlot>,
+    activePenSlotIndex: Int,
+    onConfigurePenSlot: (Int, ToolType) -> Unit,
+    onClearPenSlot: (Int) -> Unit,
+    onSelectPenSlot: (Int) -> Unit,
+    onUpdatePenColor: (String) -> Unit,
+    onUpdatePenWidth: (Float) -> Unit,
+    onUpdatePenOpacity: (Float) -> Unit,
     isRulerActive: Boolean,
     pendingShapeType: com.example.model.ShapeType?,
     pendingStickyNoteColor: String?,
@@ -453,6 +473,19 @@ internal fun InkingToolsRow(
     val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
 
     val slots: @Composable () -> Unit = {
+        ConfigurablePenSlots(
+            slots = penToolSlots,
+            activeIndex = activePenSlotIndex,
+            onSelectSlot = onSelectPenSlot,
+            onConfigureSlot = onConfigurePenSlot,
+            onClearSlot = onClearPenSlot,
+            onUpdateColor = onUpdatePenColor,
+            onUpdateWidth = onUpdatePenWidth,
+            onUpdateOpacity = onUpdatePenOpacity
+        )
+
+        DockHairlineDivider(vertical = !isVertical)
+
         TrayToolSlot(
             isSelected = !hasPendingPlacement && currentTool == ToolType.LASER_POINTER,
             description = "Puntero láser",
@@ -1116,7 +1149,7 @@ internal fun ConfigurablePenSlots(
                             ActiveDrawingToolGlyph(
                                 tool = slot.tool!!,
                                 tint = parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.onSurface),
-                                modifier = Modifier.size(21.dp)
+                                modifier = Modifier.size(width = 19.dp, height = 27.dp)
                             )
                             Canvas(Modifier.padding(top = 3.dp).size(width = 27.dp, height = 7.dp)) {
                                 drawLine(
@@ -1165,7 +1198,11 @@ internal fun ConfigurablePenSlots(
                                     Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    ActiveDrawingToolGlyph(tool, MaterialTheme.colorScheme.onSurface, Modifier.size(23.dp))
+                                    ActiveDrawingToolGlyph(
+                                        tool,
+                                        if (slot.isConfigured) parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.primary) else MaterialTheme.colorScheme.primary,
+                                        Modifier.size(width = 21.dp, height = 29.dp)
+                                    )
                                 }
                                 Column(Modifier.weight(1f)) {
                                     Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
