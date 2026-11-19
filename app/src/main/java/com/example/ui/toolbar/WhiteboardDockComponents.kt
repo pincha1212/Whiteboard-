@@ -459,7 +459,6 @@ internal fun InkingToolsRow(
     onSelectPenSlot: (Int) -> Unit,
     onUpdatePenColor: (String) -> Unit,
     onUpdatePenWidth: (Float) -> Unit,
-    onUpdatePenOpacity: (Float) -> Unit,
     isRulerActive: Boolean,
     pendingShapeType: com.example.model.ShapeType?,
     pendingStickyNoteColor: String?,
@@ -481,7 +480,6 @@ internal fun InkingToolsRow(
             onClearSlot = onClearPenSlot,
             onUpdateColor = onUpdatePenColor,
             onUpdateWidth = onUpdatePenWidth,
-            onUpdateOpacity = onUpdatePenOpacity
         )
 
         DockHairlineDivider(vertical = !isVertical)
@@ -1088,7 +1086,6 @@ internal fun ConfigurablePenSlots(
     onClearSlot: (Int) -> Unit,
     onUpdateColor: (String) -> Unit,
     onUpdateWidth: (Float) -> Unit,
-    onUpdateOpacity: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var editingIndex by remember { mutableStateOf<Int?>(null) }
@@ -1153,7 +1150,7 @@ internal fun ConfigurablePenSlots(
                             )
                             Canvas(Modifier.padding(top = 3.dp).size(width = 27.dp, height = 7.dp)) {
                                 drawLine(
-                                    color = parseDockColorSafe(slot.colorHex, Color.Black).copy(alpha = slot.opacity.coerceIn(0.05f, 1f)),
+                                    color = parseDockColorSafe(slot.colorHex, Color.Black).copy(alpha = if (slot.tool == ToolType.HIGHLIGHTER) 0.38f else 1f),
                                     start = Offset(1f, size.height / 2f),
                                     end = Offset(size.width - 1f, size.height / 2f),
                                     strokeWidth = (slot.width / 4f).coerceIn(1.5f, 5f),
@@ -1255,13 +1252,6 @@ internal fun ConfigurablePenSlots(
                                 value = slot.width.coerceIn(1f, 48f),
                                 onValueChange = { onSelectSlot(index); onUpdateWidth(it) },
                                 valueRange = 1f..48f,
-                                modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
-                            )
-                            Text("OPACIDAD ${(slot.opacity * 100).roundToInt()}%", Modifier.padding(horizontal = 14.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Slider(
-                                value = slot.opacity.coerceIn(0.05f, 1f),
-                                onValueChange = { onSelectSlot(index); onUpdateOpacity(it) },
-                                valueRange = 0.05f..1f,
                                 modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
                             )
                             Row(
