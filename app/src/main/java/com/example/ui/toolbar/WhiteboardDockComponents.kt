@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1035,15 +1036,7 @@ internal fun StickyNoteDropdownMenu(
                     text = if (placeOnTapMode) "Modo: tocar en el lienzo" else "Colocar tocando el lienzo",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-    }
-}
-
-
-@Composable
+                    color = MaterialTheme.colorScheme.onSurface@Composable
 internal fun ConfigurablePenSlots(
     slots: List<PenToolSlot>,
     activeIndex: Int,
@@ -1057,6 +1050,12 @@ internal fun ConfigurablePenSlots(
 ) {
     var editingIndex by remember { mutableStateOf<Int?>(null) }
     val normalizedSlots = (slots.take(3) + PenToolSlot.EMPTY_SLOTS.drop(slots.take(3).size)).take(3)
+    val toolOptions = listOf(
+        Triple(ToolType.PEN, "Lápiz", "Trazo preciso"),
+        Triple(ToolType.FINE_MARKER, "Marcador", "Trazo sólido"),
+        Triple(ToolType.HIGHLIGHTER, "Resaltador", "Trazo translúcido")
+    )
+
     Surface(
         modifier = modifier.testTag("configurable_pen_slots"),
         shape = RoundedCornerShape(WhiteboardUiMetrics.dockCorner),
@@ -1083,12 +1082,23 @@ internal fun ConfigurablePenSlots(
                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                             )
                             .border(
-                                if (activeIndex == index && slot.isConfigured) 1.dp else 0.dp,
-                                if (activeIndex == index && slot.isConfigured) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                if (activeIndex == index && slot.isConfigured) 2.dp else 1.dp,
+                                if (activeIndex == index && slot.isConfigured) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
                                 RoundedCornerShape(WhiteboardUiMetrics.groupCorner)
                             )
-                            .clickable {
-                                if (slot.isConfigured) onSelectSlot(index) else editingIndex = index
+                            .combinedClickable(
+                                role = Role.Button,
+                                onClick = {
+                                    if (slot.isConfigured) onSelectSlot(index) else editingIndex = index
+                                },
+                                onLongClick = { if (slot.isConfigured) editingIndex = index }
+                            )
+                            .semantics {
+                                contentDescription = if (slot.isConfigured) {
+                                    "Ranura ${index + 1}, ${slot.tool}, ${if (activeIndex == index) "activa" else "configurada"}. Mantener presionado para editar."
+                                } else "Ranura ${index + 1} vacía. Tocar para elegir herramienta."
+                                selected = slot.isConfigured && activeIndex == index
                             }
                             .testTag("pen_slot_$index")
                     ) {
@@ -1096,102 +1106,88 @@ internal fun ConfigurablePenSlots(
                             ActiveDrawingToolGlyph(
                                 tool = slot.tool!!,
                                 tint = parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.onSurface),
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(21.dp)
                             )
-                            Box(
-                                Modifier
-                                    .padding(top = 3.dp)
-                                    .size(width = 18.dp, height = 3.dp)
-                                    .clip(CircleShape)
-                                    .background(parseDockColorSafe(slot.colorHex, MaterialTheme.colorScheme.primary).copy(alpha = slot.opacity))
-                            )
+                            Canvas(Modifier.padding(top = 3.dp).size(width = 27.dp, height = 7.dp)) {
+                                drawLine(
+                                    color = parseDockColorSafe(slot.colorHex, Color.Black).copy(alpha = slot.opacity.coerceIn(0.05f, 1f)),
+                                    start = Offset(1f, size.height / 2f),
+                                    end = Offset(size.width - 1f, size.height / 2f),
+                                    strokeWidth = (slot.width / 4f).coerceIn(1.5f, 5f),
+                                    cap = StrokeCap.Round
+                                )
+                            }
                         } else {
-                            Text(
-                                "+",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 25.sp,
-                                lineHeight = 26.sp,
-                                fontWeight = FontWeight.Normal
-                            )
+                            Text("+", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 25.sp, lineHeight = 25.sp)
+                            Text("Añadir", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, lineHeight = 10.sp, fontWeight = FontWeight.Medium)
                         }
                     }
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(22.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surface)
-                            .clickable { editingIndex = index }
-                            .testTag("pen_slot_edit_$index"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("⋯", fontSize = 12.sp, lineHeight = 12.sp, color = MaterialTheme.colorScheme.onSurface)
-                    }
+
                     DropdownMenu(
                         expanded = editingIndex == index,
                         onDismissRequest = { editingIndex = null },
-                        modifier = Modifier.widthIn(min = 210.dp, max = 280.dp)
+                        modifier = Modifier.widthIn(min = 248.dp, max = 290.dp)
                     ) {
                         Text(
-                            text = "RANURA ${index + 1}",
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                            if (slot.isConfigured) "PERSONALIZAR RANURA ${index + 1}" else "ELEGIR HERRAMIENTA",
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Bold
                         )
-                        listOf(
-                            ToolType.PEN to "Lápiz",
-                            ToolType.FINE_MARKER to "Marcador",
-                            ToolType.HIGHLIGHTER to "Resaltador"
-                        ).forEach { (tool, label) ->
+                        toolOptions.forEach { (tool, label, description) ->
+                            val selectedTool = slot.isConfigured && slot.tool == tool
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (selectedTool) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f) else Color.Transparent)
                                     .clickable {
                                         onConfigureSlot(index, tool)
                                         editingIndex = null
                                     }
-                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    .padding(horizontal = 9.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(11.dp)
                             ) {
-                                ActiveDrawingToolGlyph(tool, MaterialTheme.colorScheme.onSurface, Modifier.size(18.dp))
-                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                                Box(
+                                    Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    ActiveDrawingToolGlyph(tool, MaterialTheme.colorScheme.onSurface, Modifier.size(23.dp))
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                    Text(description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                Canvas(Modifier.size(width = 38.dp, height = 22.dp)) {
+                                    val alpha = if (tool == ToolType.HIGHLIGHTER) 0.38f else 1f
+                                    val stroke = when (tool) {
+                                        ToolType.PEN -> 2.5f
+                                        ToolType.FINE_MARKER -> 6f
+                                        else -> 9f
+                                    }
+                                    drawLine(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                                        Offset(2f, size.height / 2f),
+                                        Offset(size.width - 2f, size.height / 2f),
+                                        stroke,
+                                        cap = StrokeCap.Round
+                                    )
+                                }
                             }
                         }
                         if (slot.isConfigured) {
+                            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                            Text("COLOR", Modifier.padding(horizontal = 14.dp, vertical = 4.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        onClearSlot(index)
-                                        editingIndex = null
-                                    }
-                                    .padding(horizontal = 14.dp, vertical = 9.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    "Vaciar ranura",
-                                    color = MaterialTheme.colorScheme.error,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            Text(
-                                "COLOR",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 4.dp),
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 5.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 DockPenColorPalette.forEach { option ->
                                     Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(CircleShape)
+                                        Modifier.size(29.dp).clip(CircleShape)
                                             .background(parseDockColorSafe(option.hex, Color.Black))
                                             .border(
                                                 if (slot.colorHex.equals(option.hex, true)) 2.dp else 1.dp,
@@ -1206,36 +1202,28 @@ internal fun ConfigurablePenSlots(
                                     )
                                 }
                             }
-                            Text(
-                                "GROSOR",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("GROSOR", Modifier.padding(horizontal = 14.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Slider(
                                 value = slot.width.coerceIn(1f, 48f),
-                                onValueChange = {
-                                    onSelectSlot(index)
-                                    onUpdateWidth(it)
-                                },
+                                onValueChange = { onSelectSlot(index); onUpdateWidth(it) },
                                 valueRange = 1f..48f,
                                 modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
                             )
-                            Text(
-                                "OPACIDAD ${(slot.opacity * 100).roundToInt()}%",
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Text("OPACIDAD ${(slot.opacity * 100).roundToInt()}%", Modifier.padding(horizontal = 14.dp, vertical = 2.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Slider(
                                 value = slot.opacity.coerceIn(0.05f, 1f),
-                                onValueChange = {
-                                    onSelectSlot(index)
-                                    onUpdateOpacity(it)
-                                },
+                                onValueChange = { onSelectSlot(index); onUpdateOpacity(it) },
                                 valueRange = 0.05f..1f,
                                 modifier = Modifier.padding(horizontal = 12.dp).height(34.dp)
                             )
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onClearSlot(index); editingIndex = null }.padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(17.dp))
+                                Text("Vaciar ranura", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
