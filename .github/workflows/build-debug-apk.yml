@@ -9,6 +9,7 @@ on:
       - integration/rich-notes-main
       - release/2.3.0-lite
       - feat/unified-dock-system
+      # Temporary UI integration branch; keep debug APK validation enabled.
 
 permissions:
   contents: read
