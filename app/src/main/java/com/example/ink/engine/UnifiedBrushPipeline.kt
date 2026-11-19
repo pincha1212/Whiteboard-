@@ -170,7 +170,8 @@ object UnifiedBrushPipeline {
         val worldWidth = stroke.width.coerceAtLeast(1.5f)
         // A live preview wraps a mutable point list. Its bounds would require an O(n)
         // rescan on every pointer update, while the preview is already known to be active.
-        if (!preserveInputPoints && viewportW > 0f && viewportH > 0f) {
+        val isLivePreview = stroke.id == "live_active_stroke"
+        if (!isLivePreview && viewportW > 0f && viewportH > 0f) {
             val bounds = stroke.geometryMetrics
             if (bounds.hasPoints) {
                 val sMinX = bounds.minX * safeScale + panX
@@ -214,12 +215,12 @@ object UnifiedBrushPipeline {
                 stableOpenContours = preserveInputPoints
             )
         }
-        // The live preview changes on every pointer event. Caching every intermediate
-        // geometry only churns the LRU and evicts useful committed strokes.
-        val nodes: List<BrushNode> = if (preserveInputPoints) {
+        // Only the mutable live preview bypasses the cache. Committed strokes can
+        // preserve their captured input path while reusing the generated brush nodes.
+        val nodes: List<BrushNode> = if (isLivePreview) {
             buildNodes()
         } else {
-            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${preserveInputPoints}:${(effectiveHandDrawn * 100).roundToInt()}"
             nodeCache.get(cacheKey) ?: buildNodes().also { built ->
                 if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
             }
