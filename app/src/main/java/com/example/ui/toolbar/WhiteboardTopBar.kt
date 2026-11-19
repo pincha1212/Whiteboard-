@@ -532,6 +532,8 @@ private fun WorkspaceSegmentItem(
 }
 
 
+@Composable
+private fun TopBarActionIcon(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean,
