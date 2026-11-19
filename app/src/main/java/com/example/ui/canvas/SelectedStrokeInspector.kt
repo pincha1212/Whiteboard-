@@ -66,6 +66,7 @@ import com.example.model.ShapeType
 import com.example.model.StickyNote
 import com.example.model.StrokeStyle
 import com.example.model.WhiteboardStroke
+import com.example.ui.toolbar.WhiteboardUiMetrics
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -1010,15 +1011,15 @@ private fun DockMiniIconButton(
     testTag: String? = null
 ) {
     val mod = Modifier
-        .size(34.dp)
-        .clip(RoundedCornerShape(10.dp))
+        .size(WhiteboardUiMetrics.compactAction)
+        .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
         .background(bgColor)
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
         .clickable(onClick = onClick)
         .let { if (testTag != null) it.testTag(testTag) else it }
 
     Box(modifier = mod, contentAlignment = Alignment.Center) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(16.dp))
+        Icon(imageVector = icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(WhiteboardUiMetrics.compactIcon))
     }
 }
 
