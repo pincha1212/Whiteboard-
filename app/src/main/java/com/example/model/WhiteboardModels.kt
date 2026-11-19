@@ -268,26 +268,6 @@ data class StickerItem(
     val scale: Float = 1.3f
 )
 
-data class AuditLogEntry(
-    val id: String = UUID.randomUUID().toString(),
-    val timestamp: Long = System.currentTimeMillis(),
-    val actionName: String,
-    val details: String,
-    val category: String = "CANVAS"
-)
-
-data class BoardVersionSnapshot(
-    val versionId: String = UUID.randomUUID().toString(),
-    val boardId: String,
-    val versionName: String,
-    val description: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val strokeCount: Int,
-    val noteCount: Int,
-    val shapeCount: Int,
-    val serializedData: String
-)
-
 data class WhiteboardBoard(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -301,8 +281,6 @@ data class WhiteboardBoard(
     val imageCards: List<ImageCardItem> = emptyList(),
     val textItems: List<TextItem> = emptyList(),
     val stickers: List<StickerItem> = emptyList(),
-    val auditLogs: List<AuditLogEntry> = emptyList(),
-    val snapshots: List<BoardVersionSnapshot> = emptyList()
 )
 
 data class ShapeRecognitionProposal(
