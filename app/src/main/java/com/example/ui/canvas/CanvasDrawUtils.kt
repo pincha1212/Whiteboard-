@@ -286,17 +286,18 @@ fun DrawScope.drawShapeVector(
                 val p0 = Offset(shape.vertices.first().x * scale + panX, shape.vertices.first().y * scale + panY)
                 val p1 = Offset(shape.vertices.last().x * scale + panX, shape.vertices.last().y * scale + panY)
 
-                val rot0 = p0 + Offset(0f, -32f)
-                val rot1 = p1 + Offset(0f, -32f)
+                val midpoint = Offset((p0.x + p1.x) / 2f, (p0.y + p1.y) / 2f)
+                val rotationHandle = midpoint + Offset(0f, -32f)
 
-                drawLine(color = Color(0xFF2563EB), start = p0, end = rot0, strokeWidth = 2f)
-                drawLine(color = Color(0xFF2563EB), start = p1, end = rot1, strokeWidth = 2f)
-
+                drawLine(
+                    color = Color(0xFF2563EB),
+                    start = midpoint,
+                    end = rotationHandle,
+                    strokeWidth = 2f
+                )
                 drawHandleCircle(p0)
-                drawRotationHandleCircle(rot0)
-
                 drawHandleCircle(p1)
-                drawRotationHandleCircle(rot1)
+                drawRotationHandleCircle(rotationHandle)
             } else {
                 drawRect(
                     color = Color(0xFF2563EB),
