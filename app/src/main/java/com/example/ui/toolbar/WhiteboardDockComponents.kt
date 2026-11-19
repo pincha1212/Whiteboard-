@@ -1,10 +1,10 @@
 package com.example.ui.toolbar
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -1036,7 +1036,16 @@ internal fun StickyNoteDropdownMenu(
                     text = if (placeOnTapMode) "Modo: tocar en el lienzo" else "Colocar tocando el lienzo",
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface@Composable
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 internal fun ConfigurablePenSlots(
     slots: List<PenToolSlot>,
     activeIndex: Int,
