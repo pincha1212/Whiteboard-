@@ -1171,6 +1171,7 @@ internal fun ConfigurablePenSlots(
                                     Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                                     Text(description, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
+                                val previewStrokeColor = MaterialTheme.colorScheme.primary
                                 Canvas(Modifier.size(width = 38.dp, height = 22.dp)) {
                                     val alpha = if (tool == ToolType.HIGHLIGHTER) 0.38f else 1f
                                     val stroke = when (tool) {
@@ -1179,7 +1180,7 @@ internal fun ConfigurablePenSlots(
                                         else -> 9f
                                     }
                                     drawLine(
-                                        MaterialTheme.colorScheme.primary.copy(alpha = alpha),
+                                        previewStrokeColor.copy(alpha = alpha),
                                         Offset(2f, size.height / 2f),
                                         Offset(size.width - 2f, size.height / 2f),
                                         stroke,
