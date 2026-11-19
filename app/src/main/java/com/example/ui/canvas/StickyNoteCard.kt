@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
@@ -498,13 +499,15 @@ private fun StickyNoteCardBody(
             color = textColor,
             fontSize = (autoFitFontSp.value * 1.15f).sp,
             lineHeight = (autoFitFontSp.value * 1.32f).sp,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
         )
         val effectiveStyle = TextStyle(
             color = textColor,
             fontSize = autoFitFontSp,
             lineHeight = (autoFitFontSp.value * 1.18f).sp,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Start
         )
         val bodyMinHeightDp = with(density) { (innerHeightWorld * 0.55f).toDp() }
 
