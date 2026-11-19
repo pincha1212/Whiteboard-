@@ -82,8 +82,6 @@ fun WhiteboardPenDock(
     onAddStickyNote: () -> Unit,
     onAddText: () -> Unit,
     onClearBoard: () -> Unit,
-    isStylusModeEnabled: Boolean = false,
-    onToggleStylusMode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showMoreMenu by remember { mutableStateOf(false) }
@@ -322,21 +320,6 @@ fun WhiteboardPenDock(
                         PhysicalPenSquiggleIcon(
                             tint = if (isInkBarActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(22.dp)
-                        )
-                    }
-
-                    // Independent stylus input mode
-                    CompactDockActionButton(
-                        isSelected = isStylusModeEnabled,
-                        description = if (isStylusModeEnabled) "Desactivar modo lápiz óptico" else "Activar modo lápiz óptico",
-                        onClick = onToggleStylusMode,
-                        testTag = "dock_toggle_stylus_mode"
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = null,
-                            tint = if (isStylusModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(21.dp)
                         )
                     }
 
