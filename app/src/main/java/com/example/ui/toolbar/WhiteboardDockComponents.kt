@@ -188,13 +188,13 @@ internal fun DockActionButton(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .defaultMinSize(minWidth = minWidthDp.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .defaultMinSize(minWidth = minWidthDp.dp, minHeight = WhiteboardUiMetrics.touchTarget)
+            .clip(RoundedCornerShape(WhiteboardUiMetrics.groupCorner))
             .background(bgColor)
             .border(
                 width = if (isSelected) 1.25.dp else 0.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(12.dp)
+                shape = RoundedCornerShape(WhiteboardUiMetrics.groupCorner)
             )
             .clickable(role = Role.Button, onClick = onClick)
             .semantics {
