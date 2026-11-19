@@ -486,7 +486,7 @@ class WhiteboardViewModel(
             strokeStyle = StrokeStyle.SOLID,
             capStyle = LineCapStyle.NONE,
             brushType = brushType,
-            opacity = state.penOpacity.coerceIn(0.05f, 1f)
+            opacity = brushType.defaultOpacity
         )
 
         val recognized = if (state.autoShapeRecognition) {
@@ -2901,13 +2901,7 @@ class WhiteboardViewModel(
                 tool = tool,
                 colorHex = if (previous.isConfigured) previous.colorHex else state.penColorHex,
                 width = if (previous.isConfigured) previous.width else state.penWidth.coerceIn(1f, 48f),
-                opacity = if (tool == ToolType.HIGHLIGHTER && previous.tool != ToolType.HIGHLIGHTER) {
-                    0.30f
-                } else if (previous.isConfigured) {
-                    previous.opacity
-                } else {
-                    state.penOpacity.coerceIn(0.05f, 1f)
-                }
+                opacity = brushTypeForTool(tool).defaultOpacity
             )
         }.take(3)
         store.updatePenToolSlots(slots)
@@ -2918,7 +2912,7 @@ class WhiteboardViewModel(
                 currentTool = tool,
                 penColorHex = slots[index].colorHex,
                 penWidth = slots[index].width,
-                penOpacity = slots[index].opacity,
+                penOpacity = brushTypeForTool(tool).defaultOpacity,
                 isRainbowPen = false,
                 pendingBrushType = brushTypeForTool(tool)
             )
@@ -2956,7 +2950,7 @@ class WhiteboardViewModel(
                 currentTool = tool,
                 penColorHex = slot.colorHex,
                 penWidth = slot.width,
-                penOpacity = slot.opacity,
+                penOpacity = brushTypeForTool(tool).defaultOpacity,
                 isRainbowPen = false,
                 pendingBrushType = brushTypeForTool(tool)
             )
@@ -2972,12 +2966,6 @@ class WhiteboardViewModel(
         val safeWidth = width.coerceIn(1f, 48f)
         _uiState.update { it.copy(penWidth = safeWidth) }
         persistActivePenSlotUpdate { it.copy(width = safeWidth) }
-    }
-
-    fun setPenOpacity(opacity: Float) {
-        val safeOpacity = opacity.coerceIn(0.05f, 1f)
-        _uiState.update { it.copy(penOpacity = safeOpacity) }
-        persistActivePenSlotUpdate { it.copy(opacity = safeOpacity) }
     }
 
     fun setPenStyle(style: StrokeStyle) {
