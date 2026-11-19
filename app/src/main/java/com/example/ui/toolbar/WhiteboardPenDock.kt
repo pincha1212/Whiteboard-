@@ -700,7 +700,7 @@ private fun InsertActionsCluster(
 
         DockActionButton(
             isSelected = false,
-            description = "Insertar texto en lienzo",
+            description = "Crear texto y elegir su formato",
             onClick = onAddText,
             testTag = "dock_action_add_text",
             minWidthDp = 42
@@ -709,7 +709,7 @@ private fun InsertActionsCluster(
                 imageVector = Icons.Default.TextFields,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(20.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
 
