@@ -360,9 +360,8 @@ class PaintTileRasterCache {
         private fun unpackTy(key: Long): Int = key.toInt()
 
         private fun mixHash(acc: Long, value: Long): Long {
-            var h = acc * 0x9E3779B97F4A7C15L
-            h = h xor value
-            h = h xor (h ushr 33)
+            var h = acc xor value
+            h = (h xor (h ushr 27))
             return h
         }
     }
