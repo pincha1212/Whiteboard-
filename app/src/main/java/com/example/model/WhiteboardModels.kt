@@ -3,6 +3,23 @@ package com.example.model
 import androidx.compose.runtime.Immutable
 import java.util.UUID
 
+/**
+ * A user-configurable slot in the main drawing dock.
+ * A null tool represents an intentionally empty slot.
+ */
+data class PenToolSlot(
+    val tool: ToolType? = null,
+    val colorHex: String = "#1E1E1E",
+    val width: Float = 6f,
+    val opacity: Float = 1f
+) {
+    val isConfigured: Boolean get() = tool != null
+
+    companion object {
+        val EMPTY_SLOTS = listOf(PenToolSlot(), PenToolSlot(), PenToolSlot())
+    }
+}
+
 enum class ToolType {
     HAND,
     PEN,

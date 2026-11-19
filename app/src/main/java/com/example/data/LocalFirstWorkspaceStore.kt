@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
 import com.example.model.StickyNote
+import com.example.model.PenToolSlot
+import com.example.model.ToolType
 import com.example.model.WhiteboardBoard
 import com.example.notes.data.NoteExportImportService
 import com.example.notes.model.CanvasNoteData
@@ -34,7 +36,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 data class WorkspaceDbState(
     val notes: List<NoteItem> = emptyList(),
     val folders: List<NoteFolder> = emptyList(),
-    val boards: List<WhiteboardBoard> = emptyList()
+    val boards: List<WhiteboardBoard> = emptyList(),
+    val penToolSlots: List<PenToolSlot> = PenToolSlot.EMPTY_SLOTS
 )
 
 private data class PersistRequest(
@@ -97,6 +100,15 @@ class LocalFirstWorkspaceStore(
                 persistSnapshot(request)
             }
         }
+    }
+
+    /**
+     * Persists the three configurable drawing slots in the same local-first snapshot
+     * as boards and notes. The list is normalized to exactly three entries.
+     */
+    fun updatePenToolSlots(slots: List<PenToolSlot>): WorkspaceDbState {
+        val normalized = slots.take(3) + PenToolSlot.EMPTY_SLOTS.drop(slots.take(3).size)
+        return commit { current -> current.copy(penToolSlots = normalized) }
     }
 
     fun addListener(listener: (WorkspaceDbState) -> Unit) {
@@ -550,6 +562,17 @@ class LocalFirstWorkspaceStore(
             }
             root.put("boards", boardsArr)
 
+            val penSlotsArr = JSONArray()
+            state.penToolSlots.take(3).forEach { slot ->
+                val slotObj = JSONObject()
+                slotObj.put("tool", slot.tool?.name ?: JSONObject.NULL)
+                slotObj.put("colorHex", slot.colorHex)
+                slotObj.put("width", slot.width.toDouble())
+                slotObj.put("opacity", slot.opacity.toDouble())
+                penSlotsArr.put(slotObj)
+            }
+            root.put("penToolSlots", penSlotsArr)
+
             // AtomicFile keeps a recoverable backup until the replacement has been synced and committed.
             val stream = atomicFile.startWrite()
             outputStream = stream
@@ -595,7 +618,32 @@ class LocalFirstWorkspaceStore(
                     boards.add(restored)
                 }
             }
-            projectBoardsFromNotes(WorkspaceDbState(notes = notes, folders = folders, boards = boards))
+            val savedSlots = mutableListOf<PenToolSlot>()
+            val slotsArray = root.optJSONArray("penToolSlots")
+            if (slotsArray != null) {
+                for (i in 0 until minOf(slotsArray.length(), 3)) {
+                    val slotObj = slotsArray.optJSONObject(i) ?: continue
+                    val toolName = slotObj.optString("tool").takeIf { it.isNotBlank() && it != "null" }
+                    val tool = toolName?.let { runCatching { ToolType.valueOf(it) }.getOrNull() }
+                    savedSlots.add(
+                        PenToolSlot(
+                            tool = tool,
+                            colorHex = slotObj.optString("colorHex", "#1E1E1E"),
+                            width = slotObj.optDouble("width", 6.0).toFloat().coerceIn(1f, 48f),
+                            opacity = slotObj.optDouble("opacity", 1.0).toFloat().coerceIn(0.05f, 1f)
+                        )
+                    )
+                }
+            }
+            val normalizedSlots = savedSlots + PenToolSlot.EMPTY_SLOTS.drop(savedSlots.size)
+            projectBoardsFromNotes(
+                WorkspaceDbState(
+                    notes = notes,
+                    folders = folders,
+                    boards = boards,
+                    penToolSlots = normalizedSlots
+                )
+            )
         } catch (error: Exception) {
             val recoveryCopy = try {
                 preserveUnreadableSnapshot(targetFile)
