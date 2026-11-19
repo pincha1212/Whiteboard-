@@ -544,8 +544,8 @@ private fun TopBarActionIcon(
 
     Box(
         modifier = Modifier
-            .size(32.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(WhiteboardUiMetrics.compactAction)
+            .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
             .background(bgColor)
             .clickable(enabled = enabled, onClick = onClick)
             .testTag(testTag),
@@ -555,7 +555,7 @@ private fun TopBarActionIcon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tintColor,
-            modifier = Modifier.size(17.dp)
+            modifier = Modifier.size(WhiteboardUiMetrics.standardIcon)
         )
     }
 }
