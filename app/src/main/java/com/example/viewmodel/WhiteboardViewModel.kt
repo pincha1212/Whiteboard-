@@ -486,34 +486,14 @@ class WhiteboardViewModel(
             opacity = brushType.defaultOpacity
         )
 
-        val recognized = if (state.autoShapeRecognition) {
-            ShapeRecognizer.recognizeStroke(newStroke.copy(points = points))
-        } else {
-            null
-        }
-
-        if (recognized != null && recognized.confidence >= 0.80f && recognized.shapeType != ShapeType.LINE) {
-            _uiState.update {
-                it.withUpdatedBoard { b ->
-                    b.copy(
-                        shapes = b.shapes + recognized.shapeItem
-                    )
-                }.copy(
-                    activeStroke = null,
-                    shapeRecognitionProposal = null
-                )
-            }
-        } else {
-            _uiState.update {
-                it.withUpdatedBoard { b ->
-                    b.copy(
-                        strokes = b.strokes + newStroke
-                    )
-                }.copy(
-                    activeStroke = null,
-                    shapeRecognitionProposal = null
-                )
-            }
+        // A freehand stroke is committed unchanged. Shape conversion remains an explicit user action.
+        _uiState.update {
+            it.withUpdatedBoard { b ->
+                b.copy(strokes = b.strokes + newStroke)
+            }.copy(
+                activeStroke = null,
+                shapeRecognitionProposal = null
+            )
         }
     }
 
