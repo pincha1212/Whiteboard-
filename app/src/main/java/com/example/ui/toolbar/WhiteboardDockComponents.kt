@@ -677,43 +677,19 @@ internal fun PenStyleTriggerButton(
             .testTag("dock_more_menu_button")
     ) {
         Box(contentAlignment = Alignment.TopEnd) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(16.dp)
-                        .clip(CircleShape)
-                        .then(
-                            if (isRainbowPen) {
-                                Modifier.background(Brush.sweepGradient(DockRainbowColors))
-                            } else {
-                                Modifier.background(parsedColor)
-                            }
-                        )
-                        .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Column(horizontalAlignment = Alignment.Start) {
-                    Text(
-                        text = "${penWidth.roundToInt()}px",
-                        fontSize = 10.sp,
-                        lineHeight = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isExpanded) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .then(
+                        if (isRainbowPen) {
+                            Modifier.background(Brush.sweepGradient(DockRainbowColors))
+                        } else {
+                            Modifier.background(parsedColor)
+                        }
                     )
-                    if (autoShapeRecognition) {
-                        Text(
-                            text = "Auto",
-                            fontSize = 8.sp,
-                            lineHeight = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
+                    .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            )
             // Corner triangle indicator for long-press / popup menu
             Box(
                 modifier = Modifier
