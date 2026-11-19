@@ -541,22 +541,32 @@ private fun TopBarActionIcon(
     testTag: String
 ) {
     val bgColor = if (!enabled) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant
-    val tintColor = if (!enabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.onSurface
+    val tintColor = if (!enabled) {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
 
     Box(
         modifier = Modifier
-            .size(WhiteboardUiMetrics.compactAction)
-            .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
-            .background(bgColor)
+            .size(WhiteboardUiMetrics.touchTarget)
             .clickable(enabled = enabled, onClick = onClick)
             .testTag(testTag),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = tintColor,
-            modifier = Modifier.size(WhiteboardUiMetrics.standardIcon)
-        )
+        Box(
+            modifier = Modifier
+                .size(WhiteboardUiMetrics.compactAction)
+                .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
+                .background(bgColor),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tintColor,
+                modifier = Modifier.size(WhiteboardUiMetrics.standardIcon)
+            )
+        }
     }
 }
