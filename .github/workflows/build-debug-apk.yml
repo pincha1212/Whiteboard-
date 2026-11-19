@@ -10,6 +10,7 @@ on:
       - release/2.3.0-lite
       - feat/unified-dock-system
       # Temporary UI integration branch; keep debug APK validation enabled.
+      # Revalidate after shared touch-target updates.
 
 permissions:
   contents: read
