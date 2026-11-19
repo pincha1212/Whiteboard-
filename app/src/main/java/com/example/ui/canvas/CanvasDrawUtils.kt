@@ -402,13 +402,26 @@ fun DrawScope.drawStrokeSelectionHandles(
 }
 
 fun DrawScope.drawLaserTrail(trail: List<LaserPoint>) {
-    if (trail.isEmpty()) return
+    if (trail.size < 2) return
+
     val now = System.currentTimeMillis()
-    for (p in trail) {
-        val age = now - p.timestamp
-        if (age < 1500) {
-            val alpha = (1.0f - (age / 1500f)).coerceIn(0f, 1f)
-            drawCircle(color = Color(0xFFFF1744).copy(alpha = alpha), radius = 10f * alpha, center = Offset(p.x, p.y))
-        }
+    val visiblePoints = trail.filter { now - it.timestamp < 1500L }
+    if (visiblePoints.size < 2) return
+
+    // Render consecutive pointer samples as a continuous rounded stroke, not as dots.
+    for (index in 1 until visiblePoints.size) {
+        val previous = visiblePoints[index - 1]
+        val current = visiblePoints[index]
+        val age = now - current.timestamp
+        val alpha = (1f - (age / 1500f)).coerceIn(0f, 1f)
+        if (alpha <= 0f) continue
+
+        drawLine(
+            color = Color(0xFFFF1744).copy(alpha = alpha),
+            start = Offset(previous.x, previous.y),
+            end = Offset(current.x, current.y),
+            strokeWidth = 6f * alpha,
+            cap = StrokeCap.Round
+        )
     }
 }
