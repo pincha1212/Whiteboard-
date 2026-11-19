@@ -76,6 +76,7 @@ fun PhysicalFountainPenIcon(
 
 @Composable
 fun PhysicalPencilIcon(
+    tipColor: Color = Color(0xFF1E293B),
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
@@ -99,7 +100,7 @@ fun PhysicalPencilIcon(
             lineTo(cx - w * 0.095f, h * 0.26f)
             close()
         }
-        drawPath(tip, color = Color(0xFF1E293B))
+        drawPath(tip, color = tipColor)
 
         // Hexagonal yellow wooden body anchored to bottom
         drawRect(
