@@ -1808,9 +1808,10 @@ private fun getShapeHandleHitIndex(
     if (shape.shapeType.isLineLike && shape.vertices.size >= 2) {
         val p0 = shape.vertices[0]
         val p1 = shape.vertices[1]
+        val midpointX = (p0.x + p1.x) / 2f
+        val midpointY = (p0.y + p1.y) / 2f
         val rotOffset = ShapeCanvasCoordinates.lineRotationHandleOffsetWorld(scale)
-        if (hypot(wX - p0.x, wY - (p0.y - rotOffset)) <= rotHitTolerance) return 2
-        if (hypot(wX - p1.x, wY - (p1.y - rotOffset)) <= rotHitTolerance) return 3
+        if (hypot(wX - midpointX, wY - (midpointY - rotOffset)) <= rotHitTolerance) return 4
         if (hypot(wX - p0.x, wY - p0.y) <= tolerance) return 0
         if (hypot(wX - p1.x, wY - p1.y) <= tolerance) return 1
         return -1
