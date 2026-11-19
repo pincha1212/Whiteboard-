@@ -2894,13 +2894,16 @@ class WhiteboardViewModel(
     fun configurePenToolSlot(index: Int, tool: ToolType) {
         if (index !in 0..2 || tool !in setOf(ToolType.PEN, ToolType.FINE_MARKER, ToolType.HIGHLIGHTER)) return
         val state = _uiState.value
+        val previous = state.penToolSlots.getOrNull(index) ?: PenToolSlot()
         val slots = state.penToolSlots.toMutableList().apply {
             while (size < 3) add(PenToolSlot())
             this[index] = PenToolSlot(
                 tool = tool,
-                colorHex = state.penColorHex,
-                width = state.penWidth.coerceIn(1f, 48f),
-                opacity = if (tool == ToolType.HIGHLIGHTER) 0.30f else state.penOpacity.coerceIn(0.05f, 1f)
+                colorHex = if (previous.isConfigured) previous.colorHex else state.penColorHex,
+                width = if (previous.isConfigured) previous.width else state.penWidth.coerceIn(1f, 48f),
+                opacity = if (tool == ToolType.HIGHLIGHTER && !previous.isConfigured) 0.30f else {
+                    if (previous.isConfigured) previous.opacity else state.penOpacity.coerceIn(0.05f, 1f)
+                }
             )
         }.take(3)
         store.updatePenToolSlots(slots)
@@ -2915,6 +2918,27 @@ class WhiteboardViewModel(
                 isRainbowPen = false,
                 pendingBrushType = brushTypeForTool(tool)
             )
+        }
+    }
+
+    fun clearPenToolSlot(index: Int) {
+        if (index !in 0..2) return
+        val state = _uiState.value
+        val slots = state.penToolSlots.toMutableList().apply {
+            while (size < 3) add(PenToolSlot())
+            this[index] = PenToolSlot()
+        }.take(3)
+        store.updatePenToolSlots(slots)
+        _uiState.update {
+            if (it.activePenSlotIndex == index) {
+                it.copy(
+                    penToolSlots = slots,
+                    currentTool = ToolType.HAND,
+                    isRainbowPen = false
+                )
+            } else {
+                it.copy(penToolSlots = slots)
+            }
         }
     }
 
