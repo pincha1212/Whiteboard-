@@ -1010,16 +1010,31 @@ private fun DockMiniIconButton(
     onClick: () -> Unit,
     testTag: String? = null
 ) {
-    val mod = Modifier
-        .size(WhiteboardUiMetrics.compactAction)
-        .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
-        .background(bgColor)
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
-        .clickable(onClick = onClick)
-        .let { if (testTag != null) it.testTag(testTag) else it }
-
-    Box(modifier = mod, contentAlignment = Alignment.Center) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(WhiteboardUiMetrics.compactIcon))
+    Box(
+        modifier = Modifier
+            .defaultMinSize(
+                minWidth = WhiteboardUiMetrics.touchTarget,
+                minHeight = WhiteboardUiMetrics.touchTarget
+            )
+            .clickable(onClick = onClick)
+            .let { if (testTag != null) it.testTag(testTag) else it },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(WhiteboardUiMetrics.compactAction)
+                .clip(RoundedCornerShape(WhiteboardUiMetrics.controlCorner))
+                .background(bgColor)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(WhiteboardUiMetrics.controlCorner)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = tint,
+                modifier = Modifier.size(WhiteboardUiMetrics.compactIcon)
+            )
+        }
     }
 }
 
