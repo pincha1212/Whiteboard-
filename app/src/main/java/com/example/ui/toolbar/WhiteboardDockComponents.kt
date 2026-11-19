@@ -1049,6 +1049,7 @@ internal fun ConfigurablePenSlots(
     activeIndex: Int,
     onSelectSlot: (Int) -> Unit,
     onConfigureSlot: (Int, ToolType) -> Unit,
+    onClearSlot: (Int) -> Unit,
     onUpdateColor: (String) -> Unit,
     onUpdateWidth: (Float) -> Unit,
     onUpdateOpacity: (Float) -> Unit,
@@ -1159,6 +1160,22 @@ internal fun ConfigurablePenSlots(
                             }
                         }
                         if (slot.isConfigured) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onClearSlot(index)
+                                        editingIndex = null
+                                    }
+                                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Vaciar ranura",
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                             Text(
                                 "COLOR",
