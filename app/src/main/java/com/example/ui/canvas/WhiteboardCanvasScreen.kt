@@ -14,6 +14,15 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.Slider
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.Checkbox
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -140,6 +149,13 @@ fun WhiteboardCanvasScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSnapshotsModal by remember { mutableStateOf(false) }
     var showShapePickerModal by remember { mutableStateOf(false) }
+    var showTextEditor by remember { mutableStateOf(false) }
+    var textDraft by remember { mutableStateOf("Escribe aquí") }
+    var textColorDraft by remember { mutableStateOf("#1E1E1E") }
+    var textBackgroundDraft by remember { mutableStateOf<String?>(null) }
+    var textSizeDraft by remember { mutableStateOf(24f) }
+    var textWidthDraft by remember { mutableStateOf(260f) }
+    var textBoldDraft by remember { mutableStateOf(false) }
     var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
     var editingLabelText by remember { mutableStateOf("") }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
@@ -848,6 +864,7 @@ fun WhiteboardCanvasScreen(
         // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
+            var showTextFormatMenu by remember(tItem.id) { mutableStateOf(false) }
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
             // Keep the text item's measured layout in board-space units. The camera
             // scales the completed item, avoiding font/width changes and remeasurement
@@ -915,6 +932,78 @@ fun WhiteboardCanvasScreen(
                                 .testTag("editable_text_input_${tItem.id}")
                         )
                         if (!isPanOnlyMode) {
+                            Box {
+                                IconButton(
+                                    onClick = { showTextFormatMenu = true },
+                                    modifier = Modifier.size(28.dp).testTag("btn_format_text_${tItem.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Formato del texto",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showTextFormatMenu,
+                                    onDismissRequest = { showTextFormatMenu = false },
+                                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                                ) {
+                                    Text("TAMAÑO", modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    listOf(14f, 18f, 22f, 26f, 32f, 40f, 48f).forEach { size ->
+                                        DropdownMenuItem(
+                                            text = { Text("${size.toInt()} sp", fontWeight = if (tItem.fontSize == size) FontWeight.Bold else FontWeight.Normal) },
+                                            onClick = {
+                                                viewModel.updateTextItemStyle(tItem.id, fontSize = size)
+                                                showTextFormatMenu = false
+                                            }
+                                        )
+                                    }
+                                    HorizontalDivider()
+                                    Text("COLOR DE TEXTO", modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                        listOf("#1E1E1E", "#FFFFFF", "#DC2626", "#2563EB", "#16A34A", "#9333EA", "#EA580C").forEach { hex ->
+                                            Surface(
+                                                modifier = Modifier.size(25.dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape).clickable {
+                                                    viewModel.updateTextItemStyle(tItem.id, colorHex = hex)
+                                                    showTextFormatMenu = false
+                                                },
+                                                color = parseColor(hex, Color.Black),
+                                                shape = CircleShape
+                                            ) {}
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    Text("FONDO", modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    DropdownMenuItem(
+                                        text = { Text("Sin fondo") },
+                                        onClick = {
+                                            viewModel.updateTextItemStyle(tItem.id, clearBackground = true)
+                                            showTextFormatMenu = false
+                                        }
+                                    )
+                                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                                        listOf("#FFF275", "#DCEAFE", "#DCFCE7", "#FCE7F3", "#F3E8FF", "#1F2937").forEach { hex ->
+                                            Surface(
+                                                modifier = Modifier.size(25.dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape).clickable {
+                                                    viewModel.updateTextItemStyle(tItem.id, backgroundColorHex = hex)
+                                                    showTextFormatMenu = false
+                                                },
+                                                color = parseColor(hex, Color.White),
+                                                shape = CircleShape
+                                            ) {}
+                                        }
+                                    }
+                                    HorizontalDivider()
+                                    DropdownMenuItem(
+                                        text = { Text(if (tItem.isBold) "Quitar negrita" else "Negrita") },
+                                        onClick = {
+                                            viewModel.updateTextItemStyle(tItem.id, isBold = !tItem.isBold)
+                                            showTextFormatMenu = false
+                                        }
+                                    )
+                                }
+                            }
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Eliminar texto",
@@ -1484,8 +1573,8 @@ private fun CanvasDockOverlay(
     val onRequestPlaceStickyNote = remember(viewModel) {
         { color: String -> viewModel.requestAddStickyNote(color) }
     }
-    val onAddText = remember(viewModel) {
-        { viewModel.insertTextAtCenter() }
+    val onAddText = remember {
+        { showTextEditor = true }
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -1593,6 +1682,74 @@ private fun CanvasDockOverlay(
                 modifier = dockModifier
             )
         }
+    }
+    if (showTextEditor) {
+        AlertDialog(
+            onDismissRequest = { showTextEditor = false },
+            title = { Text("Insertar texto") },
+            text = {
+                Column(
+                    modifier = Modifier.widthIn(min = 280.dp, max = 380.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    OutlinedTextField(
+                        value = textDraft,
+                        onValueChange = { textDraft = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Contenido") },
+                        minLines = 3
+                    )
+                    Text("Tamaño: ${textSizeDraft.toInt()} sp", style = MaterialTheme.typography.labelMedium)
+                    Slider(value = textSizeDraft, onValueChange = { textSizeDraft = it }, valueRange = 12f..48f, steps = 35)
+                    Text("Ancho del cuadro: ${textWidthDraft.toInt()}", style = MaterialTheme.typography.labelMedium)
+                    Slider(value = textWidthDraft, onValueChange = { textWidthDraft = it }, valueRange = 140f..420f, steps = 13)
+                    Text("Color de texto", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("#1E1E1E", "#FFFFFF", "#DC2626", "#2563EB", "#16A34A", "#9333EA", "#EA580C").forEach { hex ->
+                            Surface(
+                                modifier = Modifier.size(29.dp).clip(CircleShape).border(if (textColorDraft == hex) 2.dp else 1.dp, MaterialTheme.colorScheme.primary, CircleShape).clickable { textColorDraft = hex },
+                                color = parseColor(hex, Color.Black),
+                                shape = CircleShape
+                            ) {}
+                        }
+                    }
+                    Text("Fondo", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(onClick = { textBackgroundDraft = null }) { Text("Ninguno") }
+                        listOf("#FFF275", "#DCEAFE", "#DCFCE7", "#FCE7F3", "#F3E8FF", "#1F2937").forEach { hex ->
+                            Surface(
+                                modifier = Modifier.size(26.dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape).clickable { textBackgroundDraft = hex },
+                                color = parseColor(hex, Color.White),
+                                shape = CircleShape
+                            ) {}
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = textBoldDraft, onCheckedChange = { textBoldDraft = it })
+                        Text("Negrita")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = textDraft.isNotBlank(),
+                    onClick = {
+                        viewModel.insertTextAtCenter(
+                            initialText = textDraft,
+                            colorHex = textColorDraft,
+                            fontSize = textSizeDraft,
+                            isBold = textBoldDraft,
+                            backgroundColorHex = textBackgroundDraft,
+                            width = textWidthDraft
+                        )
+                        showTextEditor = false
+                    }
+                ) { Text("Insertar en el lienzo") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTextEditor = false }) { Text("Cancelar") }
+            }
+        )
     }
 }
 
