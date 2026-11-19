@@ -1,5 +1,7 @@
 package com.example.viewmodel
 
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
 import com.example.data.BoardSnapshotSerializer
 import com.example.data.LocalFirstWorkspaceStore
@@ -12,6 +14,7 @@ import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.ViewportTransform
 import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
+import com.example.model.BrushSlot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.LaserPoint
@@ -76,7 +79,7 @@ data class WhiteboardUiState(
     val pendingStickyNoteColor: String? = null,
     val pendingShapeType: ShapeType? = null,
     val pendingIsFilled: Boolean = false,
-    val pendingStrokeColor: String = "#2563EB",
+    val pendingStrokeColor: String = "#1E1E1E",
     val pendingFillColor: String = "#DBEAFE",
     val pendingStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
     val pendingCapStyle: LineCapStyle = LineCapStyle.NONE,
@@ -85,6 +88,7 @@ data class WhiteboardUiState(
     val isPaintPixelMode: Boolean = true,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
+    val activeBrushSlotIndex: Int = 0
 )
 
 private data class BoardSnapshot(
@@ -112,6 +116,27 @@ class WhiteboardViewModel(
 
     private val _uiState = MutableStateFlow(createInitialState())
     val uiState: StateFlow<WhiteboardUiState> = _uiState.asStateFlow()
+
+    val brushSlots: SnapshotStateList<BrushSlot> = mutableStateListOf(
+        BrushSlot(
+            id = "dock_slot_0",
+            brushType = StrokeBrushType.FOUNTAIN_PEN,
+            colorHex = "#1E1E1E",
+            strokeWidth = 6f
+        ),
+        BrushSlot(
+            id = "dock_slot_1",
+            brushType = StrokeBrushType.FINE_MARKER,
+            colorHex = "#2563EB",
+            strokeWidth = 4f
+        ),
+        BrushSlot(
+            id = "dock_slot_2",
+            brushType = StrokeBrushType.HIGHLIGHTER,
+            colorHex = "#FACC15",
+            strokeWidth = 14f
+        )
+    )
 
     val stickyNotesStore = StickyNoteStateStore(_uiState.value.board.stickyNotes)
 
@@ -277,6 +302,9 @@ class WhiteboardViewModel(
         return copy(board = updated, allBoards = updatedAll)
     }
 
+    private fun ToolType.isBrushSlotTool(): Boolean =
+        this == ToolType.PEN || this == ToolType.FINE_MARKER || this == ToolType.HIGHLIGHTER
+
     fun setTool(tool: ToolType) {
         if (tool == ToolType.HAND) {
             flushPendingStickyNoteSync(persist = true)
@@ -288,16 +316,90 @@ class WhiteboardViewModel(
                     selectedStrokeId = null,
                     selectedShapeId = null,
                     selectedNoteId = null,
+                    selectedTextId = null,
                     selectedStrokeIds = emptySet(),
                     selectedShapeIds = emptySet(),
                     selectedNoteIds = emptySet(),
                     pendingStickyNoteColor = null,
                     pendingShapeType = null
                 )
+            } else if (tool.isBrushSlotTool()) {
+                val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
+                val targetIndex = if (activeSlot != null && activeSlot.toolType == tool) {
+                    state.activeBrushSlotIndex
+                } else {
+                    brushSlots.indexOfFirst { it.toolType == tool }.takeIf { it >= 0 }
+                        ?: state.activeBrushSlotIndex
+                }
+                val resolvedSlot = brushSlots.getOrNull(targetIndex)
+                if (resolvedSlot != null) {
+                    state.copy(
+                        activeBrushSlotIndex = targetIndex,
+                        currentTool = resolvedSlot.toolType,
+                        penColorHex = resolvedSlot.colorHex,
+                        penWidth = resolvedSlot.strokeWidth,
+                        isRainbowPen = resolvedSlot.isRainbow,
+                        pendingStrokeColor = resolvedSlot.colorHex,
+                        pendingBrushType = resolvedSlot.brushType
+                    )
+                } else {
+                    state.copy(
+                        currentTool = tool,
+                        pendingBrushType = brushTypeForTool(tool)
+                    )
+                }
             } else {
                 state.copy(
                     currentTool = tool,
                     pendingBrushType = brushTypeForTool(tool)
+                )
+            }
+        }
+    }
+
+    fun selectBrushSlot(slotIndex: Int) {
+        if (slotIndex !in brushSlots.indices) return
+        val slot = brushSlots[slotIndex]
+        _uiState.update { state ->
+            state.copy(
+                activeBrushSlotIndex = slotIndex,
+                currentTool = slot.toolType,
+                penColorHex = slot.colorHex,
+                penWidth = slot.strokeWidth,
+                isRainbowPen = slot.isRainbow,
+                pendingStrokeColor = slot.colorHex,
+                pendingBrushType = slot.brushType,
+                pendingStickyNoteColor = null,
+                pendingShapeType = null
+            )
+        }
+    }
+
+    fun updateBrushSlot(
+        slotIndex: Int,
+        brushType: StrokeBrushType? = null,
+        colorHex: String? = null,
+        strokeWidth: Float? = null,
+        isRainbow: Boolean? = null
+    ) {
+        if (slotIndex !in brushSlots.indices) return
+        val current = brushSlots[slotIndex]
+        val updated = current.copy(
+            brushType = brushType ?: current.brushType,
+            colorHex = colorHex ?: current.colorHex,
+            strokeWidth = strokeWidth?.coerceIn(2f, 24f) ?: current.strokeWidth,
+            isRainbow = isRainbow ?: current.isRainbow
+        )
+        brushSlots[slotIndex] = updated
+        if (slotIndex == _uiState.value.activeBrushSlotIndex) {
+            _uiState.update { state ->
+                state.copy(
+                    currentTool = if (state.currentTool.isBrushSlotTool()) updated.toolType else state.currentTool,
+                    penColorHex = updated.colorHex,
+                    penWidth = updated.strokeWidth,
+                    isRainbowPen = updated.isRainbow,
+                    pendingStrokeColor = updated.colorHex,
+                    pendingBrushType = updated.brushType
                 )
             }
         }
@@ -1171,6 +1273,10 @@ class WhiteboardViewModel(
         val shapeType = state.pendingShapeType ?: return
         saveUndoSnapshot()
 
+        val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
+        val inheritedWidth = (activeSlot?.strokeWidth ?: state.penWidth).coerceIn(2f, 24f)
+        val inheritedBrush = activeSlot?.brushType ?: state.pendingBrushType
+        val inheritedRainbow = activeSlot?.isRainbow ?: state.isRainbowPen
         val dragDist = kotlin.math.hypot(end.x - start.x, end.y - start.y)
         val newShape: ShapeItem = if (shapeType.isLineLike) {
             val v0: StrokePoint
@@ -1186,7 +1292,6 @@ class WhiteboardViewModel(
             val maxX = kotlin.math.max(v0.x, v1.x)
             val minY = kotlin.math.min(v0.y, v1.y)
             val maxY = kotlin.math.max(v0.y, v1.y)
-            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = minX,
@@ -1195,7 +1300,7 @@ class WhiteboardViewModel(
                 height = (maxY - minY).coerceAtLeast(1f),
                 strokeColorHex = state.pendingStrokeColor,
                 fillColorHex = state.pendingFillColor,
-                strokeWidth = state.penWidth.coerceIn(2f, 16f),
+                strokeWidth = inheritedWidth,
                 isFilled = false,
                 strokeStyle = state.pendingStrokeStyle,
                 capStyle = when (shapeType) {
@@ -1204,7 +1309,9 @@ class WhiteboardViewModel(
                     else -> state.pendingCapStyle
                 },
                 vertices = listOf(v0, v1),
-                brushType = activeBrush
+                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
+                opacity = inheritedBrush.defaultOpacity,
+                brushType = inheritedBrush
             )
         } else if (dragDist < 14f) {
             val isSquareLike = shapeType == ShapeType.CIRCLE ||
@@ -1214,7 +1321,6 @@ class WhiteboardViewModel(
                 shapeType == ShapeType.TRIANGLE
             val defW = if (isSquareLike) 160f else 190f
             val defH = if (isSquareLike) 160f else 130f
-            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = start.x - defW / 2f,
@@ -1223,17 +1329,18 @@ class WhiteboardViewModel(
                 height = defH,
                 strokeColorHex = state.pendingStrokeColor,
                 fillColorHex = state.pendingFillColor,
-                strokeWidth = state.penWidth.coerceIn(2f, 16f),
+                strokeWidth = inheritedWidth,
                 isFilled = state.pendingIsFilled,
                 strokeStyle = state.pendingStrokeStyle,
-                brushType = activeBrush
+                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
+                opacity = inheritedBrush.defaultOpacity,
+                brushType = inheritedBrush
             )
         } else {
             val minX = kotlin.math.min(start.x, end.x)
             val minY = kotlin.math.min(start.y, end.y)
             val w = kotlin.math.abs(end.x - start.x).coerceAtLeast(28f)
             val h = kotlin.math.abs(end.y - start.y).coerceAtLeast(28f)
-            val activeBrush = state.pendingBrushType
             ShapeItem(
                 shapeType = shapeType,
                 x = minX,
@@ -1242,10 +1349,12 @@ class WhiteboardViewModel(
                 height = h,
                 strokeColorHex = state.pendingStrokeColor,
                 fillColorHex = state.pendingFillColor,
-                strokeWidth = state.penWidth.coerceIn(2f, 16f),
+                strokeWidth = inheritedWidth,
                 isFilled = state.pendingIsFilled,
                 strokeStyle = state.pendingStrokeStyle,
-                brushType = activeBrush
+                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
+                opacity = inheritedBrush.defaultOpacity,
+                brushType = inheritedBrush
             )
         }
 
@@ -2678,7 +2787,7 @@ class WhiteboardViewModel(
     fun insertShapeAtCenter(
         shapeType: ShapeType,
         isFilled: Boolean = false,
-        strokeColor: String = "#2563EB",
+        strokeColor: String = _uiState.value.penColorHex,
         fillColor: String = "#DBEAFE"
     ) {
         val camera = _cameraState.value
@@ -2703,6 +2812,12 @@ class WhiteboardViewModel(
             else -> LineCapStyle.NONE
         }
 
+        val state = _uiState.value
+        val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
+        val inheritedWidth = (activeSlot?.strokeWidth ?: state.penWidth).coerceIn(2f, 24f)
+        val inheritedBrush = activeSlot?.brushType ?: state.pendingBrushType
+        val inheritedRainbow = activeSlot?.isRainbow ?: state.isRainbowPen
+
         saveUndoSnapshot()
         val shape = ShapeItem(
             shapeType = shapeType,
@@ -2712,11 +2827,13 @@ class WhiteboardViewModel(
             height = height,
             strokeColorHex = strokeColor,
             fillColorHex = fillColor,
-            strokeWidth = _uiState.value.penWidth.coerceIn(2f, 16f),
+            strokeWidth = inheritedWidth,
             isFilled = isFilled && !shapeType.isLineLike,
             capStyle = capStyle,
             vertices = vertices,
-            brushType = _uiState.value.pendingBrushType
+            isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
+            opacity = inheritedBrush.defaultOpacity,
+            brushType = inheritedBrush
         )
         _uiState.update { state ->
             state.withUpdatedBoard { b ->
@@ -2994,11 +3111,20 @@ class WhiteboardViewModel(
     }
 
     fun setPenColor(hex: String, isRainbow: Boolean = false) {
-        _uiState.update { it.copy(penColorHex = hex, isRainbowPen = isRainbow) }
+        val activeIdx = _uiState.value.activeBrushSlotIndex
+        if (activeIdx in brushSlots.indices) {
+            brushSlots[activeIdx] = brushSlots[activeIdx].copy(colorHex = hex, isRainbow = isRainbow)
+        }
+        _uiState.update { it.copy(penColorHex = hex, isRainbowPen = isRainbow, pendingStrokeColor = hex) }
     }
 
     fun setPenWidth(width: Float) {
-        _uiState.update { it.copy(penWidth = width) }
+        val clamped = width.coerceIn(2f, 24f)
+        val activeIdx = _uiState.value.activeBrushSlotIndex
+        if (activeIdx in brushSlots.indices) {
+            brushSlots[activeIdx] = brushSlots[activeIdx].copy(strokeWidth = clamped)
+        }
+        _uiState.update { it.copy(penWidth = clamped) }
     }
 
     fun setPenStyle(style: StrokeStyle) {

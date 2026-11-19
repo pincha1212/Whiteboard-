@@ -76,6 +76,7 @@ private data class ShapePresetInfo(
 
 @Composable
 fun ShapePickerModal(
+    initialStrokeColor: String = "#2563EB",
     onInsertCenter: (ShapeType, isFilled: Boolean, strokeColor: String, fillColor: String) -> Unit,
     onStartDragPlacement: (ShapeType, isFilled: Boolean, strokeColor: String, fillColor: String) -> Unit,
     onDismiss: () -> Unit
@@ -101,7 +102,7 @@ fun ShapePickerModal(
     var selectedCategory by remember { mutableStateOf("Todas") }
     var selectedShape by remember { mutableStateOf(ShapeType.RECTANGLE) }
     var isFilled by remember { mutableStateOf(false) }
-    var selectedStrokeColor by remember { mutableStateOf("#2563EB") }
+    var selectedStrokeColor by remember(initialStrokeColor) { mutableStateOf(initialStrokeColor) }
     var selectedFillColor by remember { mutableStateOf("#DBEAFE") }
 
     val strokeColors = listOf(

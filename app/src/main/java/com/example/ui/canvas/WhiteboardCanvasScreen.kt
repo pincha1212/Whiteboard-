@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.AlertDialog
@@ -94,6 +96,7 @@ import com.example.model.isLineLike
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
+import com.example.model.TextItem
 import com.example.model.ToolType
 import com.example.model.WhiteboardStroke
 import com.example.ui.toolbar.DockLayoutMode
@@ -885,7 +888,7 @@ fun WhiteboardCanvasScreen(
                     height = kotlin.math.abs(pEnd.y - pStart.y).coerceAtLeast(12f),
                     strokeColorHex = state.pendingStrokeColor,
                     fillColorHex = state.pendingFillColor,
-                    strokeWidth = state.penWidth.coerceIn(2f, 16f),
+                    strokeWidth = state.penWidth.coerceIn(2f, 24f),
                     isFilled = state.pendingIsFilled && !state.pendingShapeType!!.isLineLike,
                     strokeStyle = state.pendingStrokeStyle,
                     capStyle = when (state.pendingShapeType!!) {
@@ -894,6 +897,8 @@ fun WhiteboardCanvasScreen(
                         else -> state.pendingCapStyle
                     },
                     vertices = if (state.pendingShapeType!!.isLineLike) listOf(pStart, pEnd) else emptyList(),
+                    isRainbow = state.isRainbowPen && state.pendingBrushType != StrokeBrushType.HIGHLIGHTER,
+                    opacity = state.pendingBrushType.defaultOpacity,
                     brushType = state.pendingBrushType
                 )
                 drawShapeVector(
@@ -948,15 +953,12 @@ fun WhiteboardCanvasScreen(
             }
         }
 
-        // Render Text Items (Locked axis/column labels + Editable Ishikawa cause boxes)
+        // Render Text Items (Locked axis/column labels + Modern floating editable text cards)
         state.board.textItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
-            // Keep the text item's measured layout in board-space units. The camera
-            // scales the completed item, avoiding font/width changes and remeasurement
-            // as zoom changes.
-            val widthDp = with(density) { tItem.width.coerceAtLeast(80f).toDp() }
-            val fontSizeSp = tItem.fontSize.coerceIn(10f, 28f).sp
+            val widthDp = with(density) { tItem.width.coerceAtLeast(120f).toDp() }
+            val fontSizeSp = with(density) { tItem.fontSize.coerceIn(14f, 80f).toSp() }
             val cameraLayer = Modifier
                 .offset {
                     val camera = cameraState.value
@@ -987,48 +989,143 @@ fun WhiteboardCanvasScreen(
                     )
                 }
             } else {
-                val cardBg = tItem.backgroundColorHex?.let { parseColor(it, Color.White) } ?: Color.White
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = cardBg,
-                    shadowElevation = 0.dp,
-                    modifier = cameraLayer
-                        .width(widthDp)
-                        .border(1.dp, Color(0xFF475569), RoundedCornerShape(8.dp))
-                        .testTag("editable_text_item_${tItem.id}")
+                val isSelected = state.selectedTextId == tItem.id
+                val isTransparentBg = tItem.backgroundColorHex == "TRANSPARENT"
+                val cardBg = if (isTransparentBg) {
+                    Color.Transparent
+                } else {
+                    tItem.backgroundColorHex?.let { parseColor(it, Color.White) }
+                        ?: if (isDarkBoard) Color(0xFF1E293B) else Color.White
+                }
+                val cardBorderColor = when {
+                    isSelected -> Color(0xFF2563EB)
+                    isTransparentBg -> Color.Transparent
+                    isDarkBoard -> Color(0xFF334155)
+                    else -> Color(0xFFCBD5E1)
+                }
+                val cardBorderWidth = when {
+                    isSelected -> 2.dp
+                    isTransparentBg -> 0.dp
+                    else -> 1.dp
+                }
+
+                Box(
+                    modifier = cameraLayer.testTag("editable_text_item_${tItem.id}")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = cardBg,
+                        shadowElevation = if (isTransparentBg) 0.dp else if (isSelected) 4.dp else 1.5.dp,
+                        modifier = Modifier
+                            .width(widthDp)
+                            .border(cardBorderWidth, cardBorderColor, RoundedCornerShape(12.dp))
                     ) {
-                        BasicTextField(
-                            value = tItem.text,
-                            onValueChange = { viewModel.updateTextItem(tItem.id, it) },
-                            enabled = !isPanOnlyMode,
-                            readOnly = isPanOnlyMode,
-                            textStyle = TextStyle(
-                                color = tColor,
-                                fontSize = fontSizeSp,
-                                fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
-                            ),
-                            cursorBrush = SolidColor(tColor),
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                                .testTag("editable_text_input_${tItem.id}")
-                        )
-                        if (!isPanOnlyMode) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Eliminar texto",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            if (!isPanOnlyMode) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isSelected) Color(0xFF2563EB).copy(alpha = 0.14f)
+                                            else Color.Transparent
+                                        )
+                                        .pointerInput(tItem.id, isPanOnlyMode) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    viewModel.selectTextItem(tItem.id)
+                                                    viewModel.beginTextItemTransformSnapshot()
+                                                },
+                                                onDragEnd = { viewModel.commitTextItemTransform() },
+                                                onDragCancel = { viewModel.commitTextItemTransform() },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val s = cameraState.value.scale.coerceAtLeast(0.1f)
+                                                    viewModel.moveTextItem(tItem.id, dragAmount.x / s, dragAmount.y / s)
+                                                }
+                                            )
+                                        }
+                                        .clickable { viewModel.selectTextItem(tItem.id) }
+                                        .testTag("drag_text_handle_${tItem.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DragIndicator,
+                                        contentDescription = "Mover texto",
+                                        tint = if (isSelected) Color(0xFF2563EB) else tColor.copy(alpha = 0.45f),
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+
+                            BasicTextField(
+                                value = tItem.text,
+                                onValueChange = {
+                                    if (!isSelected) viewModel.selectTextItem(tItem.id)
+                                    viewModel.updateTextItem(tItem.id, it)
+                                },
+                                enabled = !isPanOnlyMode,
+                                readOnly = isPanOnlyMode,
+                                textStyle = TextStyle(
+                                    color = tColor,
+                                    fontSize = fontSizeSp,
+                                    lineHeight = (fontSizeSp.value * 1.24f).sp,
+                                    fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
+                                ),
+                                cursorBrush = SolidColor(tColor),
                                 modifier = Modifier
-                                    .size(16.dp)
-                                    .clip(CircleShape)
-                                    .clickable { viewModel.deleteTextItem(tItem.id) }
-                                    .testTag("btn_delete_text_${tItem.id}")
+                                    .weight(1f)
+                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    .testTag("editable_text_input_${tItem.id}")
                             )
+
+                            if (!isPanOnlyMode && isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Eliminar texto",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .clickable { viewModel.deleteTextItem(tItem.id) }
+                                        .testTag("btn_delete_text_${tItem.id}")
+                                )
+                            }
                         }
+                    }
+
+                    if (isSelected && !isPanOnlyMode) {
+                        var currentDragWidth by remember(tItem.id, tItem.width) { mutableStateOf(tItem.width) }
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .offset(x = 7.dp)
+                                .size(width = 12.dp, height = 26.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF2563EB))
+                                .border(1.5.dp, Color.White, RoundedCornerShape(6.dp))
+                                .pointerInput(tItem.id) {
+                                    detectDragGestures(
+                                        onDragStart = {
+                                            currentDragWidth = tItem.width
+                                            viewModel.beginTextItemTransformSnapshot()
+                                        },
+                                        onDragEnd = { viewModel.commitTextItemTransform() },
+                                        onDragCancel = { viewModel.commitTextItemTransform() },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            val s = cameraState.value.scale.coerceAtLeast(0.1f)
+                                            currentDragWidth = (currentDragWidth + dragAmount.x / s).coerceIn(140f, 760f)
+                                            viewModel.resizeTextItemWidth(tItem.id, currentDragWidth)
+                                        }
+                                    )
+                                }
+                                .testTag("resize_text_handle_${tItem.id}")
+                        )
                     }
                 }
             }
@@ -1152,12 +1249,19 @@ fun WhiteboardCanvasScreen(
         // Adaptive Dock Overlay: Selection Inspector when selected, otherwise Adaptive WhiteboardPenDock
         if (!state.isZenMode) {
             val totalSelectedCount = state.selectedStrokeIds.size + state.selectedShapeIds.size + state.selectedNoteIds.size
-            val hasSelection = totalSelectedCount > 0 || state.selectedShapeId != null || state.selectedStrokeId != null || state.selectedNoteId != null
+            val hasSelection = totalSelectedCount > 0 ||
+                state.selectedShapeId != null ||
+                state.selectedStrokeId != null ||
+                state.selectedNoteId != null ||
+                state.selectedTextId != null
             val selectedShape = remember(state.board.shapes, state.selectedShapeId) {
                 state.selectedShapeId?.let { id -> state.board.shapes.find { it.id == id } }
             }
             val selectedStroke = remember(state.board.strokes, state.selectedStrokeId) {
                 state.selectedStrokeId?.let { id -> state.board.strokes.find { it.id == id } }
+            }
+            val selectedText = remember(state.board.textItems, state.selectedTextId) {
+                state.selectedTextId?.let { id -> state.board.textItems.find { it.id == id } }
             }
 
             CanvasDockOverlay(
@@ -1166,10 +1270,11 @@ fun WhiteboardCanvasScreen(
                 selectedShape = selectedShape,
                 selectedStroke = selectedStroke,
                 selectedNoteId = state.selectedNoteId,
+                selectedText = selectedText,
                 totalSelectedCount = totalSelectedCount.coerceAtLeast(1),
                 currentTool = state.currentTool,
+                activeBrushSlotIndex = state.activeBrushSlotIndex,
                 penColorHex = state.penColorHex,
-                penWidth = state.penWidth,
                 isRainbowPen = state.isRainbowPen,
                 autoShapeRecognition = state.autoShapeRecognition,
                 isRulerActive = state.isRulerActive,
@@ -1324,6 +1429,7 @@ fun WhiteboardCanvasScreen(
 
         if (showShapePickerModal) {
             ShapePickerModal(
+                initialStrokeColor = state.penColorHex,
                 onInsertCenter = { shapeType, isFilled, strokeColor, fillColor ->
                     viewModel.insertShapeAtCenter(
                         shapeType = shapeType,
@@ -1517,10 +1623,11 @@ private fun CanvasDockOverlay(
     selectedShape: ShapeItem?,
     selectedStroke: WhiteboardStroke?,
     selectedNoteId: String?,
+    selectedText: TextItem?,
     totalSelectedCount: Int,
     currentTool: ToolType,
+    activeBrushSlotIndex: Int,
     penColorHex: String,
-    penWidth: Float,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -1555,11 +1662,19 @@ private fun CanvasDockOverlay(
             viewModel.setTool(tool)
         }
     }
-    val onUpdatePenColor = remember(viewModel) {
-        { col: String, isRainbow: Boolean -> viewModel.setPenColor(col, isRainbow) }
+    val onSelectBrushSlot = remember(viewModel) {
+        { index: Int -> viewModel.selectBrushSlot(index) }
     }
-    val onUpdatePenWidth = remember(viewModel) {
-        { w: Float -> viewModel.setPenWidth(w) }
+    val onUpdateBrushSlot = remember(viewModel) {
+        { index: Int, brushType: StrokeBrushType?, hex: String?, width: Float?, isRainbow: Boolean? ->
+            viewModel.updateBrushSlot(
+                slotIndex = index,
+                brushType = brushType,
+                colorHex = hex,
+                strokeWidth = width,
+                isRainbow = isRainbow
+            )
+        }
     }
     val onToggleAutoShape = remember(viewModel) {
         { viewModel.toggleAutoShapeRecognition() }
@@ -1589,6 +1704,7 @@ private fun CanvasDockOverlay(
                 selectedShape = selectedShape,
                 selectedStroke = selectedStroke,
                 selectedNote = selectedNote,
+                selectedText = selectedText,
                 totalSelectedCount = totalSelectedCount,
                 onDeleteAll = { viewModel.deleteCurrentSelection() },
                 onDuplicateAll = { viewModel.duplicateCurrentSelection() },
@@ -1635,6 +1751,32 @@ private fun CanvasDockOverlay(
                         viewModel.deleteSelectedNote()
                     }
                 },
+                onUpdateTextColor = { hex ->
+                    selectedText?.let { viewModel.updateTextItemStyle(it.id, colorHex = hex) }
+                },
+                onToggleTextBackground = {
+                    selectedText?.let { t ->
+                        val isTransparent = t.backgroundColorHex == "TRANSPARENT"
+                        viewModel.updateTextItemStyle(
+                            id = t.id,
+                            backgroundColorHex = if (isTransparent) "#FFFFFF" else null,
+                            clearBackground = !isTransparent
+                        )
+                    }
+                },
+                onToggleTextBold = {
+                    selectedText?.let { t ->
+                        viewModel.updateTextItemStyle(t.id, isBold = !t.isBold)
+                    }
+                },
+                onUpdateTextFontSize = { size ->
+                    selectedText?.let { t ->
+                        viewModel.updateTextItemStyle(t.id, fontSize = size)
+                    }
+                },
+                onDeleteText = {
+                    selectedText?.let { viewModel.deleteTextItem(it.id) }
+                },
                 onDone = { viewModel.clearSelection() },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1657,8 +1799,9 @@ private fun CanvasDockOverlay(
 
             WhiteboardPenDock(
                 currentTool = currentTool,
+                brushSlots = viewModel.brushSlots,
+                activeBrushSlotIndex = activeBrushSlotIndex,
                 currentPenColor = penColorHex,
-                currentPenWidth = penWidth,
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
@@ -1666,8 +1809,8 @@ private fun CanvasDockOverlay(
                 pendingStickyNoteColor = pendingStickyNoteColor,
                 layoutMode = layoutMode,
                 onSelectTool = onSelectTool,
-                onUpdatePenColor = onUpdatePenColor,
-                onUpdatePenWidth = onUpdatePenWidth,
+                onSelectBrushSlot = onSelectBrushSlot,
+                onUpdateBrushSlot = onUpdateBrushSlot,
                 onToggleAutoShape = onToggleAutoShape,
                 onToggleRuler = onToggleRuler,
                 onAddStickyNote = onAddStickyNote,

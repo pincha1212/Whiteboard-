@@ -1,9 +1,11 @@
 package com.example.ui.toolbar
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -55,7 +57,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -64,6 +68,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.BrushSlot
+import com.example.model.StrokeBrushType
 import com.example.model.ToolType
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -432,13 +438,19 @@ private fun ModeSegmentButton(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun InkingToolsRow(
     currentTool: ToolType,
-    penColor: Color,
+    brushSlots: List<BrushSlot>,
+    activeBrushSlotIndex: Int,
+    autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
     pendingShapeType: com.example.model.ShapeType?,
     pendingStickyNoteColor: String?,
+    onSelectBrushSlot: (Int) -> Unit,
+    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onToggleAutoShape: () -> Unit,
     onSelectTool: (ToolType) -> Unit,
     onToggleRuler: () -> Unit,
     showCollapseButton: Boolean = false,
@@ -447,42 +459,71 @@ internal fun InkingToolsRow(
     modifier: Modifier = Modifier
 ) {
     val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
+    var expandedSlotIndex by remember { mutableStateOf<Int?>(null) }
+    val haptic = LocalHapticFeedback.current
+    val fallbackInk = MaterialTheme.colorScheme.onSurface
+    val isAnyBrushToolActive = !hasPendingPlacement &&
+        (currentTool == ToolType.PEN || currentTool == ToolType.FINE_MARKER || currentTool == ToolType.HIGHLIGHTER)
 
     val slots: @Composable () -> Unit = {
-        TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.PEN,
-            description = "Pluma",
-            onClick = { onSelectTool(ToolType.PEN) },
-            testTag = "dock_menu_tool_pen"
-        ) {
-            PhysicalFountainPenIcon(
-                inkColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
-        }
+        brushSlots.forEachIndexed { index, slot ->
+            val isSlotSelected = isAnyBrushToolActive && activeBrushSlotIndex == index
+            val slotColor = remember(slot.colorHex, fallbackInk) {
+                parseDockColorSafe(slot.colorHex, fallbackInk)
+            }
+            val iconTintColor = if (slot.isRainbow) Color(0xFFEC4899) else slotColor
+            val slotLabel = when (slot.brushType) {
+                StrokeBrushType.FOUNTAIN_PEN -> "Lápiz"
+                StrokeBrushType.FINE_MARKER -> "Marcador"
+                StrokeBrushType.HIGHLIGHTER -> "Resaltador"
+            }
 
-        TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.FINE_MARKER,
-            description = "Fibra o marcador fino",
-            onClick = { onSelectTool(ToolType.FINE_MARKER) },
-            testTag = "dock_menu_tool_fine_marker"
-        ) {
-            PhysicalMarkerIcon(
-                markerColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
-        }
+            Box {
+                CustomizableBrushSlotButton(
+                    isSelected = isSlotSelected,
+                    description = "$slotLabel ${index + 1}. Mantén presionado para elegir tipo, color y grosor",
+                    onClick = { onSelectBrushSlot(index) },
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSelectBrushSlot(index)
+                        expandedSlotIndex = index
+                    },
+                    testTag = "dock_brush_slot_$index"
+                ) {
+                    when (slot.brushType) {
+                        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
+                            inkColor = iconTintColor,
+                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
+                        )
+                        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
+                            markerColor = iconTintColor,
+                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
+                        )
+                        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
+                            highlighterColor = iconTintColor,
+                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
+                        )
+                    }
+                }
 
-        TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.HIGHLIGHTER,
-            description = "Resaltador",
-            onClick = { onSelectTool(ToolType.HIGHLIGHTER) },
-            testTag = "dock_menu_tool_highlighter"
-        ) {
-            PhysicalHighlighterIcon(
-                highlighterColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
+                BrushSlotDropdownMenu(
+                    expanded = expandedSlotIndex == index,
+                    onDismiss = { expandedSlotIndex = null },
+                    slot = slot,
+                    parsedColor = slotColor,
+                    autoShapeRecognition = autoShapeRecognition,
+                    onChangeBrushType = { newType ->
+                        onUpdateBrushSlot(index, newType, null, null, null)
+                    },
+                    onUpdateColor = { hex, isRainbow ->
+                        onUpdateBrushSlot(index, null, hex, null, isRainbow)
+                    },
+                    onUpdateWidth = { width ->
+                        onUpdateBrushSlot(index, null, null, width, null)
+                    },
+                    onToggleAutoShape = onToggleAutoShape
+                )
+            }
         }
 
         TrayToolSlot(
@@ -597,6 +638,79 @@ internal fun InkingToolsRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CustomizableBrushSlotButton(
+    isSelected: Boolean,
+    description: String,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    testTag: String,
+    iconContent: @Composable () -> Unit
+) {
+    val triangleColor = if (isSelected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    }
+
+    Box(
+        contentAlignment = Alignment.BottomCenter,
+        modifier = Modifier
+            .defaultMinSize(minWidth = 42.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                else Color.Transparent
+            )
+            .border(
+                width = if (isSelected) 1.4.dp else 0.dp,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                shape = RoundedCornerShape(10.dp)
+            )
+            .combinedClickable(
+                role = Role.Button,
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .semantics {
+                contentDescription = description
+                selected = isSelected
+            }
+            .padding(top = 4.dp)
+            .testTag(testTag)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            iconContent()
+        }
+        if (isSelected) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 2.dp)
+                    .size(width = 14.dp, height = 2.5.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+        }
+        // Small corner triangle indicating long-press customization (type, color & stroke width)
+        Canvas(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 3.dp, bottom = 3.dp)
+                .size(7.dp)
+        ) {
+            val tri = Path().apply {
+                moveTo(size.width, size.height)
+                lineTo(size.width, 0f)
+                lineTo(0f, size.height)
+                close()
+            }
+            drawPath(path = tri, color = triangleColor)
+        }
+    }
+}
+
 @Composable
 private fun TrayToolSlot(
     isSelected: Boolean,
@@ -644,75 +758,15 @@ private fun TrayToolSlot(
 }
 
 @Composable
-internal fun PenStyleTriggerButton(
-    parsedColor: Color,
-    penWidth: Float,
-    isRainbowPen: Boolean,
-    autoShapeRecognition: Boolean,
-    isExpanded: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = modifier
-            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                if (isExpanded) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-            )
-            .border(
-                width = if (isExpanded) 1.25.dp else 1.dp,
-                color = if (isExpanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                shape = RoundedCornerShape(12.dp)
-            )
-            .clickable(role = Role.Button, onClick = onClick)
-            .semantics {
-                contentDescription = "Color, grosor (${penWidth.roundToInt()} px) y formas automáticas"
-                selected = isExpanded
-            }
-            .padding(horizontal = 8.dp)
-            .testTag("dock_more_menu_button")
-    ) {
-        Box(contentAlignment = Alignment.TopEnd) {
-            Box(
-                modifier = Modifier
-                    .size(26.dp)
-                    .clip(CircleShape)
-                    .then(
-                        if (isRainbowPen) {
-                            Modifier.background(Brush.sweepGradient(DockRainbowColors))
-                        } else {
-                            Modifier.background(parsedColor)
-                        }
-                    )
-                    .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
-            )
-            // Corner triangle indicator for long-press / popup menu
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .align(Alignment.TopEnd)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(bottomStart = 6.dp))
-            )
-        }
-    }
-}
-
-@Composable
-internal fun PenStyleDropdownMenu(
+internal fun BrushSlotDropdownMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
-    currentPenColor: String,
-    parsedPenColor: Color,
-    currentPenWidth: Float,
-    currentTool: ToolType,
-    isRainbowPen: Boolean,
+    slot: BrushSlot,
+    parsedColor: Color,
     autoShapeRecognition: Boolean,
-    onUpdatePenColor: (String, isRainbow: Boolean) -> Unit,
-    onUpdatePenWidth: (Float) -> Unit,
+    onChangeBrushType: (StrokeBrushType) -> Unit,
+    onUpdateColor: (String, isRainbow: Boolean) -> Unit,
+    onUpdateWidth: (Float) -> Unit,
     onToggleAutoShape: () -> Unit
 ) {
     DropdownMenu(
@@ -723,9 +777,9 @@ internal fun PenStyleDropdownMenu(
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .width(320.dp)
-            .heightIn(max = 460.dp)
+            .heightIn(max = 520.dp)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-            .testTag("dock_more_dropdown_menu")
+            .testTag("dock_brush_slot_dropdown")
     ) {
         Column(
             modifier = Modifier
@@ -753,13 +807,14 @@ internal fun PenStyleDropdownMenu(
                         cubicTo(w * 0.25f, h * 0.22f, w * 0.45f, h * 0.85f, w * 0.72f, h * 0.42f)
                         quadraticTo(w * 0.86f, h * 0.22f, w, h * 0.52f)
                     }
-                    val alpha = if (currentTool == ToolType.HIGHLIGHTER) 0.45f else 1f
-                    val previewWidth = when (currentTool) {
-                        ToolType.HIGHLIGHTER -> (currentPenWidth * 1.4f).coerceIn(10f, 26f)
-                        ToolType.FINE_MARKER -> (currentPenWidth * 0.7f).coerceIn(2f, 10f)
-                        else -> currentPenWidth.coerceIn(2f, 24f)
+                    val isHighlighter = slot.brushType == StrokeBrushType.HIGHLIGHTER
+                    val alpha = if (isHighlighter) 0.45f else 1f
+                    val previewWidth = when (slot.brushType) {
+                        StrokeBrushType.HIGHLIGHTER -> (slot.strokeWidth * 1.4f).coerceIn(10f, 26f)
+                        StrokeBrushType.FINE_MARKER -> (slot.strokeWidth * 0.7f).coerceIn(2f, 10f)
+                        StrokeBrushType.FOUNTAIN_PEN -> slot.strokeWidth.coerceIn(2f, 24f)
                     }
-                    if (isRainbowPen && currentTool != ToolType.HIGHLIGHTER) {
+                    if (slot.isRainbow && !isHighlighter) {
                         drawPath(
                             path = path,
                             brush = Brush.horizontalGradient(DockRainbowColors),
@@ -768,13 +823,66 @@ internal fun PenStyleDropdownMenu(
                     } else {
                         drawPath(
                             path = path,
-                            color = parsedPenColor.copy(alpha = alpha),
+                            color = parsedColor.copy(alpha = alpha),
                             style = Stroke(width = previewWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
                         )
                     }
                 }
             }
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Customizable Tool Type Selector (Lápiz / Marcador / Resaltador)
+            Text(
+                text = "TIPO DE HERRAMIENTA",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            val brushTypeOptions = listOf(
+                StrokeBrushType.FOUNTAIN_PEN to "Lápiz",
+                StrokeBrushType.FINE_MARKER to "Marcador",
+                StrokeBrushType.HIGHLIGHTER to "Resaltador"
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                brushTypeOptions.forEach { (type, label) ->
+                    val isTypeSelected = slot.brushType == type
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (isTypeSelected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .border(
+                                width = if (isTypeSelected) 1.5.dp else 1.dp,
+                                color = if (isTypeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .clickable { onChangeBrushType(type) }
+                            .padding(vertical = 8.dp)
+                            .testTag("slot_type_${type.name}"),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = label,
+                            fontSize = 11.sp,
+                            fontWeight = if (isTypeSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isTypeSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(modifier = Modifier.height(10.dp))
 
             // Color Palette + Rainbow
@@ -795,7 +903,7 @@ internal fun PenStyleDropdownMenu(
             ) {
                 DockPenColorPalette.forEach { option ->
                     val swatchColor = remember(option.hex) { parseDockColorSafe(option.hex, Color.Black) }
-                    val isColorSelected = currentPenColor.equals(option.hex, ignoreCase = true) && !isRainbowPen
+                    val isColorSelected = slot.colorHex.equals(option.hex, ignoreCase = true) && !slot.isRainbow
                     Box(
                         modifier = Modifier
                             .size(28.dp)
@@ -806,7 +914,7 @@ internal fun PenStyleDropdownMenu(
                                 color = if (isColorSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                                 shape = CircleShape
                             )
-                            .clickable { onUpdatePenColor(option.hex, false) }
+                            .clickable { onUpdateColor(option.hex, false) }
                             .semantics {
                                 contentDescription = option.label
                                 selected = isColorSelected
@@ -825,26 +933,26 @@ internal fun PenStyleDropdownMenu(
                     }
                 }
 
-                // Rainbow Swatch (connects existing ViewModel isRainbowPen capability)
+                // Rainbow Swatch
                 Box(
                     modifier = Modifier
                         .size(28.dp)
                         .clip(CircleShape)
                         .background(Brush.sweepGradient(DockRainbowColors))
                         .border(
-                            width = if (isRainbowPen) 2.5.dp else 1.dp,
-                            color = if (isRainbowPen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            width = if (slot.isRainbow) 2.5.dp else 1.dp,
+                            color = if (slot.isRainbow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                             shape = CircleShape
                         )
-                        .clickable { onUpdatePenColor(currentPenColor, true) }
+                        .clickable { onUpdateColor(slot.colorHex, true) }
                         .semantics {
                             contentDescription = "Tinta arcoíris"
-                            selected = isRainbowPen
+                            selected = slot.isRainbow
                         }
                         .testTag("dock_color_Arcoiris"),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (isRainbowPen) {
+                    if (slot.isRainbow) {
                         Box(
                             modifier = Modifier
                                 .size(7.dp)
@@ -872,7 +980,7 @@ internal fun PenStyleDropdownMenu(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "${currentPenWidth.roundToInt()} px",
+                    text = "${slot.strokeWidth.roundToInt()} px",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -880,8 +988,8 @@ internal fun PenStyleDropdownMenu(
             }
 
             Slider(
-                value = currentPenWidth.coerceIn(2f, 24f),
-                onValueChange = onUpdatePenWidth,
+                value = slot.strokeWidth.coerceIn(2f, 24f),
+                onValueChange = onUpdateWidth,
                 valueRange = 2f..24f,
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.primary,
@@ -899,7 +1007,7 @@ internal fun PenStyleDropdownMenu(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 DockPenWidthOptions.forEach { option ->
-                    val isSelected = abs(currentPenWidth - option.width) < 1f
+                    val isSelected = abs(slot.strokeWidth - option.width) < 1f
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -913,7 +1021,7 @@ internal fun PenStyleDropdownMenu(
                                 color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
                                 shape = RoundedCornerShape(8.dp)
                             )
-                            .clickable { onUpdatePenWidth(option.width) }
+                            .clickable { onUpdateWidth(option.width) }
                             .padding(vertical = 7.dp)
                             .testTag("dock_width_${option.label}"),
                         contentAlignment = Alignment.Center

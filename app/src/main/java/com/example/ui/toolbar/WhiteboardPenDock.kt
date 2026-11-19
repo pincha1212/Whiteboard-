@@ -36,14 +36,17 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.model.BrushSlot
 import com.example.model.ShapeType
+import com.example.model.StrokeBrushType
 import com.example.model.ToolType
 
 @Composable
 fun WhiteboardPenDock(
     currentTool: ToolType,
+    brushSlots: List<BrushSlot>,
+    activeBrushSlotIndex: Int,
     currentPenColor: String,
-    currentPenWidth: Float,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -51,8 +54,8 @@ fun WhiteboardPenDock(
     pendingStickyNoteColor: String? = null,
     layoutMode: DockLayoutMode = DockLayoutMode.COMPACT_PORTRAIT,
     onSelectTool: (ToolType) -> Unit,
-    onUpdatePenColor: (String, isRainbow: Boolean) -> Unit,
-    onUpdatePenWidth: (Float) -> Unit,
+    onSelectBrushSlot: (Int) -> Unit,
+    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
     onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onAddStickyNote: (String) -> Unit = {},
@@ -61,7 +64,6 @@ fun WhiteboardPenDock(
     onOpenShapePicker: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var showStyleMenu by remember { mutableStateOf(false) }
     var showStickyPalette by remember { mutableStateOf(false) }
     var isInkingTrayOpen by remember { mutableStateOf(true) }
     var lastInkingTool by remember {
@@ -77,8 +79,11 @@ fun WhiteboardPenDock(
     }
 
     val fallbackColor = MaterialTheme.colorScheme.onSurface
-    val parsedPenColor = remember(currentPenColor, fallbackColor) {
-        parseDockColorSafe(currentPenColor, fallbackColor)
+    val activeSlot = brushSlots.getOrNull(activeBrushSlotIndex)
+    val resolvedHex = activeSlot?.colorHex ?: currentPenColor
+    val resolvedRainbow = activeSlot?.isRainbow ?: isRainbowPen
+    val parsedPenColor = remember(resolvedHex, fallbackColor) {
+        parseDockColorSafe(resolvedHex, fallbackColor)
     }
 
     val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
@@ -100,6 +105,11 @@ fun WhiteboardPenDock(
         onSelectTool(tool)
     }
 
+    val onSelectSlot: (Int) -> Unit = { idx ->
+        brushSlots.getOrNull(idx)?.let { lastInkingTool = it.toolType }
+        onSelectBrushSlot(idx)
+    }
+
     val onSelectLasso: () -> Unit = {
         isInkingTrayOpen = false
         onSelectTool(ToolType.SELECT_LASSO)
@@ -114,10 +124,10 @@ fun WhiteboardPenDock(
         DockLayoutMode.EXPANDED_TABLET -> {
             ExpandedTabletDock(
                 currentTool = currentTool,
-                currentPenColor = currentPenColor,
+                brushSlots = brushSlots,
+                activeBrushSlotIndex = activeBrushSlotIndex,
                 parsedPenColor = parsedPenColor,
-                currentPenWidth = currentPenWidth,
-                isRainbowPen = isRainbowPen,
+                isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
                 pendingShapeType = pendingShapeType,
@@ -126,9 +136,6 @@ fun WhiteboardPenDock(
                 isSelectActive = isSelectActive,
                 isHandActive = isHandActive,
                 lastInkingTool = lastInkingTool,
-                showStyleMenu = showStyleMenu,
-                onToggleStyleMenu = { showStyleMenu = !showStyleMenu },
-                onDismissStyleMenu = { showStyleMenu = false },
                 showStickyPalette = showStickyPalette,
                 onToggleStickyPalette = { showStickyPalette = !showStickyPalette },
                 onDismissStickyPalette = { showStickyPalette = false },
@@ -136,11 +143,11 @@ fun WhiteboardPenDock(
                     if (!isDrawingActive) onSelectTool(lastInkingTool)
                 },
                 onSelectTrayTool = onSelectTrayTool,
+                onSelectBrushSlot = onSelectSlot,
+                onUpdateBrushSlot = onUpdateBrushSlot,
+                onToggleAutoShape = onToggleAutoShape,
                 onSelectLasso = onSelectLasso,
                 onSelectHand = onSelectHand,
-                onUpdatePenColor = onUpdatePenColor,
-                onUpdatePenWidth = onUpdatePenWidth,
-                onToggleAutoShape = onToggleAutoShape,
                 onToggleRuler = onToggleRuler,
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
@@ -153,10 +160,10 @@ fun WhiteboardPenDock(
         DockLayoutMode.COMPACT_LANDSCAPE_RAIL -> {
             CompactLandscapeRailDock(
                 currentTool = currentTool,
-                currentPenColor = currentPenColor,
+                brushSlots = brushSlots,
+                activeBrushSlotIndex = activeBrushSlotIndex,
                 parsedPenColor = parsedPenColor,
-                currentPenWidth = currentPenWidth,
-                isRainbowPen = isRainbowPen,
+                isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
                 pendingShapeType = pendingShapeType,
@@ -166,20 +173,17 @@ fun WhiteboardPenDock(
                 isHandActive = isHandActive,
                 isInkingTrayOpen = isInkingTrayOpen,
                 lastInkingTool = lastInkingTool,
-                showStyleMenu = showStyleMenu,
-                onToggleStyleMenu = { showStyleMenu = !showStyleMenu },
-                onDismissStyleMenu = { showStyleMenu = false },
                 showStickyPalette = showStickyPalette,
                 onToggleStickyPalette = { showStickyPalette = !showStickyPalette },
                 onDismissStickyPalette = { showStickyPalette = false },
                 onClickDrawingMode = onClickDrawingMode,
                 onCloseInkingTray = { isInkingTrayOpen = false },
                 onSelectTrayTool = onSelectTrayTool,
+                onSelectBrushSlot = onSelectSlot,
+                onUpdateBrushSlot = onUpdateBrushSlot,
+                onToggleAutoShape = onToggleAutoShape,
                 onSelectLasso = onSelectLasso,
                 onSelectHand = onSelectHand,
-                onUpdatePenColor = onUpdatePenColor,
-                onUpdatePenWidth = onUpdatePenWidth,
-                onToggleAutoShape = onToggleAutoShape,
                 onToggleRuler = onToggleRuler,
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
@@ -192,10 +196,10 @@ fun WhiteboardPenDock(
         DockLayoutMode.COMPACT_PORTRAIT -> {
             CompactPortraitDock(
                 currentTool = currentTool,
-                currentPenColor = currentPenColor,
+                brushSlots = brushSlots,
+                activeBrushSlotIndex = activeBrushSlotIndex,
                 parsedPenColor = parsedPenColor,
-                currentPenWidth = currentPenWidth,
-                isRainbowPen = isRainbowPen,
+                isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
                 pendingShapeType = pendingShapeType,
@@ -205,20 +209,17 @@ fun WhiteboardPenDock(
                 isHandActive = isHandActive,
                 isInkingTrayOpen = isInkingTrayOpen,
                 lastInkingTool = lastInkingTool,
-                showStyleMenu = showStyleMenu,
-                onToggleStyleMenu = { showStyleMenu = !showStyleMenu },
-                onDismissStyleMenu = { showStyleMenu = false },
                 showStickyPalette = showStickyPalette,
                 onToggleStickyPalette = { showStickyPalette = !showStickyPalette },
                 onDismissStickyPalette = { showStickyPalette = false },
                 onClickDrawingMode = onClickDrawingMode,
                 onCloseInkingTray = { isInkingTrayOpen = false },
                 onSelectTrayTool = onSelectTrayTool,
+                onSelectBrushSlot = onSelectSlot,
+                onUpdateBrushSlot = onUpdateBrushSlot,
+                onToggleAutoShape = onToggleAutoShape,
                 onSelectLasso = onSelectLasso,
                 onSelectHand = onSelectHand,
-                onUpdatePenColor = onUpdatePenColor,
-                onUpdatePenWidth = onUpdatePenWidth,
-                onToggleAutoShape = onToggleAutoShape,
                 onToggleRuler = onToggleRuler,
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
@@ -233,9 +234,9 @@ fun WhiteboardPenDock(
 @Composable
 private fun CompactPortraitDock(
     currentTool: ToolType,
-    currentPenColor: String,
+    brushSlots: List<BrushSlot>,
+    activeBrushSlotIndex: Int,
     parsedPenColor: Color,
-    currentPenWidth: Float,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -246,20 +247,17 @@ private fun CompactPortraitDock(
     isHandActive: Boolean,
     isInkingTrayOpen: Boolean,
     lastInkingTool: ToolType,
-    showStyleMenu: Boolean,
-    onToggleStyleMenu: () -> Unit,
-    onDismissStyleMenu: () -> Unit,
     showStickyPalette: Boolean,
     onToggleStickyPalette: () -> Unit,
     onDismissStickyPalette: () -> Unit,
     onClickDrawingMode: () -> Unit,
     onCloseInkingTray: () -> Unit,
     onSelectTrayTool: (ToolType) -> Unit,
+    onSelectBrushSlot: (Int) -> Unit,
+    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onToggleAutoShape: () -> Unit,
     onSelectLasso: () -> Unit,
     onSelectHand: () -> Unit,
-    onUpdatePenColor: (String, Boolean) -> Unit,
-    onUpdatePenWidth: (Float) -> Unit,
-    onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
@@ -273,7 +271,7 @@ private fun CompactPortraitDock(
             .padding(horizontal = 8.dp, vertical = 10.dp)
             .testTag("whiteboard_pen_dock")
     ) {
-        // Upper contextual tray: Drawing, Presentation, Erasers & Ruler (no duplicate Lasso)
+        // Upper contextual tray: 3 Customizable Brush Slots (color+type+width inside each), Laser, Erasers & Ruler
         AnimatedVisibility(
             visible = isInkingTrayOpen,
             enter = fadeIn() + expandVertically(expandFrom = Alignment.Bottom),
@@ -292,10 +290,15 @@ private fun CompactPortraitDock(
             ) {
                 InkingToolsRow(
                     currentTool = currentTool,
-                    penColor = parsedPenColor,
+                    brushSlots = brushSlots,
+                    activeBrushSlotIndex = activeBrushSlotIndex,
+                    autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
+                    onSelectBrushSlot = onSelectBrushSlot,
+                    onUpdateBrushSlot = onUpdateBrushSlot,
+                    onToggleAutoShape = onToggleAutoShape,
                     onSelectTool = onSelectTrayTool,
                     onToggleRuler = onToggleRuler,
                     showCollapseButton = true,
@@ -308,7 +311,7 @@ private fun CompactPortraitDock(
             }
         }
 
-        // Unified Main Bar: [Mode: Draw | Lasso | Hand] | [Insert: Note | Text | Shape] | [Style: Color+Width]
+        // Unified Main Bar: [Mode: Draw | Lasso | Hand] | [Insert: Note | Text | Shape]
         Surface(
             shape = RoundedCornerShape(16.dp),
             tonalElevation = 2.dp,
@@ -354,32 +357,6 @@ private fun CompactPortraitDock(
                     onOpenShapePicker = onOpenShapePicker,
                     isVertical = false
                 )
-
-                DockHairlineDivider(vertical = true)
-
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
             }
         }
     }
@@ -388,9 +365,9 @@ private fun CompactPortraitDock(
 @Composable
 private fun CompactLandscapeRailDock(
     currentTool: ToolType,
-    currentPenColor: String,
+    brushSlots: List<BrushSlot>,
+    activeBrushSlotIndex: Int,
     parsedPenColor: Color,
-    currentPenWidth: Float,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -401,20 +378,17 @@ private fun CompactLandscapeRailDock(
     isHandActive: Boolean,
     isInkingTrayOpen: Boolean,
     lastInkingTool: ToolType,
-    showStyleMenu: Boolean,
-    onToggleStyleMenu: () -> Unit,
-    onDismissStyleMenu: () -> Unit,
     showStickyPalette: Boolean,
     onToggleStickyPalette: () -> Unit,
     onDismissStickyPalette: () -> Unit,
     onClickDrawingMode: () -> Unit,
     onCloseInkingTray: () -> Unit,
     onSelectTrayTool: (ToolType) -> Unit,
+    onSelectBrushSlot: (Int) -> Unit,
+    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onToggleAutoShape: () -> Unit,
     onSelectLasso: () -> Unit,
     onSelectHand: () -> Unit,
-    onUpdatePenColor: (String, Boolean) -> Unit,
-    onUpdatePenWidth: (Float) -> Unit,
-    onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
@@ -474,32 +448,6 @@ private fun CompactLandscapeRailDock(
                     onOpenShapePicker = onOpenShapePicker,
                     isVertical = true
                 )
-
-                DockHairlineDivider(vertical = false)
-
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
             }
         }
 
@@ -522,10 +470,15 @@ private fun CompactLandscapeRailDock(
             ) {
                 InkingToolsRow(
                     currentTool = currentTool,
-                    penColor = parsedPenColor,
+                    brushSlots = brushSlots,
+                    activeBrushSlotIndex = activeBrushSlotIndex,
+                    autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
+                    onSelectBrushSlot = onSelectBrushSlot,
+                    onUpdateBrushSlot = onUpdateBrushSlot,
+                    onToggleAutoShape = onToggleAutoShape,
                     onSelectTool = onSelectTrayTool,
                     onToggleRuler = onToggleRuler,
                     showCollapseButton = true,
@@ -543,9 +496,9 @@ private fun CompactLandscapeRailDock(
 @Composable
 private fun ExpandedTabletDock(
     currentTool: ToolType,
-    currentPenColor: String,
+    brushSlots: List<BrushSlot>,
+    activeBrushSlotIndex: Int,
     parsedPenColor: Color,
-    currentPenWidth: Float,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
@@ -555,19 +508,16 @@ private fun ExpandedTabletDock(
     isSelectActive: Boolean,
     isHandActive: Boolean,
     lastInkingTool: ToolType,
-    showStyleMenu: Boolean,
-    onToggleStyleMenu: () -> Unit,
-    onDismissStyleMenu: () -> Unit,
     showStickyPalette: Boolean,
     onToggleStickyPalette: () -> Unit,
     onDismissStickyPalette: () -> Unit,
     onClickDrawingMode: () -> Unit,
     onSelectTrayTool: (ToolType) -> Unit,
+    onSelectBrushSlot: (Int) -> Unit,
+    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onToggleAutoShape: () -> Unit,
     onSelectLasso: () -> Unit,
     onSelectHand: () -> Unit,
-    onUpdatePenColor: (String, Boolean) -> Unit,
-    onUpdatePenWidth: (Float) -> Unit,
-    onToggleAutoShape: () -> Unit,
     onToggleRuler: () -> Unit,
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
@@ -575,7 +525,7 @@ private fun ExpandedTabletDock(
     onOpenShapePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Unified single-tier tablet capsule: zero redundant stacking, all tools 1-tap reachable
+    // Unified single-tier tablet capsule: 0 separate style button, long-press any brush slot for color+width+type
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -618,10 +568,15 @@ private fun ExpandedTabletDock(
 
                 InkingToolsRow(
                     currentTool = currentTool,
-                    penColor = parsedPenColor,
+                    brushSlots = brushSlots,
+                    activeBrushSlotIndex = activeBrushSlotIndex,
+                    autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
+                    onSelectBrushSlot = onSelectBrushSlot,
+                    onUpdateBrushSlot = onUpdateBrushSlot,
+                    onToggleAutoShape = onToggleAutoShape,
                     onSelectTool = onSelectTrayTool,
                     onToggleRuler = onToggleRuler,
                     showCollapseButton = false,
@@ -643,32 +598,6 @@ private fun ExpandedTabletDock(
                     onOpenShapePicker = onOpenShapePicker,
                     isVertical = false
                 )
-
-                DockHairlineDivider(vertical = true)
-
-                Box {
-                    PenStyleTriggerButton(
-                        parsedColor = parsedPenColor,
-                        penWidth = currentPenWidth,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        isExpanded = showStyleMenu,
-                        onClick = onToggleStyleMenu
-                    )
-                    PenStyleDropdownMenu(
-                        expanded = showStyleMenu,
-                        onDismiss = onDismissStyleMenu,
-                        currentPenColor = currentPenColor,
-                        parsedPenColor = parsedPenColor,
-                        currentPenWidth = currentPenWidth,
-                        currentTool = currentTool,
-                        isRainbowPen = isRainbowPen,
-                        autoShapeRecognition = autoShapeRecognition,
-                        onUpdatePenColor = onUpdatePenColor,
-                        onUpdatePenWidth = onUpdatePenWidth,
-                        onToggleAutoShape = onToggleAutoShape
-                    )
-                }
             }
         }
     }

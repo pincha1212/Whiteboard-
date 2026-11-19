@@ -31,7 +31,10 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FlipToBack
 import androidx.compose.material.icons.filled.FlipToFront
+import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatColorFill
+import androidx.compose.material.icons.filled.FormatSize
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
@@ -65,6 +68,7 @@ import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StickyNote
 import com.example.model.StrokeStyle
+import com.example.model.TextItem
 import com.example.model.WhiteboardStroke
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -108,6 +112,7 @@ fun SelectionEditDock(
     selectedShape: ShapeItem?,
     selectedStroke: WhiteboardStroke?,
     selectedNote: StickyNote?,
+    selectedText: TextItem? = null,
     totalSelectedCount: Int = 1,
     onDeleteAll: () -> Unit = {},
     onDuplicateAll: () -> Unit = {},
@@ -138,12 +143,17 @@ fun SelectionEditDock(
     onToggleNotePin: () -> Unit,
     onToggleNoteAspectRatioLock: () -> Unit = {},
     onDeleteNote: () -> Unit,
+    onUpdateTextColor: (String) -> Unit = {},
+    onToggleTextBackground: () -> Unit = {},
+    onToggleTextBold: () -> Unit = {},
+    onUpdateTextFontSize: (Float) -> Unit = {},
+    onDeleteText: () -> Unit = {},
     onDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (selectedShape == null && selectedStroke == null && selectedNote == null && totalSelectedCount <= 0) return
+    if (selectedShape == null && selectedStroke == null && selectedNote == null && selectedText == null && totalSelectedCount <= 0) return
 
-    var showMoreMenu by remember(selectedShape?.id, selectedStroke?.id, selectedNote?.id, totalSelectedCount) {
+    var showMoreMenu by remember(selectedShape?.id, selectedStroke?.id, selectedNote?.id, selectedText?.id, totalSelectedCount) {
         mutableStateOf(false)
     }
 
@@ -941,6 +951,126 @@ fun SelectionEditDock(
                             Icon(
                                 imageVector = Icons.Default.Check,
                                 contentDescription = "Terminar edición de nota",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+
+                selectedText != null -> {
+                    val hasCardBg = selectedText.backgroundColorHex != "TRANSPARENT"
+                    val currentTextColor = parseColor(selectedText.colorHex)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
+                                        .clickable { showMoreMenu = !showMoreMenu }
+                                        .testTag("edit_text_color_btn"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(currentTextColor)
+                                            .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                                    )
+                                }
+
+                                DropdownMenu(
+                                    expanded = showMoreMenu,
+                                    onDismissRequest = { showMoreMenu = false },
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .width(268.dp)
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                        Text(
+                                            text = "COLOR DEL TEXTO",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        ColorSwatchGrid(
+                                            colors = strokeColors,
+                                            selectedHex = selectedText.colorHex,
+                                            onSelect = { hex ->
+                                                onUpdateTextColor(hex)
+                                                showMoreMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            QuickStepperPill(
+                                icon = Icons.Default.FormatSize,
+                                label = "${selectedText.fontSize.roundToInt()}",
+                                onDecrement = { onUpdateTextFontSize((selectedText.fontSize - 4f).coerceAtLeast(20f)) },
+                                onIncrement = { onUpdateTextFontSize((selectedText.fontSize + 4f).coerceAtMost(72f)) },
+                                decTestTag = "edit_text_size_minus",
+                                incTestTag = "edit_text_size_plus"
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.FormatBold,
+                                contentDescription = "Negrita",
+                                tint = if (selectedText.isBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                bgColor = if (selectedText.isBold) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = onToggleTextBold,
+                                testTag = "edit_text_bold_btn"
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.Layers,
+                                contentDescription = if (hasCardBg) "Quitar fondo de tarjeta" else "Mostrar fondo de tarjeta",
+                                tint = if (hasCardBg) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                bgColor = if (hasCardBg) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                onClick = onToggleTextBackground,
+                                testTag = "edit_text_bg_toggle"
+                            )
+
+                            DockMiniIconButton(
+                                icon = Icons.Default.Delete,
+                                contentDescription = "Eliminar texto",
+                                tint = MaterialTheme.colorScheme.error,
+                                bgColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                                onClick = onDeleteText,
+                                testTag = "edit_text_delete"
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.primary)
+                                .clickable(onClick = onDone)
+                                .testTag("edit_text_done"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Terminar edición de texto",
                                 tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )

@@ -28,6 +28,22 @@ enum class StrokeBrushType(
     HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
 }
 
+@Immutable
+data class BrushSlot(
+    val id: String = UUID.randomUUID().toString(),
+    val brushType: StrokeBrushType,
+    val colorHex: String,
+    val strokeWidth: Float,
+    val isRainbow: Boolean = false
+) {
+    val toolType: ToolType
+        get() = when (brushType) {
+            StrokeBrushType.FOUNTAIN_PEN -> ToolType.PEN
+            StrokeBrushType.FINE_MARKER -> ToolType.FINE_MARKER
+            StrokeBrushType.HIGHLIGHTER -> ToolType.HIGHLIGHTER
+        }
+}
+
 enum class StrokeStyle { SOLID }
 
 enum class LineCapStyle(val displayName: String, val symbol: String) {
