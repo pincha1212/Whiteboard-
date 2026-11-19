@@ -15,6 +15,7 @@ import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.LaserPoint
+import com.example.model.PenToolSlot
 import com.example.model.LineCapStyle
 import com.example.model.RulerState
 import com.example.model.ShapeItem
@@ -55,6 +56,9 @@ data class WhiteboardUiState(
     val currentTool: ToolType = ToolType.PEN,
     val penColorHex: String = "#1E1E1E",
     val penWidth: Float = 6f,
+    val penOpacity: Float = 1f,
+    val penToolSlots: List<PenToolSlot> = PenToolSlot.EMPTY_SLOTS,
+    val activePenSlotIndex: Int = 0,
     val penStyle: StrokeStyle = StrokeStyle.SOLID,
     val penCapStyle: LineCapStyle = LineCapStyle.NONE,
     val isRainbowPen: Boolean = false,
@@ -258,7 +262,8 @@ class WhiteboardViewModel(
         return WhiteboardUiState(
             board = blankBoard,
             allBoards = listOf(blankBoard),
-            isViewingBoardsHome = true
+            isViewingBoardsHome = true,
+            penToolSlots = store.currentState.penToolSlots
         )
     }
 
@@ -481,7 +486,7 @@ class WhiteboardViewModel(
             strokeStyle = StrokeStyle.SOLID,
             capStyle = LineCapStyle.NONE,
             brushType = brushType,
-            opacity = brushType.defaultOpacity
+            opacity = state.penOpacity.coerceIn(0.05f, 1f)
         )
 
         val recognized = if (state.autoShapeRecognition) {
@@ -2871,12 +2876,80 @@ class WhiteboardViewModel(
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
     }
 
+    private fun persistActivePenSlotUpdate(
+        transform: (PenToolSlot) -> PenToolSlot
+    ) {
+        val state = _uiState.value
+        val index = state.activePenSlotIndex.coerceIn(0, 2)
+        val current = state.penToolSlots.getOrNull(index) ?: PenToolSlot()
+        if (!current.isConfigured) return
+        val updated = state.penToolSlots.toMutableList().apply {
+            while (size < 3) add(PenToolSlot())
+            this[index] = transform(current)
+        }.take(3)
+        _uiState.update { it.copy(penToolSlots = updated) }
+        store.updatePenToolSlots(updated)
+    }
+
+    fun configurePenToolSlot(index: Int, tool: ToolType) {
+        if (index !in 0..2 || tool !in setOf(ToolType.PEN, ToolType.FINE_MARKER, ToolType.HIGHLIGHTER)) return
+        val state = _uiState.value
+        val slots = state.penToolSlots.toMutableList().apply {
+            while (size < 3) add(PenToolSlot())
+            this[index] = PenToolSlot(
+                tool = tool,
+                colorHex = state.penColorHex,
+                width = state.penWidth.coerceIn(1f, 48f),
+                opacity = if (tool == ToolType.HIGHLIGHTER) 0.30f else state.penOpacity.coerceIn(0.05f, 1f)
+            )
+        }.take(3)
+        store.updatePenToolSlots(slots)
+        _uiState.update {
+            it.copy(
+                penToolSlots = slots,
+                activePenSlotIndex = index,
+                currentTool = tool,
+                penColorHex = slots[index].colorHex,
+                penWidth = slots[index].width,
+                penOpacity = slots[index].opacity,
+                isRainbowPen = false,
+                pendingBrushType = brushTypeForTool(tool)
+            )
+        }
+    }
+
+    fun selectPenToolSlot(index: Int) {
+        if (index !in 0..2) return
+        val slot = _uiState.value.penToolSlots.getOrNull(index) ?: return
+        val tool = slot.tool ?: return
+        _uiState.update {
+            it.copy(
+                activePenSlotIndex = index,
+                currentTool = tool,
+                penColorHex = slot.colorHex,
+                penWidth = slot.width,
+                penOpacity = slot.opacity,
+                isRainbowPen = false,
+                pendingBrushType = brushTypeForTool(tool)
+            )
+        }
+    }
+
     fun setPenColor(hex: String, isRainbow: Boolean = false) {
         _uiState.update { it.copy(penColorHex = hex, isRainbowPen = isRainbow) }
+        persistActivePenSlotUpdate { it.copy(colorHex = hex) }
     }
 
     fun setPenWidth(width: Float) {
-        _uiState.update { it.copy(penWidth = width) }
+        val safeWidth = width.coerceIn(1f, 48f)
+        _uiState.update { it.copy(penWidth = safeWidth) }
+        persistActivePenSlotUpdate { it.copy(width = safeWidth) }
+    }
+
+    fun setPenOpacity(opacity: Float) {
+        val safeOpacity = opacity.coerceIn(0.05f, 1f)
+        _uiState.update { it.copy(penOpacity = safeOpacity) }
+        persistActivePenSlotUpdate { it.copy(opacity = safeOpacity) }
     }
 
     fun setPenStyle(style: StrokeStyle) {
