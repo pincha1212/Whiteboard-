@@ -329,6 +329,14 @@ private fun CompactPortraitDock(
                 InkingToolsRow(
                     currentTool = currentTool,
                     penColor = parsedPenColor,
+                    penToolSlots = penToolSlots,
+                    activePenSlotIndex = activePenSlotIndex,
+                    onConfigurePenSlot = onConfigurePenSlot,
+                    onClearPenSlot = onClearPenSlot,
+                    onSelectPenSlot = onSelectPenSlot,
+                    onUpdatePenColor = { onUpdatePenColor(it, false) },
+                    onUpdatePenWidth = onUpdatePenWidth,
+                    onUpdatePenOpacity = onUpdatePenOpacity,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
@@ -393,16 +401,7 @@ private fun CompactPortraitDock(
 
                 DockHairlineDivider(vertical = true)
 
-                ConfigurablePenSlots(
-                    slots = penToolSlots,
-                    activeIndex = activePenSlotIndex,
-                    onSelectSlot = onSelectPenSlot,
-                    onConfigureSlot = onConfigurePenSlot,
-                    onClearSlot = onClearPenSlot,
-                    onUpdateColor = { onUpdatePenColor(it, false) },
-                    onUpdateWidth = onUpdatePenWidth,
-                    onUpdateOpacity = onUpdatePenOpacity
-                )
+
             }
         }
     }
@@ -507,16 +506,7 @@ private fun CompactLandscapeRailDock(
 
                 DockHairlineDivider(vertical = false)
 
-                ConfigurablePenSlots(
-                    slots = penToolSlots,
-                    activeIndex = activePenSlotIndex,
-                    onSelectSlot = onSelectPenSlot,
-                    onConfigureSlot = onConfigurePenSlot,
-                    onClearSlot = onClearPenSlot,
-                    onUpdateColor = { onUpdatePenColor(it, false) },
-                    onUpdateWidth = onUpdatePenWidth,
-                    onUpdateOpacity = onUpdatePenOpacity
-                )
+
             }
         }
 
@@ -540,6 +530,14 @@ private fun CompactLandscapeRailDock(
                 InkingToolsRow(
                     currentTool = currentTool,
                     penColor = parsedPenColor,
+                    penToolSlots = penToolSlots,
+                    activePenSlotIndex = activePenSlotIndex,
+                    onConfigurePenSlot = onConfigurePenSlot,
+                    onClearPenSlot = onClearPenSlot,
+                    onSelectPenSlot = onSelectPenSlot,
+                    onUpdatePenColor = { onUpdatePenColor(it, false) },
+                    onUpdatePenWidth = onUpdatePenWidth,
+                    onUpdatePenOpacity = onUpdatePenOpacity,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
@@ -643,6 +641,14 @@ private fun ExpandedTabletDock(
                 InkingToolsRow(
                     currentTool = currentTool,
                     penColor = parsedPenColor,
+                    penToolSlots = penToolSlots,
+                    activePenSlotIndex = activePenSlotIndex,
+                    onConfigurePenSlot = onConfigurePenSlot,
+                    onClearPenSlot = onClearPenSlot,
+                    onSelectPenSlot = onSelectPenSlot,
+                    onUpdatePenColor = { onUpdatePenColor(it, false) },
+                    onUpdatePenWidth = onUpdatePenWidth,
+                    onUpdatePenOpacity = onUpdatePenOpacity,
                     isRulerActive = isRulerActive,
                     pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
@@ -670,16 +676,7 @@ private fun ExpandedTabletDock(
 
                 DockHairlineDivider(vertical = true)
 
-                ConfigurablePenSlots(
-                    slots = penToolSlots,
-                    activeIndex = activePenSlotIndex,
-                    onSelectSlot = onSelectPenSlot,
-                    onConfigureSlot = onConfigurePenSlot,
-                    onClearSlot = onClearPenSlot,
-                    onUpdateColor = { onUpdatePenColor(it, false) },
-                    onUpdateWidth = onUpdatePenWidth,
-                    onUpdateOpacity = onUpdatePenOpacity
-                )
+
             }
         }
     }
