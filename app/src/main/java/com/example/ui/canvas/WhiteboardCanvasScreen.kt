@@ -1465,6 +1465,9 @@ private fun CanvasDockOverlay(
     val onConfigurePenSlot = remember(viewModel) {
         { index: Int, tool: ToolType -> viewModel.configurePenToolSlot(index, tool) }
     }
+    val onClearPenSlot = remember(viewModel) {
+        { index: Int -> viewModel.clearPenToolSlot(index) }
+    }
     val onSelectPenSlot = remember(viewModel) {
         { index: Int ->
             viewModel.cancelPendingPlacement()
@@ -1576,6 +1579,7 @@ private fun CanvasDockOverlay(
                 penToolSlots = penToolSlots,
                 activePenSlotIndex = activePenSlotIndex,
                 onConfigurePenSlot = onConfigurePenSlot,
+                onClearPenSlot = onClearPenSlot,
                 onSelectPenSlot = onSelectPenSlot,
                 onUpdatePenOpacity = onUpdatePenOpacity,
                 isRainbowPen = isRainbowPen,
