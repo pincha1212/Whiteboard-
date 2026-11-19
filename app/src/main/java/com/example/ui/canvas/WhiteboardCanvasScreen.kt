@@ -152,7 +152,7 @@ fun WhiteboardCanvasScreen(
     var showTextEditor by remember { mutableStateOf(false) }
     var textDraft by remember { mutableStateOf("Escribe aquí") }
     var textColorDraft by remember { mutableStateOf("#1E1E1E") }
-    var textBackgroundDraft by remember { mutableStateOf<String?>(null) }
+    var textBackgroundDraft by remember { mutableStateOf<String?>("#FFFFFF") }
     var textSizeDraft by remember { mutableStateOf(24f) }
     var textWidthDraft by remember { mutableStateOf(260f) }
     var textBoldDraft by remember { mutableStateOf(false) }
@@ -978,7 +978,7 @@ fun WhiteboardCanvasScreen(
                                     DropdownMenuItem(
                                         text = { Text("Sin fondo") },
                                         onClick = {
-                                            viewModel.updateTextItemStyle(tItem.id, clearBackground = true)
+                                            viewModel.updateTextItemStyle(tItem.id, backgroundColorHex = "#00000000")
                                             showTextFormatMenu = false
                                         }
                                     )
@@ -1715,7 +1715,7 @@ private fun CanvasDockOverlay(
                     }
                     Text("Fondo", style = MaterialTheme.typography.labelMedium)
                     Row(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { textBackgroundDraft = null }) { Text("Ninguno") }
+                        TextButton(onClick = { textBackgroundDraft = "#00000000" }) { Text("Sin fondo") }
                         listOf("#FFF275", "#DCEAFE", "#DCFCE7", "#FCE7F3", "#F3E8FF", "#1F2937").forEach { hex ->
                             Surface(
                                 modifier = Modifier.size(26.dp).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape).clickable { textBackgroundDraft = hex },
