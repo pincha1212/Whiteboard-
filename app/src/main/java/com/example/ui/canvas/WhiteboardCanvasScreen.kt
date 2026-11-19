@@ -149,13 +149,6 @@ fun WhiteboardCanvasScreen(
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSnapshotsModal by remember { mutableStateOf(false) }
     var showShapePickerModal by remember { mutableStateOf(false) }
-    var showTextEditor by remember { mutableStateOf(false) }
-    var textDraft by remember { mutableStateOf("Escribe aquí") }
-    var textColorDraft by remember { mutableStateOf("#1E1E1E") }
-    var textBackgroundDraft by remember { mutableStateOf<String?>("#FFFFFF") }
-    var textSizeDraft by remember { mutableStateOf(24f) }
-    var textWidthDraft by remember { mutableStateOf(260f) }
-    var textBoldDraft by remember { mutableStateOf(false) }
     var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
     var editingLabelText by remember { mutableStateOf("") }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
@@ -1517,6 +1510,13 @@ private fun CanvasDockOverlay(
     onRequestDeleteNote: (StickyNote) -> Unit,
     onOpenShapePicker: () -> Unit
 ) {
+    var showTextEditor by remember { mutableStateOf(false) }
+    var textDraft by remember { mutableStateOf("Escribe aquí") }
+    var textColorDraft by remember { mutableStateOf("#1E1E1E") }
+    var textBackgroundDraft by remember { mutableStateOf<String?>("#FFFFFF") }
+    var textSizeDraft by remember { mutableStateOf(24f) }
+    var textWidthDraft by remember { mutableStateOf(260f) }
+    var textBoldDraft by remember { mutableStateOf(false) }
     val selectedNote = if (selectedNoteId != null) {
         val noteFlow = remember(viewModel, selectedNoteId) {
             viewModel.stickyNotesStore.flowFor(selectedNoteId)
