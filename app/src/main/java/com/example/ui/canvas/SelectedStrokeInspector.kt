@@ -117,6 +117,7 @@ fun SelectionEditDock(
     onRotateAll: (Float) -> Unit = {},
     onUpdateAllColor: (String) -> Unit = {},
     onUpdateShapeColor: (String) -> Unit,
+    onUpdateShapeLabel: (String) -> Unit = {},
     onUpdateShapeFillColor: (String) -> Unit,
     onToggleShapeFilled: () -> Unit,
     onUpdateShapeWidth: (Float) -> Unit,
@@ -481,6 +482,22 @@ fun SelectionEditDock(
                                     )
 
                                     Spacer(modifier = Modifier.height(8.dp))
+
+                                    Text(
+                                        text = "Texto de la forma",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    androidx.compose.material3.OutlinedTextField(
+                                        value = selectedShape.label,
+                                        onValueChange = onUpdateShapeLabel,
+                                        singleLine = true,
+                                        placeholder = { Text("Etiqueta") },
+                                        modifier = Modifier.fillMaxWidth().testTag("edit_shape_label_dock")
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                    Spacer(modifier = Modifier.height(10.dp))
 
                                     // Stroke Colors
                                     Text("Color de línea", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
