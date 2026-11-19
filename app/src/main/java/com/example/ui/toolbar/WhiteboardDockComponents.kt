@@ -452,42 +452,6 @@ internal fun InkingToolsRow(
 
     val slots: @Composable () -> Unit = {
         TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.PEN,
-            description = "Pluma",
-            onClick = { onSelectTool(ToolType.PEN) },
-            testTag = "dock_menu_tool_pen"
-        ) {
-            PhysicalFountainPenIcon(
-                inkColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
-        }
-
-        TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.FINE_MARKER,
-            description = "Fibra o marcador fino",
-            onClick = { onSelectTool(ToolType.FINE_MARKER) },
-            testTag = "dock_menu_tool_fine_marker"
-        ) {
-            PhysicalMarkerIcon(
-                markerColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
-        }
-
-        TrayToolSlot(
-            isSelected = !hasPendingPlacement && currentTool == ToolType.HIGHLIGHTER,
-            description = "Resaltador",
-            onClick = { onSelectTool(ToolType.HIGHLIGHTER) },
-            testTag = "dock_menu_tool_highlighter"
-        ) {
-            PhysicalHighlighterIcon(
-                highlighterColor = penColor,
-                modifier = Modifier.size(width = 26.dp, height = 38.dp)
-            )
-        }
-
-        TrayToolSlot(
             isSelected = !hasPendingPlacement && currentTool == ToolType.LASER_POINTER,
             description = "Puntero láser",
             onClick = { onSelectTool(ToolType.LASER_POINTER) },
