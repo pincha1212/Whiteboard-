@@ -2,7 +2,6 @@ package com.example.ui.canvas
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -16,12 +15,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.HorizontalDivider
@@ -431,11 +428,6 @@ private fun StickyNoteCardBody(
     val textColor = if (isDarkBg) Color.White else Color(0xFF1B1D1F)
     val headerBg = remember(noteBg) { noteBg.copy(alpha = 0.85f) }
 
-    var showPalette by remember(content.id) { mutableStateOf(false) }
-    if ((!isSelected || isPanOnlyMode) && showPalette) {
-        showPalette = false
-    }
-
     val headerHeightWorld = StickyNoteGeometry.headerHeightWorld(content.height)
     val innerPadWorld = StickyNoteGeometry.innerPaddingWorld(content.width, content.height)
     val (innerWidthWorld, innerHeightWorld) = StickyNoteGeometry.innerTextBoxWorld(content.width, content.height)
@@ -444,8 +436,6 @@ private fun StickyNoteCardBody(
     val innerPadDp = with(density) { innerPadWorld.toDp() }
     val headerHorizontalPadDp = with(density) { (innerPadWorld * 0.8f).coerceAtLeast(4f).toDp() }
     val iconDp = with(density) { (headerHeightWorld * 0.62f).coerceIn(8f, 16f).toDp() }
-    val colorDotDp = with(density) { (headerHeightWorld * 0.58f).coerceIn(7f, 15f).toDp() }
-    val deleteHitDp = with(density) { (headerHeightWorld * 0.88f).coerceAtLeast(12f).toDp() }
     val dividerThicknessDp = with(density) { 1f.toDp() }
     val dividerVerticalPadDp = with(density) { 3f.toDp() }
 
@@ -479,19 +469,6 @@ private fun StickyNoteCardBody(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(colorDotDp)
-                    .clip(CircleShape)
-                    .background(textColor.copy(alpha = 0.25f))
-                    .let {
-                        if (isPanOnlyMode) it else it.clickable {
-                            onSelect()
-                            showPalette = !showPalette
-                        }
-                    }
-            )
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(with(density) { 4f.toDp() })
@@ -512,49 +489,6 @@ private fun StickyNoteCardBody(
                         modifier = Modifier
                             .size(iconDp)
                             .let { if (isPanOnlyMode) it else it.clickable { onTogglePin() } }
-                    )
-                }
-                if (!isPanOnlyMode) {
-                    Box(
-                        modifier = Modifier
-                            .size(deleteHitDp)
-                            .clip(CircleShape)
-                            .clickable { onDelete() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Eliminar nota",
-                            tint = textColor.copy(alpha = 0.72f),
-                            modifier = Modifier.size(iconDp)
-                        )
-                    }
-                }
-            }
-        }
-
-        if (showPalette && !isPanOnlyMode) {
-            val paletteDotDp = with(density) {
-                min(16f, (content.width - innerPadWorld * 2f) / 9f).coerceAtLeast(8f).toDp()
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White.copy(alpha = 0.95f))
-                    .padding(vertical = with(density) { 4f.toDp() }),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StickyNotePalette.forEach { (hex, color) ->
-                    Box(
-                        modifier = Modifier
-                            .size(paletteDotDp)
-                            .clip(CircleShape)
-                            .background(color)
-                            .clickable {
-                                onUpdateColor(hex)
-                                showPalette = false
-                            }
                     )
                 }
             }
