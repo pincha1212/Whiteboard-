@@ -108,7 +108,7 @@ class LocalFirstWorkspaceStore(
      */
     fun updatePenToolSlots(slots: List<PenToolSlot>): WorkspaceDbState {
         val normalized = slots.take(3) + PenToolSlot.EMPTY_SLOTS.drop(slots.take(3).size)
-        return commit { current -> current.copy(penToolSlots = normalized) }
+        return commit(notifyListeners = false) { current -> current.copy(penToolSlots = normalized) }
     }
 
     fun addListener(listener: (WorkspaceDbState) -> Unit) {
@@ -121,6 +121,7 @@ class LocalFirstWorkspaceStore(
 
     private fun commit(
         persist: Boolean = true,
+        notifyListeners: Boolean = true,
         transform: (WorkspaceDbState) -> WorkspaceDbState
     ): WorkspaceDbState {
         val next: WorkspaceDbState
@@ -133,7 +134,9 @@ class LocalFirstWorkspaceStore(
                 persistRequestFlow.tryEmit(PersistRequest(stateRevision, next))
             }
         }
-        listeners.forEach { it(next) }
+        if (notifyListeners) {
+            listeners.forEach { it(next) }
+        }
         return next
     }
 
