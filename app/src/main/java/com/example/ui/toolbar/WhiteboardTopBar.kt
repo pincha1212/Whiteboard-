@@ -79,7 +79,6 @@ fun WhiteboardTopBar(
     onClearBoard: () -> Unit,
     onExportBoard: () -> Unit,
     onRenameBoard: () -> Unit,
-    onOpenSnapshotsAndAudit: () -> Unit = {},
     onBackToHome: (() -> Unit)? = null,
     onSwitchToNotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -395,18 +394,6 @@ fun WhiteboardTopBar(
                             )
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                            DropdownMenuItem(
-                                text = { Text("Snapshots y Auditoría", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                },
-                                onClick = {
-                                    showHeaderMenu = false
-                                    onOpenSnapshotsAndAudit()
-                                },
-                                modifier = Modifier.testTag("menu_open_snapshots_audit")
-                            )
 
                             DropdownMenuItem(
                                 text = { Text("Renombrar pizarra", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
