@@ -75,6 +75,7 @@ data class WhiteboardUiState(
     val selectedStrokeIds: Set<String> = emptySet(),
     val selectedShapeIds: Set<String> = emptySet(),
     val selectedNoteIds: Set<String> = emptySet(),
+    val selectedTextIds: Set<String> = emptySet(),
     val shapeRecognitionProposal: ShapeRecognitionProposal? = null,
     val pendingStickyNoteColor: String? = null,
     val handDrawnFactor: Float = 0.24f,
@@ -1154,17 +1155,19 @@ class WhiteboardViewModel(
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
         val noteIds = if (state.selectedNoteIds.isNotEmpty()) state.selectedNoteIds else state.selectedNoteId?.let { setOf(it) } ?: emptySet()
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
 
-        if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty()) return
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty() && textIds.isEmpty()) return
         saveUndoSnapshot()
         stickyNotesStore.removeNotes(noteIds)
 
         _uiState.update {
             it.withUpdatedBoard { b ->
                 b.copy(
-                    strokes = b.strokes.filter { s -> !strokeIds.contains(s.id) },
-                    shapes = b.shapes.filter { sh -> sh.isLocked || !shapeIds.contains(sh.id) },
-                    stickyNotes = stickyNotesStore.currentNotes()
+                    strokes = b.strokes.filterNot { s -> strokeIds.contains(s.id) },
+                    shapes = b.shapes.filterNot { sh -> !sh.isLocked && shapeIds.contains(sh.id) },
+                    stickyNotes = stickyNotesStore.currentNotes(),
+                    textItems = b.textItems.filterNot { item -> !item.isLocked && textIds.contains(item.id) }
                 )
             }.copy(
                 selectedStrokeId = null,
@@ -1173,7 +1176,8 @@ class WhiteboardViewModel(
                 selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
