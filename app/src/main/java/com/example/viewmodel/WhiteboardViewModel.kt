@@ -1618,7 +1618,7 @@ class WhiteboardViewModel(
         if (noteIds.isNotEmpty()) {
             stickyNotesStore.moveMultipleWorld(noteIds, dxWorld, dyWorld)
         }
-        if (strokeIds.isEmpty() && shapeIds.isEmpty() && isStickyNoteTransformInProgress) {
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && textIds.isEmpty() && isStickyNoteTransformInProgress) {
             return
         }
 
@@ -2324,7 +2324,7 @@ class WhiteboardViewModel(
                 selectedTextIds = newTextIds
             )
         }
-        if (newNotes.isNotEmpty()) {
+        if (newNotes.isNotEmpty() || newTexts.isNotEmpty()) {
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
         }
     }
