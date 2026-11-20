@@ -924,7 +924,7 @@ fun WhiteboardCanvasScreen(
                     )
                 }
             } else {
-                val isSelected = state.selectedTextId == tItem.id
+                val isSelected = state.selectedTextId == tItem.id || state.selectedTextIds.contains(tItem.id)
                 val isTransparentBg = tItem.backgroundColorHex == "TRANSPARENT"
                 val cardBg = if (isTransparentBg) {
                     Color.Transparent
@@ -967,17 +967,17 @@ fun WhiteboardCanvasScreen(
                                             previous = change.position
                                             if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
                                                 dragging = true
-                                                viewModel.selectTextItem(tItem.id)
-                                                viewModel.beginTextItemTransformSnapshot()
+                                                if (!viewModel.uiState.value.selectedTextIds.contains(tItem.id)) viewModel.selectTextItem(tItem.id)
+                                                viewModel.beginTransformSnapshot()
                                             }
                                             if (dragging) {
                                                 change.consume()
                                                 val cameraScale = cameraState.value.scale.coerceAtLeast(0.1f)
-                                                viewModel.moveTextItem(tItem.id, delta.x / cameraScale, delta.y / cameraScale)
+                                                viewModel.moveSelectedObjects(delta.x / cameraScale, delta.y / cameraScale)
                                             }
                                         }
                                     } while (event.changes.any { it.id == down.id && it.pressed })
-                                    if (dragging) viewModel.commitTextItemTransform()
+                                    if (dragging) viewModel.persistCurrentBoard()
                                 }
                             }
                         }
