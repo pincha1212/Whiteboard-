@@ -1242,7 +1242,8 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
-                selectedTextId = null
+                selectedTextId = null,
+                selectedTextIds = emptySet()
             )
         }
     }
@@ -2100,7 +2101,8 @@ class WhiteboardViewModel(
         val state = _uiState.value
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
-        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && textIds.isEmpty()) return
         saveUndoSnapshot()
         _uiState.update {
             it.withUpdatedBoard { b ->
@@ -2110,6 +2112,9 @@ class WhiteboardViewModel(
                     },
                     shapes = if (shapeIds.isEmpty()) b.shapes else b.shapes.map { sh ->
                         if (shapeIds.contains(sh.id)) sh.copy(strokeColorHex = colorHex) else sh
+                    },
+                    textItems = if (textIds.isEmpty()) b.textItems else b.textItems.map { item ->
+                        if (textIds.contains(item.id)) item.copy(colorHex = colorHex) else item
                     }
                 )
             }
@@ -2120,7 +2125,8 @@ class WhiteboardViewModel(
         val state = _uiState.value
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
-        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && textIds.isEmpty()) return
         saveUndoSnapshot()
         val updatedStrokes = if (strokeIds.isEmpty()) state.board.strokes else state.board.strokes.map { s ->
             if (!strokeIds.contains(s.id) || s.points.isEmpty()) {
@@ -2175,14 +2181,21 @@ class WhiteboardViewModel(
                 s.copy(x = newX, y = newY, width = newW, height = newH, vertices = remappedVerts)
             }
         }
-        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes) } }
+        val updatedTexts = if (textIds.isEmpty()) state.board.textItems else state.board.textItems.map { item ->
+            if (textIds.contains(item.id) && !item.isLocked) item.copy(
+                width = (item.width * factor).coerceIn(140f, 1200f),
+                fontSize = (item.fontSize * factor).coerceIn(20f, 96f)
+            ) else item
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes, textItems = updatedTexts) } }
     }
 
     fun rotateCurrentSelection(deltaDegrees: Float) {
         val state = _uiState.value
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
-        if (strokeIds.isEmpty() && shapeIds.isEmpty()) return
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && textIds.isEmpty()) return
         saveUndoSnapshot()
         val rad = deltaDegrees * (PI.toFloat() / 180f)
         val cosA = cos(rad)
@@ -2229,7 +2242,10 @@ class WhiteboardViewModel(
                 s.copy(rotation = next)
             }
         }
-        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes) } }
+        val updatedTexts = if (textIds.isEmpty()) state.board.textItems else state.board.textItems.map { item ->
+            if (textIds.contains(item.id) && !item.isLocked) item.copy(rotation = ((item.rotation + deltaDegrees) % 360f + 360f) % 360f) else item
+        }
+        _uiState.update { it.withUpdatedBoard { b -> b.copy(strokes = updatedStrokes, shapes = updatedShapes, textItems = updatedTexts) } }
     }
 
     fun duplicateCurrentSelection() {
@@ -2238,10 +2254,12 @@ class WhiteboardViewModel(
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
         val noteIds = if (state.selectedNoteIds.isNotEmpty()) state.selectedNoteIds else state.selectedNoteId?.let { setOf(it) } ?: emptySet()
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
         val strokesToDup = state.board.strokes.filter { strokeIds.contains(it.id) }
         val shapesToDup = state.board.shapes.filter { shapeIds.contains(it.id) }
         val notesToDup = stickyNotesStore.currentNotes().filter { noteIds.contains(it.id) }
-        if (strokesToDup.isEmpty() && shapesToDup.isEmpty() && notesToDup.isEmpty()) return
+        val textsToDup = state.board.textItems.filter { textIds.contains(it.id) }
+        if (strokesToDup.isEmpty() && shapesToDup.isEmpty() && notesToDup.isEmpty() && textsToDup.isEmpty()) return
         saveUndoSnapshot()
         val newStrokes = strokesToDup.map { s ->
             s.copy(id = UUID.randomUUID().toString(), points = s.points.map { StrokePoint(it.x + 30f, it.y + 30f) })
@@ -2269,12 +2287,15 @@ class WhiteboardViewModel(
         val newStrokeIds = newStrokes.map { it.id }.toSet()
         val newShapeIds = newShapes.map { it.id }.toSet()
         val newNoteIds = newNotes.map { it.id }.toSet()
+        val newTexts = textsToDup.map { item -> item.copy(id = UUID.randomUUID().toString(), x = item.x + 30f, y = item.y + 30f, groupId = null, parentId = null) }
+        val newTextIds = newTexts.map { it.id }.toSet()
         _uiState.update {
             it.withUpdatedBoard { b ->
                 b.copy(
                     strokes = b.strokes + newStrokes,
                     shapes = b.shapes + newShapes,
-                    stickyNotes = stickyNotesStore.currentNotes()
+                    stickyNotes = stickyNotesStore.currentNotes(),
+                    textItems = b.textItems + newTexts
                 )
             }.copy(
                 selectedStrokeId = newStrokeIds.firstOrNull(),
@@ -2282,7 +2303,9 @@ class WhiteboardViewModel(
                 selectedShapeId = newShapeIds.firstOrNull(),
                 selectedShapeIds = newShapeIds,
                 selectedNoteId = newNoteIds.firstOrNull(),
-                selectedNoteIds = newNoteIds
+                selectedNoteIds = newNoteIds,
+                selectedTextId = newTextIds.firstOrNull(),
+                selectedTextIds = newTextIds
             )
         }
         if (newNotes.isNotEmpty()) {
