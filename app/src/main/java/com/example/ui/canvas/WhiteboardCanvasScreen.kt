@@ -981,7 +981,7 @@ fun WhiteboardCanvasScreen(
                                 }
                             }
                         }
-                        .testTag("editable_text_item_\${tItem.id}")
+                        .testTag("editable_text_item_${tItem.id}")
                 ) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
