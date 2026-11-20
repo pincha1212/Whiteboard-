@@ -1023,7 +1023,7 @@ fun WhiteboardCanvasScreen(
                         }
                     }
 
-                    if (isSelected && !isPanOnlyMode) {
+                    if (state.selectedTextId == tItem.id && !isPanOnlyMode) {
                         var currentDragWidth by remember(tItem.id, tItem.width) { mutableStateOf(tItem.width) }
                         Box(
                             modifier = Modifier
@@ -1037,9 +1037,9 @@ fun WhiteboardCanvasScreen(
                                     detectDragGestures(
                                         onDragStart = {
                                             currentDragWidth = tItem.width
-                                            viewModel.beginTextItemTransformSnapshot()
+                                            viewModel.beginCurrentSelectionTransformSnapshot()
                                         },
-                                        onDragEnd = { viewModel.commitTextItemTransform() },
+                                        onDragEnd = { viewModel.commitCurrentSelectionTransform() },
                                         onDragCancel = { viewModel.commitTextItemTransform() },
                                         onDrag = { change, dragAmount ->
                                             change.consume()
