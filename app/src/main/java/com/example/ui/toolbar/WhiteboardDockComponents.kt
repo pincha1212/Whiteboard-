@@ -1,11 +1,9 @@
 package com.example.ui.toolbar
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -16,7 +14,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NearMe
@@ -34,10 +30,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -52,14 +44,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -71,8 +59,6 @@ import androidx.compose.ui.unit.sp
 import com.example.model.BrushSlot
 import com.example.model.StrokeBrushType
 import com.example.model.ToolType
-import kotlin.math.abs
-import kotlin.math.roundToInt
 
 enum class DockLayoutMode {
     COMPACT_PORTRAIT,
@@ -438,7 +424,6 @@ private fun ModeSegmentButton(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun InkingToolsRow(
     currentTool: ToolType,
@@ -459,72 +444,20 @@ internal fun InkingToolsRow(
     modifier: Modifier = Modifier
 ) {
     val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
-    var expandedSlotIndex by remember { mutableStateOf<Int?>(null) }
-    val haptic = LocalHapticFeedback.current
-    val fallbackInk = MaterialTheme.colorScheme.onSurface
     val isAnyBrushToolActive = !hasPendingPlacement &&
         (currentTool == ToolType.PEN || currentTool == ToolType.FINE_MARKER || currentTool == ToolType.HIGHLIGHTER)
 
     val slots: @Composable () -> Unit = {
-        brushSlots.forEachIndexed { index, slot ->
-            val isSlotSelected = isAnyBrushToolActive && activeBrushSlotIndex == index
-            val slotColor = remember(slot.colorHex, fallbackInk) {
-                parseDockColorSafe(slot.colorHex, fallbackInk)
-            }
-            val iconTintColor = if (slot.isRainbow) Color(0xFFEC4899) else slotColor
-            val slotLabel = when (slot.brushType) {
-                StrokeBrushType.FOUNTAIN_PEN -> "Lápiz"
-                StrokeBrushType.FINE_MARKER -> "Marcador"
-                StrokeBrushType.HIGHLIGHTER -> "Resaltador"
-            }
-
-            Box {
-                CustomizableBrushSlotButton(
-                    isSelected = isSlotSelected,
-                    description = "$slotLabel ${index + 1}. Mantén presionado para elegir tipo, color y grosor",
-                    onClick = { onSelectBrushSlot(index) },
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSelectBrushSlot(index)
-                        expandedSlotIndex = index
-                    },
-                    testTag = "dock_brush_slot_$index"
-                ) {
-                    when (slot.brushType) {
-                        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
-                            inkColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
-                            markerColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
-                            highlighterColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                    }
-                }
-
-                BrushSlotDropdownMenu(
-                    expanded = expandedSlotIndex == index,
-                    onDismiss = { expandedSlotIndex = null },
-                    slot = slot,
-                    parsedColor = slotColor,
-                    autoShapeRecognition = autoShapeRecognition,
-                    onChangeBrushType = { newType ->
-                        onUpdateBrushSlot(index, newType, null, null, null)
-                    },
-                    onUpdateColor = { hex, isRainbow ->
-                        onUpdateBrushSlot(index, null, hex, null, isRainbow)
-                    },
-                    onUpdateWidth = { width ->
-                        onUpdateBrushSlot(index, null, null, width, null)
-                    },
-                    onToggleAutoShape = onToggleAutoShape
-                )
-            }
-        }
+        BrushDock(
+            brushSlots = brushSlots,
+            activeBrushSlotIndex = activeBrushSlotIndex,
+            isBrushToolActive = isAnyBrushToolActive,
+            autoShapeRecognition = autoShapeRecognition,
+            onSelectBrushSlot = onSelectBrushSlot,
+            onUpdateBrushSlot = onUpdateBrushSlot,
+            onToggleAutoShape = onToggleAutoShape,
+            isVertical = isVertical
+        )
 
         TrayToolSlot(
             isSelected = !hasPendingPlacement && currentTool == ToolType.LASER_POINTER,
@@ -638,79 +571,6 @@ internal fun InkingToolsRow(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun CustomizableBrushSlotButton(
-    isSelected: Boolean,
-    description: String,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-    testTag: String,
-    iconContent: @Composable () -> Unit
-) {
-    val triangleColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-    }
-
-    Box(
-        contentAlignment = Alignment.BottomCenter,
-        modifier = Modifier
-            .defaultMinSize(minWidth = 42.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
-                else Color.Transparent
-            )
-            .border(
-                width = if (isSelected) 1.4.dp else 0.dp,
-                color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                shape = RoundedCornerShape(10.dp)
-            )
-            .combinedClickable(
-                role = Role.Button,
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-            .semantics {
-                contentDescription = description
-                selected = isSelected
-            }
-            .padding(top = 4.dp)
-            .testTag(testTag)
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            iconContent()
-        }
-        if (isSelected) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 2.dp)
-                    .size(width = 14.dp, height = 2.5.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-        }
-        // Small corner triangle indicating long-press customization (type, color & stroke width)
-        Canvas(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 3.dp, bottom = 3.dp)
-                .size(7.dp)
-        ) {
-            val tri = Path().apply {
-                moveTo(size.width, size.height)
-                lineTo(size.width, 0f)
-                lineTo(0f, size.height)
-                close()
-            }
-            drawPath(path = tri, color = triangleColor)
-        }
-    }
-}
-
 @Composable
 private fun TrayToolSlot(
     isSelected: Boolean,
@@ -753,333 +613,6 @@ private fun TrayToolSlot(
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primary)
             )
-        }
-    }
-}
-
-@Composable
-internal fun BrushSlotDropdownMenu(
-    expanded: Boolean,
-    onDismiss: () -> Unit,
-    slot: BrushSlot,
-    parsedColor: Color,
-    autoShapeRecognition: Boolean,
-    onChangeBrushType: (StrokeBrushType) -> Unit,
-    onUpdateColor: (String, isRainbow: Boolean) -> Unit,
-    onUpdateWidth: (Float) -> Unit,
-    onToggleAutoShape: () -> Unit
-) {
-    DropdownMenu(
-        expanded = expanded,
-        onDismissRequest = onDismiss,
-        scrollState = rememberScrollState(),
-        containerColor = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier
-            .width(320.dp)
-            .heightIn(max = 520.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
-            .testTag("dock_brush_slot_dropdown")
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            // Live Stroke Preview Strip
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-            ) {
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    val h = size.height
-                    val w = size.width
-                    val path = Path().apply {
-                        moveTo(0f, h * 0.56f)
-                        cubicTo(w * 0.25f, h * 0.22f, w * 0.45f, h * 0.85f, w * 0.72f, h * 0.42f)
-                        quadraticTo(w * 0.86f, h * 0.22f, w, h * 0.52f)
-                    }
-                    val isHighlighter = slot.brushType == StrokeBrushType.HIGHLIGHTER
-                    val alpha = if (isHighlighter) 0.45f else 1f
-                    val previewWidth = when (slot.brushType) {
-                        StrokeBrushType.HIGHLIGHTER -> (slot.strokeWidth * 1.4f).coerceIn(10f, 26f)
-                        StrokeBrushType.FINE_MARKER -> (slot.strokeWidth * 0.7f).coerceIn(2f, 10f)
-                        StrokeBrushType.FOUNTAIN_PEN -> slot.strokeWidth.coerceIn(2f, 24f)
-                    }
-                    if (slot.isRainbow && !isHighlighter) {
-                        drawPath(
-                            path = path,
-                            brush = Brush.horizontalGradient(DockRainbowColors),
-                            style = Stroke(width = previewWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
-                    } else {
-                        drawPath(
-                            path = path,
-                            color = parsedColor.copy(alpha = alpha),
-                            style = Stroke(width = previewWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Customizable Tool Type Selector (Lápiz / Marcador / Resaltador)
-            Text(
-                text = "TIPO DE HERRAMIENTA",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            val brushTypeOptions = listOf(
-                StrokeBrushType.FOUNTAIN_PEN to "Lápiz",
-                StrokeBrushType.FINE_MARKER to "Marcador",
-                StrokeBrushType.HIGHLIGHTER to "Resaltador"
-            )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                brushTypeOptions.forEach { (type, label) ->
-                    val isTypeSelected = slot.brushType == type
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (isTypeSelected) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .border(
-                                width = if (isTypeSelected) 1.5.dp else 1.dp,
-                                color = if (isTypeSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(10.dp)
-                            )
-                            .clickable { onChangeBrushType(type) }
-                            .padding(vertical = 8.dp)
-                            .testTag("slot_type_${type.name}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 11.sp,
-                            fontWeight = if (isTypeSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isTypeSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Color Palette + Rainbow
-            Text(
-                text = "COLOR DE TRAZO",
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-            ) {
-                DockPenColorPalette.forEach { option ->
-                    val swatchColor = remember(option.hex) { parseDockColorSafe(option.hex, Color.Black) }
-                    val isColorSelected = slot.colorHex.equals(option.hex, ignoreCase = true) && !slot.isRainbow
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(swatchColor)
-                            .border(
-                                width = if (isColorSelected) 2.5.dp else 1.dp,
-                                color = if (isColorSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                shape = CircleShape
-                            )
-                            .clickable { onUpdateColor(option.hex, false) }
-                            .semantics {
-                                contentDescription = option.label
-                                selected = isColorSelected
-                            }
-                            .testTag("dock_color_${option.label}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isColorSelected) {
-                            Box(
-                                modifier = Modifier
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(if (option.hex.equals("#FACC15", true)) Color(0xFF0F172A) else Color.White)
-                            )
-                        }
-                    }
-                }
-
-                // Rainbow Swatch
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Brush.sweepGradient(DockRainbowColors))
-                        .border(
-                            width = if (slot.isRainbow) 2.5.dp else 1.dp,
-                            color = if (slot.isRainbow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                            shape = CircleShape
-                        )
-                        .clickable { onUpdateColor(slot.colorHex, true) }
-                        .semantics {
-                            contentDescription = "Tinta arcoíris"
-                            selected = slot.isRainbow
-                        }
-                        .testTag("dock_color_Arcoiris"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (slot.isRainbow) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(Color.White)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Width Presets + Continuous Slider
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "GROSOR",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "${slot.strokeWidth.roundToInt()} px",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            Slider(
-                value = slot.strokeWidth.coerceIn(2f, 24f),
-                onValueChange = onUpdateWidth,
-                valueRange = 2f..24f,
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier
-                    .height(30.dp)
-                    .testTag("dock_pen_width_slider")
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                DockPenWidthOptions.forEach { option ->
-                    val isSelected = abs(slot.strokeWidth - option.width) < 1f
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                else MaterialTheme.colorScheme.surfaceVariant
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                shape = RoundedCornerShape(8.dp)
-                            )
-                            .clickable { onUpdateWidth(option.width) }
-                            .padding(vertical = 7.dp)
-                            .testTag("dock_width_${option.label}"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = option.label,
-                            fontSize = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Auto-Shape Recognition Toggle
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        if (autoShapeRecognition) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                        else Color.Transparent
-                    )
-                    .clickable(onClick = onToggleAutoShape)
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                    .testTag("dock_menu_toggle_auto_shape")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AutoFixHigh,
-                    contentDescription = null,
-                    tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Formas automáticas",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = if (autoShapeRecognition) FontWeight.SemiBold else FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Convierte trazos cerrados en figuras",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Switch(
-                    checked = autoShapeRecognition,
-                    onCheckedChange = { onToggleAutoShape() }
-                )
-            }
         }
     }
 }

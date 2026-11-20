@@ -57,19 +57,26 @@ fun PhysicalFountainPenIcon(
             size = Size(w * 0.52f, h * 0.08f)
         )
 
-        // Upright barrel anchored cleanly to the bottom edge
+        // Colored upright barrel anchored cleanly to the bottom edge
         drawRoundRect(
-            color = Color(0xFF1E293B),
+            color = inkColor,
             topLeft = Offset(cx - w * 0.26f, h * 0.62f),
             size = Size(w * 0.52f, h * 0.44f),
             cornerRadius = CornerRadius(w * 0.08f)
         )
         drawLine(
-            color = Color.White.copy(alpha = 0.28f),
+            color = Color.White.copy(alpha = 0.34f),
             start = Offset(cx - w * 0.12f, h * 0.66f),
             end = Offset(cx - w * 0.12f, h * 0.98f),
             strokeWidth = w * 0.055f,
             cap = StrokeCap.Round
+        )
+        drawRoundRect(
+            color = Color(0xFF334155),
+            topLeft = Offset(cx - w * 0.26f, h * 0.62f),
+            size = Size(w * 0.52f, h * 0.44f),
+            cornerRadius = CornerRadius(w * 0.08f),
+            style = Stroke(width = w * 0.042f)
         )
     }
 }

@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.whiteboard.vkyzrq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 14
-    versionName = "2.8.0"
+    versionCode = 16
+    versionName = "2.9.0"
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
