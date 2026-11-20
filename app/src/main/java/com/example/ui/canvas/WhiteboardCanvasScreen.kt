@@ -14,6 +14,7 @@ import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -34,7 +35,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.AlertDialog
@@ -945,7 +945,43 @@ fun WhiteboardCanvasScreen(
                 }
 
                 Box(
-                    modifier = cameraLayer.testTag("editable_text_item_${tItem.id}")
+                    modifier = cameraLayer
+                        .graphicsLayer {
+                            rotationZ = tItem.rotation
+                            transformOrigin = TransformOrigin.Center
+                        }
+                        .pointerInput(tItem.id, isPanOnlyMode) {
+                            if (!isPanOnlyMode) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(
+                                        requireUnconsumed = false,
+                                        pass = PointerEventPass.Initial
+                                    )
+                                    var previous = down.position
+                                    var dragging = false
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                        if (change.pressed) {
+                                            val delta = change.position - previous
+                                            previous = change.position
+                                            if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                                                dragging = true
+                                                viewModel.selectTextItem(tItem.id)
+                                                viewModel.beginTextItemTransformSnapshot()
+                                            }
+                                            if (dragging) {
+                                                change.consume()
+                                                val cameraScale = cameraState.value.scale.coerceAtLeast(0.1f)
+                                                viewModel.moveTextItem(tItem.id, delta.x / cameraScale, delta.y / cameraScale)
+                                            }
+                                        }
+                                    } while (event.changes.any { it.id == down.id && it.pressed })
+                                    if (dragging) viewModel.commitTextItemTransform()
+                                }
+                            }
+                        }
+                        .testTag("editable_text_item_\${tItem.id}")
                 ) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -959,44 +995,6 @@ fun WhiteboardCanvasScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                         ) {
-                            if (!isPanOnlyMode) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(
-                                            if (isSelected) Color(0xFF2563EB).copy(alpha = 0.14f)
-                                            else Color.Transparent
-                                        )
-                                        .pointerInput(tItem.id, isPanOnlyMode) {
-                                            detectDragGestures(
-                                                onDragStart = {
-                                                    viewModel.selectTextItem(tItem.id)
-                                                    viewModel.beginTextItemTransformSnapshot()
-                                                },
-                                                onDragEnd = { viewModel.commitTextItemTransform() },
-                                                onDragCancel = { viewModel.commitTextItemTransform() },
-                                                onDrag = { change, dragAmount ->
-                                                    change.consume()
-                                                    val s = cameraState.value.scale.coerceAtLeast(0.1f)
-                                                    viewModel.moveTextItem(tItem.id, dragAmount.x / s, dragAmount.y / s)
-                                                }
-                                            )
-                                        }
-                                        .clickable { viewModel.selectTextItem(tItem.id) }
-                                        .testTag("drag_text_handle_${tItem.id}")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.DragIndicator,
-                                        contentDescription = "Mover texto",
-                                        tint = if (isSelected) Color(0xFF2563EB) else tColor.copy(alpha = 0.45f),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(4.dp))
-                            }
-
                             BasicTextField(
                                 value = tItem.text,
                                 onValueChange = {
@@ -1018,18 +1016,7 @@ fun WhiteboardCanvasScreen(
                                     .testTag("editable_text_input_${tItem.id}")
                             )
 
-                            if (!isPanOnlyMode && isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "Eliminar texto",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .clip(CircleShape)
-                                        .clickable { viewModel.deleteTextItem(tItem.id) }
-                                        .testTag("btn_delete_text_${tItem.id}")
-                                )
-                            }
+
                         }
                     }
 
