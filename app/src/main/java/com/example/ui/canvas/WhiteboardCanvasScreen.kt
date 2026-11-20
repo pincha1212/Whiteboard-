@@ -464,7 +464,7 @@ fun WhiteboardCanvasScreen(
                                 when (gestureMode) {
                                     CanvasGestureMode.RESIZE_SHAPE -> {
                                         if (!hasTransformed) {
-                                            viewModel.beginTransformSnapshot()
+                                            viewModel.beginCurrentSelectionTransformSnapshot()
                                             hasTransformed = true
                                         }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
@@ -977,7 +977,7 @@ fun WhiteboardCanvasScreen(
                                         }
                                     } while (event.changes.any { it.id == down.id && it.pressed })
                                     if (dragging) {
-                                        viewModel.persistCurrentBoard()
+                                        viewModel.commitCurrentSelectionTransform()
                                     } else if (!viewModel.uiState.value.selectedTextIds.contains(tItem.id)) {
                                         viewModel.selectTextItem(tItem.id)
                                     }
