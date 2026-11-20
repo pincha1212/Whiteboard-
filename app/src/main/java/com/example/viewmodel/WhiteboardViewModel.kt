@@ -1240,7 +1240,6 @@ class WhiteboardViewModel(
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
-                selectedTextIds = emptySet(),
                 selectedTextId = null,
                 selectedTextIds = emptySet()
             )
@@ -1257,7 +1256,6 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
-                selectedTextIds = emptySet(),
                 selectedTextId = null,
                 selectedTextIds = emptySet()
             )
@@ -1276,7 +1274,8 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
-                selectedTextId = null
+                selectedTextId = null,
+                selectedTextIds = emptySet()
             )
         }
     }
@@ -1294,8 +1293,7 @@ class WhiteboardViewModel(
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet(),
-                selectedTextIds = emptySet()
+                selectedNoteIds = emptySet()
             )
         }
     }
