@@ -253,6 +253,7 @@ data class TextItem(
     val isEditableCard: Boolean = false,
     val backgroundColorHex: String? = null,
     val width: Float = 190f,
+    val rotation: Float = 0f,
     val groupId: String? = null,
     val parentId: String? = null,
     val isHiddenByCollapse: Boolean = false
