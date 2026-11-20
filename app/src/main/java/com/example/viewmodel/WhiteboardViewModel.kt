@@ -2700,6 +2700,7 @@ class WhiteboardViewModel(
                 b.copy(textItems = b.textItems + item, auditLogs = (b.auditLogs + log).takeLast(100))
             }.copy(
                 selectedTextId = item.id,
+                selectedTextIds = setOf(item.id),
                 selectedStrokeId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeId = null,
@@ -2726,7 +2727,8 @@ class WhiteboardViewModel(
                     auditLogs = (b.auditLogs + log).takeLast(100)
                 )
             }.copy(
-                selectedTextId = if (state.selectedTextId == id) null else state.selectedTextId
+                selectedTextId = if (state.selectedTextId == id) null else state.selectedTextId,
+                selectedTextIds = state.selectedTextIds - id
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
