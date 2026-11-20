@@ -1226,7 +1226,8 @@ class WhiteboardViewModel(
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
-                selectedTextId = null
+                selectedTextId = null,
+                selectedTextIds = emptySet()
             )
         }
     }
@@ -1270,6 +1271,7 @@ class WhiteboardViewModel(
         _uiState.update {
             it.copy(
                 selectedTextId = id,
+                selectedTextIds = if (id != null) setOf(id) else emptySet(),
                 selectedStrokeId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeId = null,
@@ -1290,7 +1292,8 @@ class WhiteboardViewModel(
                 selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
     }
@@ -1591,8 +1594,9 @@ class WhiteboardViewModel(
         val strokeIds = if (state.selectedStrokeIds.isNotEmpty()) state.selectedStrokeIds else state.selectedStrokeId?.let { setOf(it) } ?: emptySet()
         val shapeIds = if (state.selectedShapeIds.isNotEmpty()) state.selectedShapeIds else state.selectedShapeId?.let { setOf(it) } ?: emptySet()
         val noteIds = if (state.selectedNoteIds.isNotEmpty()) state.selectedNoteIds else state.selectedNoteId?.let { setOf(it) } ?: emptySet()
+        val textIds = if (state.selectedTextIds.isNotEmpty()) state.selectedTextIds else state.selectedTextId?.let { setOf(it) } ?: emptySet()
 
-        if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty()) return
+        if (strokeIds.isEmpty() && shapeIds.isEmpty() && noteIds.isEmpty() && textIds.isEmpty()) return
 
         if (noteIds.isNotEmpty()) {
             stickyNotesStore.moveMultipleWorld(noteIds, dxWorld, dyWorld)
@@ -1616,9 +1620,12 @@ class WhiteboardViewModel(
             } else sh
         }
         val updatedNotes = if (noteIds.isEmpty()) state.board.stickyNotes else stickyNotesStore.currentNotes()
+        val updatedTexts = if (textIds.isEmpty()) state.board.textItems else state.board.textItems.map { item ->
+            if (textIds.contains(item.id) && !item.isLocked) item.copy(x = item.x + dxWorld, y = item.y + dyWorld) else item
+        }
         _uiState.update {
             it.withUpdatedBoard { b ->
-                b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes)
+                b.copy(strokes = updatedStrokes, shapes = updatedShapes, stickyNotes = updatedNotes, textItems = updatedTexts)
             }
         }
         if (noteIds.isNotEmpty() && !isStickyNoteTransformInProgress) {
