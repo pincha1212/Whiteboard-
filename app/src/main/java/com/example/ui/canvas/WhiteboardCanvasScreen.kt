@@ -485,7 +485,7 @@ fun WhiteboardCanvasScreen(
                                     }
                                     CanvasGestureMode.ROTATE_SHAPE -> {
                                         if (!hasTransformed) {
-                                            viewModel.beginTransformSnapshot()
+                                            viewModel.beginCurrentSelectionTransformSnapshot()
                                             hasTransformed = true
                                         }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
@@ -503,7 +503,7 @@ fun WhiteboardCanvasScreen(
                                         val pan = event.calculatePan()
                                         if (pan.x != 0f || pan.y != 0f) {
                                             if (!hasTransformed) {
-                                                viewModel.beginTransformSnapshot()
+                                                viewModel.beginCurrentSelectionTransformSnapshot()
                                                 hasTransformed = true
                                             }
                                             viewModel.moveSelectedShape(pan.x / liveCamera.scale, pan.y / liveCamera.scale)
@@ -512,7 +512,7 @@ fun WhiteboardCanvasScreen(
                                     }
                                     CanvasGestureMode.RESIZE_STROKE -> {
                                         if (!hasTransformed) {
-                                            viewModel.beginTransformSnapshot()
+                                            viewModel.beginCurrentSelectionTransformSnapshot()
                                             hasTransformed = true
                                         }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
@@ -522,7 +522,7 @@ fun WhiteboardCanvasScreen(
                                     }
                                     CanvasGestureMode.ROTATE_STROKE -> {
                                         if (!hasTransformed) {
-                                            viewModel.beginTransformSnapshot()
+                                            viewModel.beginCurrentSelectionTransformSnapshot()
                                             hasTransformed = true
                                         }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
@@ -543,7 +543,7 @@ fun WhiteboardCanvasScreen(
                                         val pan = event.calculatePan()
                                         if (pan.x != 0f || pan.y != 0f) {
                                             if (!hasTransformed) {
-                                                viewModel.beginTransformSnapshot()
+                                                viewModel.beginCurrentSelectionTransformSnapshot()
                                                 hasTransformed = true
                                             }
                                             viewModel.moveSelectedStroke(pan.x / liveCamera.scale, pan.y / liveCamera.scale)
@@ -650,7 +650,7 @@ fun WhiteboardCanvasScreen(
                                     gestureMode == CanvasGestureMode.MOVE_STROKE
                                 )
                         ) {
-                            viewModel.persistCurrentBoard()
+                            viewModel.commitCurrentSelectionTransform()
                         }
                         viewModel.resetStrokeDragAngle()
                         localActivePoints.clear()
@@ -967,7 +967,7 @@ fun WhiteboardCanvasScreen(
                                             if (!dragging && (change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
                                                 dragging = true
                                                 if (!viewModel.uiState.value.selectedTextIds.contains(tItem.id)) viewModel.selectTextItem(tItem.id)
-                                                viewModel.beginTransformSnapshot()
+                                                viewModel.beginCurrentSelectionTransformSnapshot()
                                             }
                                             if (dragging) {
                                                 change.consume()
