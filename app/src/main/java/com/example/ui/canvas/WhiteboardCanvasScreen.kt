@@ -33,7 +33,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.AlertDialog
@@ -976,7 +975,11 @@ fun WhiteboardCanvasScreen(
                                             }
                                         }
                                     } while (event.changes.any { it.id == down.id && it.pressed })
-                                    if (dragging) viewModel.persistCurrentBoard()
+                                    if (dragging) {
+                                        viewModel.persistCurrentBoard()
+                                    } else if (!viewModel.uiState.value.selectedTextIds.contains(tItem.id)) {
+                                        viewModel.selectTextItem(tItem.id)
+                                    }
                                 }
                             }
                         }
