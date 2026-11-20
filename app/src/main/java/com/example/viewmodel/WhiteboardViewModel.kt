@@ -2706,8 +2706,7 @@ class WhiteboardViewModel(
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet(),
-                selectedTextIds = emptySet()
+                selectedNoteIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
