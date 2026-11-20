@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.BrushSlot
-import com.example.model.ShapeType
 import com.example.model.StrokeBrushType
 import com.example.model.ToolType
 
@@ -50,7 +49,6 @@ fun WhiteboardPenDock(
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: ShapeType? = null,
     pendingStickyNoteColor: String? = null,
     layoutMode: DockLayoutMode = DockLayoutMode.COMPACT_PORTRAIT,
     onSelectTool: (ToolType) -> Unit,
@@ -61,7 +59,6 @@ fun WhiteboardPenDock(
     onAddStickyNote: (String) -> Unit = {},
     onRequestPlaceStickyNote: (String) -> Unit = {},
     onAddText: () -> Unit = {},
-    onOpenShapePicker: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showStickyPalette by remember { mutableStateOf(false) }
@@ -86,7 +83,7 @@ fun WhiteboardPenDock(
         parseDockColorSafe(resolvedHex, fallbackColor)
     }
 
-    val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
+    val hasPendingPlacement = pendingStickyNoteColor != null
     val isHandActive = !hasPendingPlacement && currentTool == ToolType.HAND
     val isSelectActive = !hasPendingPlacement && currentTool == ToolType.SELECT_LASSO
     val isDrawingActive = !hasPendingPlacement && currentTool.isInkingOrEraseTool()
@@ -130,7 +127,6 @@ fun WhiteboardPenDock(
                 isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
-                pendingShapeType = pendingShapeType,
                 pendingStickyNoteColor = pendingStickyNoteColor,
                 isDrawingActive = isDrawingActive,
                 isSelectActive = isSelectActive,
@@ -152,7 +148,6 @@ fun WhiteboardPenDock(
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                 onAddText = onAddText,
-                onOpenShapePicker = onOpenShapePicker,
                 modifier = modifier
             )
         }
@@ -166,7 +161,6 @@ fun WhiteboardPenDock(
                 isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
-                pendingShapeType = pendingShapeType,
                 pendingStickyNoteColor = pendingStickyNoteColor,
                 isDrawingActive = isDrawingActive,
                 isSelectActive = isSelectActive,
@@ -188,7 +182,6 @@ fun WhiteboardPenDock(
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                 onAddText = onAddText,
-                onOpenShapePicker = onOpenShapePicker,
                 modifier = modifier
             )
         }
@@ -202,7 +195,6 @@ fun WhiteboardPenDock(
                 isRainbowPen = resolvedRainbow,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
-                pendingShapeType = pendingShapeType,
                 pendingStickyNoteColor = pendingStickyNoteColor,
                 isDrawingActive = isDrawingActive,
                 isSelectActive = isSelectActive,
@@ -224,7 +216,6 @@ fun WhiteboardPenDock(
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                 onAddText = onAddText,
-                onOpenShapePicker = onOpenShapePicker,
                 modifier = modifier
             )
         }
@@ -240,7 +231,6 @@ private fun CompactPortraitDock(
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: ShapeType?,
     pendingStickyNoteColor: String?,
     isDrawingActive: Boolean,
     isSelectActive: Boolean,
@@ -262,7 +252,6 @@ private fun CompactPortraitDock(
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
     onAddText: () -> Unit,
-    onOpenShapePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -294,7 +283,6 @@ private fun CompactPortraitDock(
                     activeBrushSlotIndex = activeBrushSlotIndex,
                     autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     onSelectBrushSlot = onSelectBrushSlot,
                     onUpdateBrushSlot = onUpdateBrushSlot,
@@ -311,7 +299,7 @@ private fun CompactPortraitDock(
             }
         }
 
-        // Unified Main Bar: [Mode: Draw | Lasso | Hand] | [Insert: Note | Text | Shape]
+        // Unified Main Bar: [Mode: Draw | Lasso | Hand] | [Insert: Note | Text]
         Surface(
             shape = RoundedCornerShape(16.dp),
             tonalElevation = 2.dp,
@@ -346,7 +334,6 @@ private fun CompactPortraitDock(
                 DockHairlineDivider(vertical = true)
 
                 InsertActionsCluster(
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     showStickyPalette = showStickyPalette,
                     onToggleStickyPalette = onToggleStickyPalette,
@@ -354,7 +341,6 @@ private fun CompactPortraitDock(
                     onAddStickyNote = onAddStickyNote,
                     onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                     onAddText = onAddText,
-                    onOpenShapePicker = onOpenShapePicker,
                     isVertical = false
                 )
             }
@@ -371,7 +357,6 @@ private fun CompactLandscapeRailDock(
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: ShapeType?,
     pendingStickyNoteColor: String?,
     isDrawingActive: Boolean,
     isSelectActive: Boolean,
@@ -393,7 +378,6 @@ private fun CompactLandscapeRailDock(
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
     onAddText: () -> Unit,
-    onOpenShapePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -437,7 +421,6 @@ private fun CompactLandscapeRailDock(
                 DockHairlineDivider(vertical = false)
 
                 InsertActionsCluster(
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     showStickyPalette = showStickyPalette,
                     onToggleStickyPalette = onToggleStickyPalette,
@@ -445,7 +428,6 @@ private fun CompactLandscapeRailDock(
                     onAddStickyNote = onAddStickyNote,
                     onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                     onAddText = onAddText,
-                    onOpenShapePicker = onOpenShapePicker,
                     isVertical = true
                 )
             }
@@ -474,7 +456,6 @@ private fun CompactLandscapeRailDock(
                     activeBrushSlotIndex = activeBrushSlotIndex,
                     autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     onSelectBrushSlot = onSelectBrushSlot,
                     onUpdateBrushSlot = onUpdateBrushSlot,
@@ -502,7 +483,6 @@ private fun ExpandedTabletDock(
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: ShapeType?,
     pendingStickyNoteColor: String?,
     isDrawingActive: Boolean,
     isSelectActive: Boolean,
@@ -522,7 +502,6 @@ private fun ExpandedTabletDock(
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
     onAddText: () -> Unit,
-    onOpenShapePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Unified single-tier tablet capsule: 0 separate style button, long-press any brush slot for color+width+type
@@ -572,7 +551,6 @@ private fun ExpandedTabletDock(
                     activeBrushSlotIndex = activeBrushSlotIndex,
                     autoShapeRecognition = autoShapeRecognition,
                     isRulerActive = isRulerActive,
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     onSelectBrushSlot = onSelectBrushSlot,
                     onUpdateBrushSlot = onUpdateBrushSlot,
@@ -587,7 +565,6 @@ private fun ExpandedTabletDock(
                 DockHairlineDivider(vertical = true)
 
                 InsertActionsCluster(
-                    pendingShapeType = pendingShapeType,
                     pendingStickyNoteColor = pendingStickyNoteColor,
                     showStickyPalette = showStickyPalette,
                     onToggleStickyPalette = onToggleStickyPalette,
@@ -595,7 +572,6 @@ private fun ExpandedTabletDock(
                     onAddStickyNote = onAddStickyNote,
                     onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                     onAddText = onAddText,
-                    onOpenShapePicker = onOpenShapePicker,
                     isVertical = false
                 )
             }
@@ -605,7 +581,6 @@ private fun ExpandedTabletDock(
 
 @Composable
 private fun InsertActionsCluster(
-    pendingShapeType: ShapeType?,
     pendingStickyNoteColor: String?,
     showStickyPalette: Boolean,
     onToggleStickyPalette: () -> Unit,
@@ -613,7 +588,6 @@ private fun InsertActionsCluster(
     onAddStickyNote: (String) -> Unit,
     onRequestPlaceStickyNote: (String) -> Unit,
     onAddText: () -> Unit,
-    onOpenShapePicker: () -> Unit,
     isVertical: Boolean
 ) {
     val content: @Composable () -> Unit = {
@@ -648,19 +622,6 @@ private fun InsertActionsCluster(
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp)
-            )
-        }
-
-        DockActionButton(
-            isSelected = pendingShapeType != null,
-            description = "Insertar formas geométricas",
-            onClick = onOpenShapePicker,
-            testTag = "dock_action_shapes",
-            minWidthDp = 42
-        ) {
-            PhysicalShapesIcon(
-                tint = if (pendingShapeType != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(22.dp)
             )
         }
     }

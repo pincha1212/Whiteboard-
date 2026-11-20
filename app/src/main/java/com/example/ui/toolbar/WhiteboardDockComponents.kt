@@ -431,7 +431,6 @@ internal fun InkingToolsRow(
     activeBrushSlotIndex: Int,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: com.example.model.ShapeType?,
     pendingStickyNoteColor: String?,
     onSelectBrushSlot: (Int) -> Unit,
     onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
@@ -443,7 +442,7 @@ internal fun InkingToolsRow(
     isVertical: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val hasPendingPlacement = pendingShapeType != null || pendingStickyNoteColor != null
+    val hasPendingPlacement = pendingStickyNoteColor != null
     val isAnyBrushToolActive = !hasPendingPlacement &&
         (currentTool == ToolType.PEN || currentTool == ToolType.FINE_MARKER || currentTool == ToolType.HIGHLIGHTER)
 

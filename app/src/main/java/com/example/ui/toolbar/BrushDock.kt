@@ -75,7 +75,7 @@ fun BrushDock(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val hasPendingPlacement = uiState.pendingShapeType != null || uiState.pendingStickyNoteColor != null
+    val hasPendingPlacement = uiState.pendingStickyNoteColor != null
     val isBrushToolActive = !hasPendingPlacement && (
         uiState.currentTool == ToolType.PEN ||
             uiState.currentTool == ToolType.FINE_MARKER ||

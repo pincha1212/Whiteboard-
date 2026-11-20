@@ -90,7 +90,6 @@ import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.StrokeStabilizer
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
-import com.example.model.ShapeType
 import com.example.model.StickyNote
 import com.example.model.isLineLike
 import com.example.model.StrokeBrushType
@@ -116,7 +115,6 @@ import kotlin.math.sin
 private enum class CanvasGestureMode {
     NONE,
     DRAW_STROKE,
-    PLACE_SHAPE,
     PAN,
     MOVE_SHAPE,
     RESIZE_SHAPE,
@@ -145,7 +143,6 @@ fun WhiteboardCanvasScreen(
     var showExportModal by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var showSnapshotsModal by remember { mutableStateOf(false) }
-    var showShapePickerModal by remember { mutableStateOf(false) }
     var editingLabelShape by remember { mutableStateOf<ShapeItem?>(null) }
     var editingLabelText by remember { mutableStateOf("") }
     var notePendingRemoval by remember { mutableStateOf<StickyNote?>(null) }
@@ -154,8 +151,6 @@ fun WhiteboardCanvasScreen(
     val density = LocalDensity.current
 
 
-    var pendingDragStart by remember { mutableStateOf<StrokePoint?>(null) }
-    var pendingDragEnd by remember { mutableStateOf<StrokePoint?>(null) }
     var pixelEraserCursorWorld by remember { mutableStateOf<StrokePoint?>(null) }
     var activeRotationHud by remember { mutableStateOf<Pair<Offset, String>?>(null) }
 
@@ -195,8 +190,7 @@ fun WhiteboardCanvasScreen(
     }
 
     val isPanOnlyMode = state.currentTool == ToolType.HAND &&
-        state.pendingStickyNoteColor == null &&
-        state.pendingShapeType == null
+        state.pendingStickyNoteColor == null
 
     // Cache conservative world-space bounds by immutable shape-list identity.
     // Camera movement can then cull off-screen shapes without rescanning vertices.
@@ -360,11 +354,6 @@ fun WhiteboardCanvasScreen(
 
                         if (curState.pendingStickyNoteColor != null) {
                             viewModel.placePendingAt(wX, wY)
-                        } else if (curState.pendingShapeType != null) {
-                            val startPt = StrokePoint(wX, wY)
-                            pendingDragStart = startPt
-                            pendingDragEnd = startPt
-                            gestureMode = CanvasGestureMode.PLACE_SHAPE
                         } else if (curState.currentTool == ToolType.HAND) {
                             // Standalone Hand button: strictly pan-only, disable any accidental object selection/drag
                             gestureMode = CanvasGestureMode.PAN
@@ -474,12 +463,6 @@ fun WhiteboardCanvasScreen(
                                 val liveCamera = viewModel.cameraState.value
 
                                 when (gestureMode) {
-                                    CanvasGestureMode.PLACE_SHAPE -> {
-                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
-                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
-                                        pendingDragEnd = StrokePoint(nwX, nwY)
-                                        change.consume()
-                                    }
                                     CanvasGestureMode.RESIZE_SHAPE -> {
                                         if (!hasTransformed) {
                                             viewModel.beginTransformSnapshot()
@@ -648,15 +631,7 @@ fun WhiteboardCanvasScreen(
                         pixelEraserCursorWorld = null
                         activeRotationHud = null
 
-                        if (gestureMode == CanvasGestureMode.PLACE_SHAPE && !isMultiTouch) {
-                            val s = pendingDragStart
-                            val e = pendingDragEnd
-                            if (s != null && e != null) {
-                                viewModel.placePendingShapeInBounds(s, e)
-                            }
-                            pendingDragStart = null
-                            pendingDragEnd = null
-                        } else if (gestureMode == CanvasGestureMode.LASSO_SELECT && !isMultiTouch) {
+                        if (gestureMode == CanvasGestureMode.LASSO_SELECT && !isMultiTouch) {
                             if (localLassoPoints.size >= 5) {
                                 viewModel.selectByLasso(localLassoPoints.toList())
                             } else {
@@ -665,7 +640,7 @@ fun WhiteboardCanvasScreen(
                         } else if (gestureMode == CanvasGestureMode.DRAW_STROKE && localActivePoints.size >= 2 && !isMultiTouch) {
                             val pointsCopy = localActivePoints.toList()
                             // A freehand gesture must always be committed as the same stroke.
-                            // Shape conversion is reserved for explicit shape tools / user actions.
+                            // Shape conversion is reserved for automatic shape recognition when enabled.
                             viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
                         } else if (hasTransformed && (
                                 gestureMode == CanvasGestureMode.ROTATE_SHAPE ||
@@ -679,8 +654,6 @@ fun WhiteboardCanvasScreen(
                             viewModel.persistCurrentBoard()
                         }
                         viewModel.resetStrokeDragAngle()
-                        pendingDragStart = null
-                        pendingDragEnd = null
                         localActivePoints.clear()
                         localLassoPoints.clear()
                     }
@@ -873,44 +846,6 @@ fun WhiteboardCanvasScreen(
                         handDrawnFactor = state.handDrawnFactor
                     )
                 }
-            }
-
-            if (state.pendingShapeType != null && pendingDragStart != null && pendingDragEnd != null) {
-                val pStart = pendingDragStart!!
-                val pEnd = pendingDragEnd!!
-                val minX = kotlin.math.min(pStart.x, pEnd.x)
-                val minY = kotlin.math.min(pStart.y, pEnd.y)
-                val previewShape = ShapeItem(
-                    shapeType = state.pendingShapeType!!,
-                    x = minX,
-                    y = minY,
-                    width = kotlin.math.abs(pEnd.x - pStart.x).coerceAtLeast(12f),
-                    height = kotlin.math.abs(pEnd.y - pStart.y).coerceAtLeast(12f),
-                    strokeColorHex = state.pendingStrokeColor,
-                    fillColorHex = state.pendingFillColor,
-                    strokeWidth = state.penWidth.coerceIn(2f, 24f),
-                    isFilled = state.pendingIsFilled && !state.pendingShapeType!!.isLineLike,
-                    strokeStyle = state.pendingStrokeStyle,
-                    capStyle = when (state.pendingShapeType!!) {
-                        ShapeType.ARROW -> LineCapStyle.END_ARROW
-                        ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
-                        else -> state.pendingCapStyle
-                    },
-                    vertices = if (state.pendingShapeType!!.isLineLike) listOf(pStart, pEnd) else emptyList(),
-                    isRainbow = state.isRainbowPen && state.pendingBrushType != StrokeBrushType.HIGHLIGHTER,
-                    opacity = state.pendingBrushType.defaultOpacity,
-                    brushType = state.pendingBrushType
-                )
-                drawShapeVector(
-                    shape = previewShape,
-                    panX = camera.panX,
-                    panY = camera.panY,
-                    scale = camera.scale,
-                    isSelected = true,
-                    isDarkBoard = isDarkBoard,
-                    rotStemPx = rotStemPx,
-                    handDrawnFactor = state.handDrawnFactor
-                )
             }
 
             if (state.selectedStrokeId != null && state.selectedStrokeIds.size <= 1) {
@@ -1169,7 +1104,7 @@ fun WhiteboardCanvasScreen(
 
         // Render Sticky Notes (isolated per-note StateFlow cards + constant-size selection overlay)
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
-        val isPlacementPending = state.pendingStickyNoteColor != null || state.pendingShapeType != null
+        val isPlacementPending = state.pendingStickyNoteColor != null
         val isMultiSelectActive = (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
 
         StickyNoteLayer(
@@ -1278,7 +1213,6 @@ fun WhiteboardCanvasScreen(
                 isRainbowPen = state.isRainbowPen,
                 autoShapeRecognition = state.autoShapeRecognition,
                 isRulerActive = state.isRulerActive,
-                pendingShapeType = state.pendingShapeType,
                 pendingStickyNoteColor = state.pendingStickyNoteColor,
                 onRequestDeleteNote = { target ->
                     if (target.text.isNotBlank() || !target.title.isNullOrBlank()) {
@@ -1286,13 +1220,12 @@ fun WhiteboardCanvasScreen(
                     } else {
                         viewModel.deleteSelectedNote()
                     }
-                },
-                onOpenShapePicker = { showShapePickerModal = true }
+                }
             )
         }
 
         // Pending Placement Banner
-        if (state.pendingStickyNoteColor != null || state.pendingShapeType != null) {
+        if (state.pendingStickyNoteColor != null) {
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.primary,
@@ -1308,17 +1241,8 @@ fun WhiteboardCanvasScreen(
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val desc = when {
-                        state.pendingStickyNoteColor != null -> "Toca en la pizarra para colocar la nota"
-                        pendingDragStart != null && pendingDragEnd != null -> {
-                            val w = kotlin.math.abs(pendingDragEnd!!.x - pendingDragStart!!.x).toInt()
-                            val h = kotlin.math.abs(pendingDragEnd!!.y - pendingDragStart!!.y).toInt()
-                            "${state.pendingShapeType!!.displayName}: ${w}×${h} px"
-                        }
-                        else -> "Arrastra en la pizarra para colocar y dimensionar (${state.pendingShapeType!!.displayName})"
-                    }
                     Text(
-                        text = desc,
+                        text = "Toca en la pizarra para colocar la nota",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimary,
                         fontWeight = FontWeight.SemiBold,
@@ -1424,31 +1348,6 @@ fun WhiteboardCanvasScreen(
                     viewModel.clearAuditLogs()
                 },
                 onDismiss = { showSnapshotsModal = false }
-            )
-        }
-
-        if (showShapePickerModal) {
-            ShapePickerModal(
-                initialStrokeColor = state.penColorHex,
-                onInsertCenter = { shapeType, isFilled, strokeColor, fillColor ->
-                    viewModel.insertShapeAtCenter(
-                        shapeType = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor
-                    )
-                },
-                onStartDragPlacement = { shapeType, isFilled, strokeColor, fillColor ->
-                    viewModel.requestAddCustomShape(
-                        type = shapeType,
-                        isFilled = isFilled,
-                        strokeColor = strokeColor,
-                        fillColor = fillColor,
-                        style = state.pendingStrokeStyle,
-                        capStyle = state.pendingCapStyle
-                    )
-                },
-                onDismiss = { showShapePickerModal = false }
             )
         }
 
@@ -1631,10 +1530,8 @@ private fun CanvasDockOverlay(
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
     isRulerActive: Boolean,
-    pendingShapeType: ShapeType?,
     pendingStickyNoteColor: String?,
-    onRequestDeleteNote: (StickyNote) -> Unit,
-    onOpenShapePicker: () -> Unit
+    onRequestDeleteNote: (StickyNote) -> Unit
 ) {
     val selectedNote = if (selectedNoteId != null) {
         val noteFlow = remember(viewModel, selectedNoteId) {
@@ -1805,7 +1702,6 @@ private fun CanvasDockOverlay(
                 isRainbowPen = isRainbowPen,
                 autoShapeRecognition = autoShapeRecognition,
                 isRulerActive = isRulerActive,
-                pendingShapeType = pendingShapeType,
                 pendingStickyNoteColor = pendingStickyNoteColor,
                 layoutMode = layoutMode,
                 onSelectTool = onSelectTool,
@@ -1816,7 +1712,6 @@ private fun CanvasDockOverlay(
                 onAddStickyNote = onAddStickyNote,
                 onRequestPlaceStickyNote = onRequestPlaceStickyNote,
                 onAddText = onAddText,
-                onOpenShapePicker = onOpenShapePicker,
                 modifier = dockModifier
             )
         }

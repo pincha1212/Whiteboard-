@@ -77,13 +77,6 @@ data class WhiteboardUiState(
     val selectedNoteIds: Set<String> = emptySet(),
     val shapeRecognitionProposal: ShapeRecognitionProposal? = null,
     val pendingStickyNoteColor: String? = null,
-    val pendingShapeType: ShapeType? = null,
-    val pendingIsFilled: Boolean = false,
-    val pendingStrokeColor: String = "#1E1E1E",
-    val pendingFillColor: String = "#DBEAFE",
-    val pendingStrokeStyle: StrokeStyle = StrokeStyle.SOLID,
-    val pendingCapStyle: LineCapStyle = LineCapStyle.NONE,
-    val pendingBrushType: StrokeBrushType = StrokeBrushType.FOUNTAIN_PEN,
     val handDrawnFactor: Float = 0.24f,
     val isPaintPixelMode: Boolean = true,
     val canUndo: Boolean = false,
@@ -320,8 +313,7 @@ class WhiteboardViewModel(
                     selectedStrokeIds = emptySet(),
                     selectedShapeIds = emptySet(),
                     selectedNoteIds = emptySet(),
-                    pendingStickyNoteColor = null,
-                    pendingShapeType = null
+                    pendingStickyNoteColor = null
                 )
             } else if (tool.isBrushSlotTool()) {
                 val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
@@ -338,21 +330,13 @@ class WhiteboardViewModel(
                         currentTool = resolvedSlot.toolType,
                         penColorHex = resolvedSlot.colorHex,
                         penWidth = resolvedSlot.strokeWidth,
-                        isRainbowPen = resolvedSlot.isRainbow,
-                        pendingStrokeColor = resolvedSlot.colorHex,
-                        pendingBrushType = resolvedSlot.brushType
+                        isRainbowPen = resolvedSlot.isRainbow
                     )
                 } else {
-                    state.copy(
-                        currentTool = tool,
-                        pendingBrushType = brushTypeForTool(tool)
-                    )
+                    state.copy(currentTool = tool)
                 }
             } else {
-                state.copy(
-                    currentTool = tool,
-                    pendingBrushType = brushTypeForTool(tool)
-                )
+                state.copy(currentTool = tool)
             }
         }
     }
@@ -367,10 +351,7 @@ class WhiteboardViewModel(
                 penColorHex = slot.colorHex,
                 penWidth = slot.strokeWidth,
                 isRainbowPen = slot.isRainbow,
-                pendingStrokeColor = slot.colorHex,
-                pendingBrushType = slot.brushType,
-                pendingStickyNoteColor = null,
-                pendingShapeType = null
+                pendingStickyNoteColor = null
             )
         }
     }
@@ -397,9 +378,7 @@ class WhiteboardViewModel(
                     currentTool = if (state.currentTool.isBrushSlotTool()) updated.toolType else state.currentTool,
                     penColorHex = updated.colorHex,
                     penWidth = updated.strokeWidth,
-                    isRainbowPen = updated.isRainbow,
-                    pendingStrokeColor = updated.colorHex,
-                    pendingBrushType = updated.brushType
+                    isRainbowPen = updated.isRainbow
                 )
             }
         }
@@ -1201,44 +1180,11 @@ class WhiteboardViewModel(
     }
 
     fun requestAddStickyNote(colorHex: String = "#FFF275") {
-        _uiState.update { it.copy(pendingStickyNoteColor = colorHex, pendingShapeType = null) }
-    }
-
-    fun requestAddCustomShape(
-        type: ShapeType,
-        isFilled: Boolean,
-        strokeColor: String,
-        fillColor: String,
-        style: StrokeStyle,
-        capStyle: LineCapStyle = LineCapStyle.NONE,
-        brushType: StrokeBrushType = brushTypeForTool(_uiState.value.currentTool)
-    ) {
-        _uiState.update {
-            it.copy(
-                pendingShapeType = type,
-                pendingStickyNoteColor = null,
-                pendingIsFilled = isFilled,
-                pendingStrokeColor = strokeColor,
-                pendingFillColor = fillColor,
-                pendingStrokeStyle = style,
-                pendingCapStyle = capStyle,
-                pendingBrushType = brushType,
-                selectedShapeId = null,
-                selectedStrokeId = null,
-                selectedNoteId = null,
-                selectedShapeIds = emptySet(),
-                selectedStrokeIds = emptySet(),
-                selectedNoteIds = emptySet()
-            )
-        }
-    }
-
-    fun setPendingBrushType(brushType: StrokeBrushType) {
-        _uiState.update { it.copy(pendingBrushType = brushType) }
+        _uiState.update { it.copy(pendingStickyNoteColor = colorHex) }
     }
 
     fun cancelPendingPlacement() {
-        _uiState.update { it.copy(pendingStickyNoteColor = null, pendingShapeType = null) }
+        _uiState.update { it.copy(pendingStickyNoteColor = null) }
     }
 
     fun placePendingAt(worldX: Float, worldY: Float) {
@@ -1263,128 +1209,7 @@ class WhiteboardViewModel(
                 )
             }
             commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-        } else if (state.pendingShapeType != null) {
-            placePendingShapeInBounds(StrokePoint(worldX, worldY), StrokePoint(worldX, worldY))
         }
-    }
-
-    fun placePendingShapeInBounds(start: StrokePoint, end: StrokePoint) {
-        val state = _uiState.value
-        val shapeType = state.pendingShapeType ?: return
-        saveUndoSnapshot()
-
-        val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
-        val inheritedWidth = (activeSlot?.strokeWidth ?: state.penWidth).coerceIn(2f, 24f)
-        val inheritedBrush = activeSlot?.brushType ?: state.pendingBrushType
-        val inheritedRainbow = activeSlot?.isRainbow ?: state.isRainbowPen
-        val dragDist = kotlin.math.hypot(end.x - start.x, end.y - start.y)
-        val newShape: ShapeItem = if (shapeType.isLineLike) {
-            val v0: StrokePoint
-            val v1: StrokePoint
-            if (dragDist < 14f) {
-                v0 = StrokePoint(start.x - 90f, start.y)
-                v1 = StrokePoint(start.x + 90f, start.y)
-            } else {
-                v0 = start
-                v1 = end
-            }
-            val minX = kotlin.math.min(v0.x, v1.x)
-            val maxX = kotlin.math.max(v0.x, v1.x)
-            val minY = kotlin.math.min(v0.y, v1.y)
-            val maxY = kotlin.math.max(v0.y, v1.y)
-            ShapeItem(
-                shapeType = shapeType,
-                x = minX,
-                y = minY,
-                width = (maxX - minX).coerceAtLeast(1f),
-                height = (maxY - minY).coerceAtLeast(1f),
-                strokeColorHex = state.pendingStrokeColor,
-                fillColorHex = state.pendingFillColor,
-                strokeWidth = inheritedWidth,
-                isFilled = false,
-                strokeStyle = state.pendingStrokeStyle,
-                capStyle = when (shapeType) {
-                    ShapeType.ARROW -> LineCapStyle.END_ARROW
-                    ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
-                    else -> state.pendingCapStyle
-                },
-                vertices = listOf(v0, v1),
-                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
-                opacity = inheritedBrush.defaultOpacity,
-                brushType = inheritedBrush
-            )
-        } else if (dragDist < 14f) {
-            val isSquareLike = shapeType == ShapeType.CIRCLE ||
-                shapeType == ShapeType.STAR ||
-                shapeType == ShapeType.HEXAGON ||
-                shapeType == ShapeType.DIAMOND ||
-                shapeType == ShapeType.TRIANGLE
-            val defW = if (isSquareLike) 160f else 190f
-            val defH = if (isSquareLike) 160f else 130f
-            ShapeItem(
-                shapeType = shapeType,
-                x = start.x - defW / 2f,
-                y = start.y - defH / 2f,
-                width = defW,
-                height = defH,
-                strokeColorHex = state.pendingStrokeColor,
-                fillColorHex = state.pendingFillColor,
-                strokeWidth = inheritedWidth,
-                isFilled = state.pendingIsFilled,
-                strokeStyle = state.pendingStrokeStyle,
-                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
-                opacity = inheritedBrush.defaultOpacity,
-                brushType = inheritedBrush
-            )
-        } else {
-            val minX = kotlin.math.min(start.x, end.x)
-            val minY = kotlin.math.min(start.y, end.y)
-            val w = kotlin.math.abs(end.x - start.x).coerceAtLeast(28f)
-            val h = kotlin.math.abs(end.y - start.y).coerceAtLeast(28f)
-            ShapeItem(
-                shapeType = shapeType,
-                x = minX,
-                y = minY,
-                width = w,
-                height = h,
-                strokeColorHex = state.pendingStrokeColor,
-                fillColorHex = state.pendingFillColor,
-                strokeWidth = inheritedWidth,
-                isFilled = state.pendingIsFilled,
-                strokeStyle = state.pendingStrokeStyle,
-                isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
-                opacity = inheritedBrush.defaultOpacity,
-                brushType = inheritedBrush
-            )
-        }
-
-        _uiState.update {
-            it.withUpdatedBoard { b ->
-                b.copy(shapes = b.shapes + newShape)
-            }.copy(
-                pendingShapeType = null,
-                selectedShapeId = newShape.id,
-                selectedShapeIds = setOf(newShape.id),
-                selectedStrokeId = null,
-                selectedStrokeIds = emptySet(),
-                selectedNoteId = null,
-                selectedNoteIds = emptySet(),
-                currentTool = ToolType.SELECT_LASSO
-            )
-        }
-    }
-
-    fun addCustomShape(
-        type: ShapeType,
-        isFilled: Boolean,
-        strokeColor: String,
-        fillColor: String,
-        style: StrokeStyle,
-        capStyle: LineCapStyle = LineCapStyle.NONE,
-        screenW: Float = 1080f,
-        screenH: Float = 1920f
-    ) {
-        requestAddCustomShape(type, isFilled, strokeColor, fillColor, style, capStyle)
     }
 
     fun selectStroke(id: String?) {
@@ -2474,7 +2299,6 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
-                pendingShapeType = null,
                 pendingStickyNoteColor = null,
                 canUndo = false,
                 canRedo = false
@@ -2518,7 +2342,6 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = if (targetNote != null) setOf(targetNote.id) else emptySet(),
-                pendingShapeType = null,
                 pendingStickyNoteColor = null,
                 canUndo = false,
                 canRedo = false
@@ -2540,7 +2363,6 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
-                pendingShapeType = null,
                 pendingStickyNoteColor = null
             )
         }
@@ -2589,7 +2411,6 @@ class WhiteboardViewModel(
                 selectedStrokeIds = if (openImmediately) emptySet() else it.selectedStrokeIds,
                 selectedShapeIds = if (openImmediately) emptySet() else it.selectedShapeIds,
                 selectedNoteIds = if (openImmediately) emptySet() else it.selectedNoteIds,
-                pendingShapeType = if (openImmediately) null else it.pendingShapeType,
                 pendingStickyNoteColor = if (openImmediately) null else it.pendingStickyNoteColor,
                 canUndo = if (openImmediately) false else it.canUndo,
                 canRedo = if (openImmediately) false else it.canRedo,
@@ -2780,73 +2601,6 @@ class WhiteboardViewModel(
             state.withUpdatedBoard { b ->
                 b.copy(auditLogs = emptyList())
             }
-        }
-        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
-    }
-
-    fun insertShapeAtCenter(
-        shapeType: ShapeType,
-        isFilled: Boolean = false,
-        strokeColor: String = _uiState.value.penColorHex,
-        fillColor: String = "#DBEAFE"
-    ) {
-        val camera = _cameraState.value
-        val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
-        val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
-
-        val width = if (shapeType.isLineLike) 240f else 220f
-        val height = if (shapeType == ShapeType.CIRCLE) 220f else if (shapeType.isLineLike) 80f else 150f
-
-        val x = worldCenterX - width / 2f
-        val y = worldCenterY - height / 2f
-
-        val vertices = if (shapeType.isLineLike) {
-            listOf(StrokePoint(x, y + height / 2f), StrokePoint(x + width, y + height / 2f))
-        } else {
-            emptyList()
-        }
-
-        val capStyle = when (shapeType) {
-            ShapeType.ARROW -> LineCapStyle.END_ARROW
-            ShapeType.DOUBLE_ARROW -> LineCapStyle.BOTH_ARROWS
-            else -> LineCapStyle.NONE
-        }
-
-        val state = _uiState.value
-        val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
-        val inheritedWidth = (activeSlot?.strokeWidth ?: state.penWidth).coerceIn(2f, 24f)
-        val inheritedBrush = activeSlot?.brushType ?: state.pendingBrushType
-        val inheritedRainbow = activeSlot?.isRainbow ?: state.isRainbowPen
-
-        saveUndoSnapshot()
-        val shape = ShapeItem(
-            shapeType = shapeType,
-            x = x,
-            y = y,
-            width = width,
-            height = height,
-            strokeColorHex = strokeColor,
-            fillColorHex = fillColor,
-            strokeWidth = inheritedWidth,
-            isFilled = isFilled && !shapeType.isLineLike,
-            capStyle = capStyle,
-            vertices = vertices,
-            isRainbow = inheritedRainbow && inheritedBrush != StrokeBrushType.HIGHLIGHTER,
-            opacity = inheritedBrush.defaultOpacity,
-            brushType = inheritedBrush
-        )
-        _uiState.update { state ->
-            state.withUpdatedBoard { b ->
-                val log = AuditLogEntry(
-                    actionName = "SHAPE_INSERTED",
-                    details = "Forma ${shapeType.displayName} insertada en centro",
-                    category = "SHAPES"
-                )
-                b.copy(shapes = b.shapes + shape, auditLogs = (b.auditLogs + log).takeLast(100))
-            }.copy(
-                selectedShapeId = shape.id,
-                pendingShapeType = null
-            )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
@@ -3115,7 +2869,7 @@ class WhiteboardViewModel(
         if (activeIdx in brushSlots.indices) {
             brushSlots[activeIdx] = brushSlots[activeIdx].copy(colorHex = hex, isRainbow = isRainbow)
         }
-        _uiState.update { it.copy(penColorHex = hex, isRainbowPen = isRainbow, pendingStrokeColor = hex) }
+        _uiState.update { it.copy(penColorHex = hex, isRainbowPen = isRainbow) }
     }
 
     fun setPenWidth(width: Float) {

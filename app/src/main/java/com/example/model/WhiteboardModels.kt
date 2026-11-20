@@ -12,7 +12,6 @@ enum class ToolType {
     ERASER,
     PIXEL_ERASER,
     SELECT_LASSO,
-    SHAPE,
     STICKY_NOTE,
     TEXT,
     STICKER
