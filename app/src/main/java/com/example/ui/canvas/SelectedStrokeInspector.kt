@@ -1023,6 +1023,15 @@ fun SelectionEditDock(
                             }
 
                             QuickStepperPill(
+                                icon = Icons.AutoMirrored.Filled.RotateLeft,
+                                label = "${selectedText.rotation.roundToInt()}°",
+                                onDecrement = { onRotateAll(-5f) },
+                                onIncrement = { onRotateAll(5f) },
+                                decTestTag = "edit_text_rotate_minus",
+                                incTestTag = "edit_text_rotate_plus"
+                            )
+
+                            QuickStepperPill(
                                 icon = Icons.Default.FormatSize,
                                 label = "${selectedText.fontSize.roundToInt()}",
                                 onDecrement = { onUpdateTextFontSize((selectedText.fontSize - 4f).coerceAtLeast(20f)) },
