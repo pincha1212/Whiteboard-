@@ -1,12 +1,16 @@
 name: Build Android debug APK
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
       - feat/unified-notes-whiteboard
       - feat/rich-notes-on-whiteboard
       - integration/rich-notes-main
+      - fix/whiteboard-stroke-performance
       - release/2.3.0-lite
 
 permissions:
