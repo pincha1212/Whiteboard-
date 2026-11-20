@@ -1475,6 +1475,23 @@ class WhiteboardViewModel(
         saveUndoSnapshot()
     }
 
+    fun beginCurrentSelectionTransformSnapshot() {
+        val state = _uiState.value
+        if (state.selectedNoteId != null || state.selectedNoteIds.isNotEmpty()) {
+            beginStickyNoteTransformSnapshot()
+        } else {
+            beginTransformSnapshot()
+        }
+    }
+
+    fun commitCurrentSelectionTransform() {
+        if (isStickyNoteTransformInProgress) {
+            commitWorkspaceSync()
+        } else {
+            persistCurrentBoard()
+        }
+    }
+
     fun beginStickyNoteTransformSnapshot() {
         // Recover a cancelled previous gesture before starting a new undo transaction.
         if (isStickyNoteTransformInProgress) commitWorkspaceSync()
