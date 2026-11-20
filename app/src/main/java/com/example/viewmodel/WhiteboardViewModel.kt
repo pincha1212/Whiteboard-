@@ -314,6 +314,7 @@ class WhiteboardViewModel(
                     selectedStrokeIds = emptySet(),
                     selectedShapeIds = emptySet(),
                     selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet(),
                     pendingStickyNoteColor = null
                 )
             } else if (tool.isBrushSlotTool()) {
@@ -844,6 +845,17 @@ class WhiteboardViewModel(
             }
         }.map { it.id }.toSet()
 
+        val enclosedTextIds = board.textItems.filter { item ->
+            if (item.isLocked || item.isHiddenByCollapse) false else {
+                val centerX = item.x + item.width / 2f
+                val centerY = item.y + item.fontSize * 1.5f
+                isPointInPolygon(centerX, centerY, lassoPolygon) || (
+                    isPointInPolygon(item.x, item.y, lassoPolygon) &&
+                    isPointInPolygon(item.x + item.width, item.y + item.fontSize * 2f, lassoPolygon)
+                )
+            }
+        }.map { it.id }.toSet()
+
         val enclosedNoteIds = stickyNotesStore.currentNotes().filter { n ->
             if (n.isLocked || n.isHiddenByCollapse) {
                 false
@@ -857,12 +869,14 @@ class WhiteboardViewModel(
             }
         }.map { it.id }.toSet()
 
-        if (enclosedShapeIds.isNotEmpty() || enclosedStrokeIds.isNotEmpty() || enclosedNoteIds.isNotEmpty()) {
+        if (enclosedShapeIds.isNotEmpty() || enclosedStrokeIds.isNotEmpty() || enclosedNoteIds.isNotEmpty() || enclosedTextIds.isNotEmpty()) {
             _uiState.update {
                 it.copy(
                     selectedShapeIds = enclosedShapeIds,
                     selectedStrokeIds = enclosedStrokeIds,
                     selectedNoteIds = enclosedNoteIds,
+                    selectedTextIds = enclosedTextIds,
+                    selectedTextId = enclosedTextIds.firstOrNull(),
                     selectedShapeId = enclosedShapeIds.firstOrNull(),
                     selectedStrokeId = enclosedStrokeIds.firstOrNull(),
                     selectedNoteId = enclosedNoteIds.firstOrNull()
@@ -1226,6 +1240,7 @@ class WhiteboardViewModel(
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet(),
                 selectedTextId = null,
                 selectedTextIds = emptySet()
             )
@@ -1242,6 +1257,7 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedNoteId = null,
                 selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet(),
                 selectedTextId = null,
                 selectedTextIds = emptySet()
             )
@@ -1278,7 +1294,8 @@ class WhiteboardViewModel(
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
     }
@@ -1417,7 +1434,8 @@ class WhiteboardViewModel(
                     selectedShapeId = recognized.shapeItem.id,
                     selectedShapeIds = setOf(recognized.shapeItem.id),
                     selectedNoteId = null,
-                    selectedNoteIds = emptySet()
+                    selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
                 )
             }
         }
@@ -2333,6 +2351,7 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet(),
                 pendingStickyNoteColor = null,
                 canUndo = false,
                 canRedo = false
@@ -2397,6 +2416,7 @@ class WhiteboardViewModel(
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
                 selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet(),
                 pendingStickyNoteColor = null
             )
         }
@@ -2610,7 +2630,8 @@ class WhiteboardViewModel(
                 selectedNoteId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
@@ -2686,7 +2707,8 @@ class WhiteboardViewModel(
                 selectedShapeId = null,
                 selectedShapeIds = emptySet(),
                 selectedNoteId = null,
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
@@ -2800,7 +2822,8 @@ class WhiteboardViewModel(
                 selectedNoteId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
@@ -2861,7 +2884,8 @@ class WhiteboardViewModel(
                 selectedNoteId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
@@ -2892,7 +2916,8 @@ class WhiteboardViewModel(
                 selectedNoteId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedNoteIds = emptySet()
+                selectedNoteIds = emptySet(),
+                selectedTextIds = emptySet()
             )
         }
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = true, persist = true)
