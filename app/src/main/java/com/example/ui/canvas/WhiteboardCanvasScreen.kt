@@ -1092,7 +1092,7 @@ fun WhiteboardCanvasScreen(
         // Render Sticky Notes (isolated per-note StateFlow cards + constant-size selection overlay)
         val hasViewport = canvasSizePx.width > 0 && canvasSizePx.height > 0
         val isPlacementPending = state.pendingStickyNoteColor != null
-        val isMultiSelectActive = (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size) > 1
+        val isMultiSelectActive = (state.selectedNoteIds.size + state.selectedStrokeIds.size + state.selectedShapeIds.size + state.selectedTextIds.size) > 1
 
         StickyNoteLayer(
             viewModel = viewModel,
@@ -1170,7 +1170,7 @@ fun WhiteboardCanvasScreen(
 
         // Adaptive Dock Overlay: Selection Inspector when selected, otherwise Adaptive WhiteboardPenDock
         if (!state.isZenMode) {
-            val totalSelectedCount = state.selectedStrokeIds.size + state.selectedShapeIds.size + state.selectedNoteIds.size
+            val totalSelectedCount = state.selectedStrokeIds.size + state.selectedShapeIds.size + state.selectedNoteIds.size + state.selectedTextIds.size
             val hasSelection = totalSelectedCount > 0 ||
                 state.selectedShapeId != null ||
                 state.selectedStrokeId != null ||
