@@ -211,7 +211,8 @@ object UnifiedBrushPipeline {
                 effectiveHandDrawn,
                 PathHumanizer.DEFAULT_STEP_PX,
                 config.seed,
-                stableOpenContours = preserveInputPoints
+                // Keep open-stroke brush texture identical while drawing and after commit.
+                stableOpenContours = true
             )
         }
         // The live preview changes on every pointer event. Caching every intermediate
