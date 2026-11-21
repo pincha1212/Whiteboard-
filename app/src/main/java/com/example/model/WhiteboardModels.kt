@@ -256,7 +256,9 @@ data class TextItem(
     val rotation: Float = 0f,
     val groupId: String? = null,
     val parentId: String? = null,
-    val isHiddenByCollapse: Boolean = false
+    val isHiddenByCollapse: Boolean = false,
+    /** Explicit resize height; 0 keeps the legacy content-driven height. */
+    val height: Float = 0f
 )
 
 data class StickerItem(
