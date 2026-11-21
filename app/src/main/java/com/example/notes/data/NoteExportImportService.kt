@@ -71,7 +71,10 @@ object NoteExportImportService {
         return sb.toString()
     }
 
-    fun exportAllToJson(notes: List<NoteItem>, folders: List<NoteFolder>): String {
+    fun exportAllToJson(notes: List<NoteItem>, folders: List<NoteFolder>): String =
+        exportAllToJsonObject(notes, folders).toString(2)
+
+    fun exportAllToJsonObject(notes: List<NoteItem>, folders: List<NoteFolder>): JSONObject {
         val root = JSONObject()
         root.put("app", "Chronos Notes Offline-First")
         root.put("version", "2.0.0")
@@ -164,7 +167,7 @@ object NoteExportImportService {
         }
         root.put("notes", notesArray)
 
-        return root.toString(2)
+        return root
     }
 
     fun importFromJson(jsonString: String): Pair<List<NoteItem>, List<NoteFolder>> {
