@@ -28,6 +28,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStreamWriter
 import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -535,7 +536,7 @@ class LocalFirstWorkspaceStore(
             root.put("schemaVersion", 1)
 
             // Persist unified notes + folders via NoteExportImportService (single source of truth)
-            val notesJson = JSONObject(NoteExportImportService.exportAllToJson(state.notes, state.folders))
+            val notesJson = NoteExportImportService.exportAllToJsonObject(state.notes, state.folders)
             root.put("notes", notesJson.getJSONArray("notes"))
             root.put("folders", notesJson.getJSONArray("folders"))
 
@@ -543,7 +544,7 @@ class LocalFirstWorkspaceStore(
             val boardsArr = JSONArray()
             state.boards.forEach { board ->
                 val boardWithoutDuplicateNotes = board.copy(stickyNotes = emptyList())
-                val boardObj = JSONObject(BoardSnapshotSerializer.serializeBoard(boardWithoutDuplicateNotes))
+                val boardObj = BoardSnapshotSerializer.serializeBoardObject(boardWithoutDuplicateNotes)
                 boardObj.put("createdAt", board.createdAt)
                 boardObj.put("updatedAt", board.updatedAt)
                 boardsArr.put(boardObj)
@@ -553,7 +554,11 @@ class LocalFirstWorkspaceStore(
             // AtomicFile keeps a recoverable backup until the replacement has been synced and committed.
             val stream = atomicFile.startWrite()
             outputStream = stream
-            stream.write(root.toString().toByteArray(Charsets.UTF_8))
+            // Write UTF-8 directly to the atomic stream. Avoid creating a second full-size
+            // byte array alongside the serialized workspace String on memory-constrained devices.
+            val writer = OutputStreamWriter(stream, Charsets.UTF_8)
+            writer.write(root.toString())
+            writer.flush()
             atomicFile.finishWrite(stream)
             outputStream = null
             true
