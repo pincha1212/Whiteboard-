@@ -274,11 +274,8 @@ object PixelEraserGeometry {
         val anyHit = clippedPairs.any { it.second.wasModified }
         if (!anyHit) return null
 
-        val isHighlighter = shape.opacity < 0.41f
-        val brushType = when {
-            shape.opacity < 0.41f -> StrokeBrushType.HIGHLIGHTER
-            else -> StrokeBrushType.FOUNTAIN_PEN
-        }
+        val isHighlighter = shape.opacity < 0.41f || shape.brushType == StrokeBrushType.HIGHLIGHTER
+        val brushType = if (shape.opacity < 0.41f) StrokeBrushType.HIGHLIGHTER else shape.brushType
 
         val emitted = mutableListOf<WhiteboardStroke>()
         clippedPairs.forEach { (contour, clipped) ->
@@ -296,7 +293,8 @@ object PixelEraserGeometry {
                             strokeStyle = contour.strokeStyle,
                             capStyle = contour.capStyle,
                             brushType = brushType,
-                            opacity = shape.opacity
+                            opacity = shape.opacity,
+                            layerId = shape.layerId
                         )
                     )
                 }
@@ -318,7 +316,8 @@ object PixelEraserGeometry {
                                     frag.keptOrigEnd
                                 ),
                                 brushType = brushType,
-                                opacity = shape.opacity
+                                opacity = shape.opacity,
+                                layerId = shape.layerId
                             )
                         )
                     }

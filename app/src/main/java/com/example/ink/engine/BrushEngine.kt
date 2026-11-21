@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.os.Build
@@ -458,22 +459,298 @@ private fun nextHash(state: Int): Int {
 }
 
 /**
+ * 2. Lápiz de Grafito Sketchbook ([PencilBrush]):
+ * Textured mineral core with paper-tooth micro-grain speckles modulated by speed.
+ */
+class PencilBrush : BrushEngine {
+    override val brushId: String = "pencil"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val baseHalfW = (config.strokeWidth * 0.44f).coerceAtLeast(0.65f)
+        val alphaFrac = config.alpha.coerceIn(0.12f, 1.0f)
+        val shader = buildDynamicShaderIfNeeded(nodes, config)
+
+        val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = (alphaFrac * 0.78f * 255f).roundToInt().coerceIn(18, 235)
+            this.shader = shader
+        }
+        val grainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = (alphaFrac * 0.46f * 255f).roundToInt().coerceIn(12, 190)
+            this.shader = shader
+        }
+
+        for (contour in contours) {
+            if (contour.size == 1) {
+                canvas.drawCircle(contour[0].x, contour[0].y, baseHalfW * 0.9f, corePaint)
+                continue
+            }
+            val leftX = FloatArray(contour.size)
+            val leftY = FloatArray(contour.size)
+            val rightX = FloatArray(contour.size)
+            val rightY = FloatArray(contour.size)
+
+            var hashState = config.seed xor (contour.size * 7919)
+            for (i in contour.indices) {
+                val n = contour[i]
+                hashState = nextHash(hashState xor (i * 2654435761L).toInt())
+                val tooth = ((hashState and 0xFF) / 255f)
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                val speedTrim = (1.0f - n.velocity * 0.16f).coerceIn(0.75f, 1.02f)
+                val hw = (baseHalfW * speedTrim * (0.76f + 0.28f * tooth)).coerceAtLeast(0.5f)
+                leftX[i] = n.x + nx * hw
+                leftY[i] = n.y + ny * hw
+                rightX[i] = n.x - nx * hw
+                rightY[i] = n.y - ny * hw
+            }
+
+            val ribbon = buildRoundedRibbonPath(
+                contour = contour,
+                leftX = leftX,
+                leftY = leftY,
+                rightX = rightX,
+                rightY = rightY
+            )
+            canvas.drawPath(ribbon, corePaint)
+
+            // Graphite mineral speckles along paper grain
+            val speckRadius = (baseHalfW * 0.24f).coerceIn(0.45f, 1.8f)
+            val spread = baseHalfW * 1.15f
+            for (i in contour.indices step 1) {
+                val n = contour[i]
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                val tx = cos(n.angle)
+                val ty = sin(n.angle)
+                for (g in 0 until 2) {
+                    hashState = nextHash(hashState)
+                    val offsetN = (((hashState and 0xFF) / 127.5f) - 1f) * spread
+                    hashState = nextHash(hashState)
+                    val offsetT = (((hashState and 0xFF) / 127.5f) - 1f) * (baseHalfW * 0.5f)
+                    val gx = n.x + nx * offsetN + tx * offsetT
+                    val gy = n.y + ny * offsetN + ty * offsetT
+                    canvas.drawCircle(gx, gy, speckRadius, grainPaint)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 3. Pincel Artístico Sketchbook ([PaintBrush]):
+ * Layered pigment halo + directional bristle streaks for expressive painting.
+ */
+class PaintBrush : BrushEngine {
+    override val brushId: String = "paint_brush"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val baseHalfW = (config.strokeWidth * 0.62f).coerceAtLeast(1.4f)
+        val alphaFrac = config.alpha.coerceIn(0.12f, 1.0f)
+        val shader = buildDynamicShaderIfNeeded(nodes, config)
+
+        val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = (alphaFrac * 0.34f * 255f).roundToInt().coerceIn(10, 140)
+            this.shader = shader
+        }
+        val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = (alphaFrac * 0.74f * 255f).roundToInt().coerceIn(18, 220)
+            this.shader = shader
+        }
+        val bristlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = (baseHalfW * 0.28f).coerceIn(1.0f, 5.5f)
+            color = config.color
+            alpha = (alphaFrac * 0.42f * 255f).roundToInt().coerceIn(12, 165)
+            this.shader = shader
+        }
+
+        for (contour in contours) {
+            if (contour.size == 1) {
+                val p = contour[0]
+                canvas.drawCircle(p.x, p.y, baseHalfW * 1.15f, haloPaint)
+                canvas.drawCircle(p.x, p.y, baseHalfW * 0.88f, bodyPaint)
+                continue
+            }
+
+            val haloLX = FloatArray(contour.size)
+            val haloLY = FloatArray(contour.size)
+            val haloRX = FloatArray(contour.size)
+            val haloRY = FloatArray(contour.size)
+            val bodyLX = FloatArray(contour.size)
+            val bodyLY = FloatArray(contour.size)
+            val bodyRX = FloatArray(contour.size)
+            val bodyRY = FloatArray(contour.size)
+
+            val streakLeft = Path()
+            val streakRight = Path()
+
+            for (i in contour.indices) {
+                val n = contour[i]
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                val taper = if (n.isClosed) {
+                    1f
+                } else {
+                    (0.55f + 0.45f * sin(n.progress * PI.toFloat()).coerceIn(0f, 1f))
+                }
+                val press = (1.12f - 0.28f * n.velocity).coerceIn(0.76f, 1.16f)
+                val hwBody = (baseHalfW * 0.88f * taper * press).coerceAtLeast(0.75f)
+                val hwHalo = (baseHalfW * 1.16f * taper * press).coerceAtLeast(1.0f)
+
+                haloLX[i] = n.x + nx * hwHalo
+                haloLY[i] = n.y + ny * hwHalo
+                haloRX[i] = n.x - nx * hwHalo
+                haloRY[i] = n.y - ny * hwHalo
+
+                bodyLX[i] = n.x + nx * hwBody
+                bodyLY[i] = n.y + ny * hwBody
+                bodyRX[i] = n.x - nx * hwBody
+                bodyRY[i] = n.y - ny * hwBody
+
+                val sOff = hwBody * 0.48f
+                if (i == 0) {
+                    streakLeft.moveTo(n.x + nx * sOff, n.y + ny * sOff)
+                    streakRight.moveTo(n.x - nx * sOff, n.y - ny * sOff)
+                } else {
+                    streakLeft.lineTo(n.x + nx * sOff, n.y + ny * sOff)
+                    streakRight.lineTo(n.x - nx * sOff, n.y - ny * sOff)
+                }
+            }
+
+            canvas.drawPath(buildRoundedRibbonPath(contour, haloLX, haloLY, haloRX, haloRY), haloPaint)
+            canvas.drawPath(buildRoundedRibbonPath(contour, bodyLX, bodyLY, bodyRX, bodyRY), bodyPaint)
+            canvas.drawPath(streakLeft, bristlePaint)
+            canvas.drawPath(streakRight, bristlePaint)
+        }
+    }
+}
+
+/**
+ * 4. Aerógrafo Sketchbook ([Airbrush]):
+ * Soft feathered radial spray stamps spaced evenly along each contour.
+ */
+class Airbrush : BrushEngine {
+    override val brushId: String = "airbrush"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val sprayRadius = (config.strokeWidth * 1.15f).coerceAtLeast(5f)
+        val alphaFrac = config.alpha.coerceIn(0.08f, 1.0f)
+        val perStampAlpha = (alphaFrac * 0.24f * 255f).roundToInt().coerceIn(8, 96)
+
+        val rgb = config.color and 0x00FFFFFF
+        val centerColor = (perStampAlpha shl 24) or rgb
+        val midColor = ((perStampAlpha * 0.42f).roundToInt().coerceAtLeast(2) shl 24) or rgb
+        val edgeColor = rgb
+
+        val unitRadial = RadialGradient(
+            0f,
+            0f,
+            1f,
+            intArrayOf(centerColor, midColor, edgeColor),
+            floatArrayOf(0f, 0.48f, 1f),
+            Shader.TileMode.CLAMP
+        )
+
+        val stampPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            shader = unitRadial
+        }
+
+        val stepDist = max(3.5f, sprayRadius * 0.30f)
+        val rainbowPalette = intArrayOf(
+            Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.MAGENTA
+        )
+
+        for (contour in contours) {
+            if (contour.isEmpty()) continue
+            var lastStampX = contour[0].x
+            var lastStampY = contour[0].y
+
+            fun drawSprayAt(x: Float, y: Float, radius: Float, progress: Float) {
+                if (config.isRainbow) {
+                    val idx = ((progress * (rainbowPalette.size - 1)).toInt()).coerceIn(0, rainbowPalette.size - 1)
+                    val cRgb = rainbowPalette[idx] and 0x00FFFFFF
+                    stampPaint.shader = RadialGradient(
+                        0f, 0f, 1f,
+                        intArrayOf((perStampAlpha shl 24) or cRgb, ((perStampAlpha / 2) shl 24) or cRgb, cRgb),
+                        floatArrayOf(0f, 0.48f, 1f),
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.save()
+                canvas.translate(x, y)
+                canvas.scale(radius, radius)
+                canvas.drawCircle(0f, 0f, 1f, stampPaint)
+                canvas.restore()
+            }
+
+            drawSprayAt(lastStampX, lastStampY, sprayRadius, contour[0].progress)
+            for (i in 1 until contour.size) {
+                val n = contour[i]
+                val dist = hypot(n.x - lastStampX, n.y - lastStampY)
+                if (dist >= stepDist || i == contour.lastIndex) {
+                    val subSteps = (dist / stepDist).toInt().coerceIn(1, 8)
+                    for (s in 1..subSteps) {
+                        val t = s / subSteps.toFloat()
+                        val sx = lastStampX + (n.x - lastStampX) * t
+                        val sy = lastStampY + (n.y - lastStampY) * t
+                        drawSprayAt(sx, sy, sprayRadius, n.progress)
+                    }
+                    lastStampX = n.x
+                    lastStampY = n.y
+                }
+            }
+        }
+    }
+}
+
+/**
  * Central registry mapping app [StrokeBrushType] values to their Stage 3 [BrushEngine] implementations.
  */
 object BrushEngineRegistry {
+    private val pencil = PencilBrush()
     private val highlighter = HighlighterBrush()
     private val fountainPen = FountainPenBrush()
     private val fineMarker = FineMarkerBrush()
+    private val paintBrush = PaintBrush()
+    private val airbrush = Airbrush()
 
     fun forBrushType(brushType: StrokeBrushType, strokeStyle: StrokeStyle = StrokeStyle.SOLID): BrushEngine {
         return when (brushType) {
+            StrokeBrushType.PENCIL -> pencil
             StrokeBrushType.FOUNTAIN_PEN -> fountainPen
             StrokeBrushType.FINE_MARKER -> fineMarker
+            StrokeBrushType.PAINT_BRUSH -> paintBrush
+            StrokeBrushType.AIRBRUSH -> airbrush
             StrokeBrushType.HIGHLIGHTER -> highlighter
         }
     }
 
     fun allCoreBrushes(): List<BrushEngine> = listOf(
+        pencil,
+        fountainPen,
+        fineMarker,
+        paintBrush,
+        airbrush,
         highlighter
     )
 }

@@ -56,11 +56,16 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private val AllResizeHandles = StickyNoteResizeHandle.entries.toList()
+private val CornerResizeHandles = listOf(
+    StickyNoteResizeHandle.TOP_LEFT,
+    StickyNoteResizeHandle.TOP_RIGHT,
+    StickyNoteResizeHandle.BOTTOM_RIGHT,
+    StickyNoteResizeHandle.BOTTOM_LEFT
+)
 
 /**
- * Screen-space selection frame, 8 resize handles, and 1 rotation handle for the currently
- * selected sticky note.
+ * Screen-space selection frame, 4 basic corner resize handles, and 1 rotation handle for the
+ * currently selected sticky note.
  *
  * - Constant 48.dp touch targets at any zoom level.
  * - Reads note geometry and camera exclusively in draw / placement phases so drag, resize,
@@ -139,33 +144,11 @@ fun StickyNoteSelectionOverlay(
             }
         }
 
-        // 8 screen-space resize handles (4 corners + 4 edges)
-        AllResizeHandles.forEach { handle ->
+        // 4 screen-space corner resize handles (basic 4-vertex layout)
+        CornerResizeHandles.forEach { handle ->
             val placedTopLeft = remember(noteId, handle) { floatArrayOf(0f, 0f) }
-            val isCorner = handle == StickyNoteResizeHandle.TOP_LEFT ||
-                handle == StickyNoteResizeHandle.TOP_RIGHT ||
-                handle == StickyNoteResizeHandle.BOTTOM_RIGHT ||
-                handle == StickyNoteResizeHandle.BOTTOM_LEFT
-
-            val isVerticalEdge = handle == StickyNoteResizeHandle.LEFT ||
-                handle == StickyNoteResizeHandle.RIGHT
-
-            val visualW: Dp
-            val visualH: Dp
-            when {
-                isCorner -> {
-                    visualW = 12.dp
-                    visualH = 12.dp
-                }
-                isVerticalEdge -> {
-                    visualW = 6.dp
-                    visualH = 16.dp
-                }
-                else -> {
-                    visualW = 16.dp
-                    visualH = 6.dp
-                }
-            }
+            val visualW: Dp = 13.dp
+            val visualH: Dp = 13.dp
 
             Box(
                 contentAlignment = Alignment.Center,
@@ -266,9 +249,9 @@ fun StickyNoteSelectionOverlay(
                 Box(
                     modifier = Modifier
                         .size(visualW, visualH)
-                        .clip(if (isCorner) CircleShape else RoundedCornerShape(3.dp))
+                        .clip(CircleShape)
                         .background(surfaceColor)
-                        .border(1.75.dp, primaryColor, if (isCorner) CircleShape else RoundedCornerShape(3.dp))
+                        .border(1.75.dp, primaryColor, CircleShape)
                 )
             }
         }

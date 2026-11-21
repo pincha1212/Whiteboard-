@@ -131,7 +131,9 @@ object StickyNoteGeometry {
         scale: Float,
         lockAspectRatio: Boolean,
         targetAspectRatio: Float = 1.0f,
-        rotationDegrees: Float = 0f
+        rotationDegrees: Float = 0f,
+        minWidthWorld: Float = MIN_SIZE_WORLD,
+        minHeightWorld: Float = MIN_SIZE_WORLD
     ): StickyNoteBounds {
         val safeScale = scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
         val dxWorld = deltaScreenX / safeScale
@@ -204,8 +206,8 @@ object StickyNoteGeometry {
         val finalH: Float
 
         if (!lockAspectRatio) {
-            finalW = (right - left).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
-            finalH = (bottom - top).coerceIn(MIN_SIZE_WORLD, MAX_SIZE_WORLD)
+            finalW = (right - left).coerceIn(minWidthWorld, MAX_SIZE_WORLD)
+            finalH = (bottom - top).coerceIn(minHeightWorld, MAX_SIZE_WORLD)
             unrotatedX = when {
                 touchesLeft -> origRight - finalW
                 touchesRight -> origLeft

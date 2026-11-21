@@ -115,12 +115,16 @@ internal val DockRainbowColors = listOf(
 )
 
 internal fun ToolType.isInkingOrEraseTool(): Boolean = when (this) {
+    ToolType.PENCIL,
     ToolType.PEN,
     ToolType.FINE_MARKER,
+    ToolType.PAINT_BRUSH,
+    ToolType.AIRBRUSH,
     ToolType.HIGHLIGHTER,
     ToolType.LASER_POINTER,
     ToolType.ERASER,
-    ToolType.PIXEL_ERASER -> true
+    ToolType.PIXEL_ERASER,
+    ToolType.EYEDROPPER -> true
     else -> false
 }
 
@@ -434,6 +438,10 @@ internal fun InkingToolsRow(
     pendingStickyNoteColor: String?,
     onSelectBrushSlot: (Int) -> Unit,
     onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onUpdateSlotOpacity: (Int, Float) -> Unit = { _, _ -> },
+    onOpenColorStudio: () -> Unit = {},
+    penColor: Color = Color.Black,
+    isRainbowPen: Boolean = false,
     onToggleAutoShape: () -> Unit,
     onSelectTool: (ToolType) -> Unit,
     onToggleRuler: () -> Unit,
@@ -443,8 +451,14 @@ internal fun InkingToolsRow(
     modifier: Modifier = Modifier
 ) {
     val hasPendingPlacement = pendingStickyNoteColor != null
-    val isAnyBrushToolActive = !hasPendingPlacement &&
-        (currentTool == ToolType.PEN || currentTool == ToolType.FINE_MARKER || currentTool == ToolType.HIGHLIGHTER)
+    val isAnyBrushToolActive = !hasPendingPlacement && (
+        currentTool == ToolType.PENCIL ||
+            currentTool == ToolType.PEN ||
+            currentTool == ToolType.FINE_MARKER ||
+            currentTool == ToolType.PAINT_BRUSH ||
+            currentTool == ToolType.AIRBRUSH ||
+            currentTool == ToolType.HIGHLIGHTER
+        )
 
     val slots: @Composable () -> Unit = {
         BrushDock(
@@ -454,9 +468,45 @@ internal fun InkingToolsRow(
             autoShapeRecognition = autoShapeRecognition,
             onSelectBrushSlot = onSelectBrushSlot,
             onUpdateBrushSlot = onUpdateBrushSlot,
+            onUpdateSlotOpacity = onUpdateSlotOpacity,
+            onOpenColorStudio = onOpenColorStudio,
             onToggleAutoShape = onToggleAutoShape,
             isVertical = isVertical
         )
+
+        // Sketchbook Color Studio Puck (tapping opens full HSB Wheel + Opacity + Copic studio)
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .defaultMinSize(minWidth = 38.dp, minHeight = 48.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(role = Role.Button, onClick = onOpenColorStudio)
+                .semantics { contentDescription = "Estudio de color HSB" }
+                .testTag("dock_color_puck_button")
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isRainbowPen) Brush.sweepGradient(DockRainbowColors)
+                        else Brush.radialGradient(listOf(penColor, penColor))
+                    )
+                    .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            )
+        }
+
+        TrayToolSlot(
+            isSelected = !hasPendingPlacement && currentTool == ToolType.EYEDROPPER,
+            description = "Cuentagotas de color",
+            onClick = { onSelectTool(ToolType.EYEDROPPER) },
+            testTag = "dock_menu_tool_eyedropper"
+        ) {
+            PhysicalEyedropperIcon(
+                sampledColor = if (isRainbowPen) Color(0xFFEC4899) else penColor,
+                modifier = Modifier.size(width = 24.dp, height = 38.dp)
+            )
+        }
 
         TrayToolSlot(
             isSelected = !hasPendingPlacement && currentTool == ToolType.LASER_POINTER,

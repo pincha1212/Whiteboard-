@@ -18,6 +18,8 @@ import androidx.core.content.FileProvider
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.engine.UnifiedBrushPipeline
 import com.example.model.CanvasGridType
+import com.example.model.DEFAULT_LAYER_ID
+import com.example.model.DrawingLayer
 import com.example.model.WhiteboardBoard
 import java.io.File
 import java.io.FileOutputStream
@@ -110,28 +112,44 @@ object BoardExportService {
 
         val isDarkBoard = board.colorTheme.isDark
 
-        // 3. Strokes rendered through the Unified 4-Stage Brush Pipeline
-        board.strokes.forEach { stroke ->
-            if (stroke.points.size >= 2) {
-                UnifiedBrushPipeline.renderStroke(
-                    canvas = canvas,
-                    stroke = stroke,
-                    isDarkBoard = isDarkBoard,
-                    isOpaqueCanvasBackground = true
-                )
-            }
-        }
+        // 3 & 4. Strokes & Shapes rendered layer-by-layer (bottom to top)
+        val layers = board.layers.ifEmpty { listOf(DrawingLayer()) }
+        val knownLayerIds = layers.map { it.id }.toSet()
+        val strokesByLayer = board.strokes.groupBy { s -> if (s.layerId in knownLayerIds) s.layerId else DEFAULT_LAYER_ID }
+        val shapesByLayer = board.shapes.groupBy { sh -> if (sh.layerId in knownLayerIds) sh.layerId else DEFAULT_LAYER_ID }
 
-        // 4. Shapes rendered through the Unified 4-Stage Brush Pipeline
-        board.shapes.forEach { shape ->
-            if (!shape.isHiddenByCollapse) {
-                UnifiedBrushPipeline.renderShape(
-                    canvas = canvas,
-                    shape = shape,
-                    isDarkBoard = isDarkBoard,
-                    isOpaqueCanvasBackground = true,
-                    drawLabel = true
-                )
+        layers.forEach { layer ->
+            if (!layer.isVisible || layer.opacity <= 0.01f) return@forEach
+            val layerAlpha = (layer.opacity * 255f).roundToInt().coerceIn(0, 255)
+            val saveCount = if (layerAlpha < 252) {
+                canvas.saveLayerAlpha(null, layerAlpha)
+            } else -1
+
+            strokesByLayer[layer.id].orEmpty().forEach { stroke ->
+                if (stroke.points.size >= 2) {
+                    UnifiedBrushPipeline.renderStroke(
+                        canvas = canvas,
+                        stroke = stroke,
+                        isDarkBoard = isDarkBoard,
+                        isOpaqueCanvasBackground = true
+                    )
+                }
+            }
+
+            shapesByLayer[layer.id].orEmpty().forEach { shape ->
+                if (!shape.isHiddenByCollapse) {
+                    UnifiedBrushPipeline.renderShape(
+                        canvas = canvas,
+                        shape = shape,
+                        isDarkBoard = isDarkBoard,
+                        isOpaqueCanvasBackground = true,
+                        drawLabel = true
+                    )
+                }
+            }
+
+            if (saveCount != -1) {
+                canvas.restoreToCount(saveCount)
             }
         }
 
@@ -218,16 +236,8 @@ object BoardExportService {
         board.textItems.forEach { t ->
             if (t.isHiddenByCollapse) return@forEach
             canvas.save()
-            if (t.isEditableCard) {
-                val cardBg = safeParseColor(t.backgroundColorHex ?: "#FFFFFF", Color.WHITE)
-                val cardRect = RectF(t.x, t.y, t.x + t.width, t.y + 44f)
-                noteFillPaint.color = cardBg
-                canvas.drawRoundRect(cardRect, 10f, 10f, noteFillPaint)
-                noteBorderPaint.color = Color.parseColor("#475569")
-                canvas.drawRoundRect(cardRect, 10f, 10f, noteBorderPaint)
-            }
             val tPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = t.fontSize.coerceIn(12f, 40f)
+                textSize = t.fontSize.coerceIn(12f, 72f)
                 color = safeParseColor(t.colorHex, Color.parseColor("#0F172A"))
                 isFakeBoldText = t.isBold
             }
@@ -239,6 +249,18 @@ object BoardExportService {
                     .build()
             } else {
                 StaticLayout(t.text, tPaint, tw, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
+            }
+            val cardH = max(t.height, layout.height.toFloat() + 20f).coerceAtLeast(48f)
+            if (t.rotation != 0f) {
+                canvas.rotate(t.rotation, t.x + t.width * 0.5f, t.y + cardH * 0.5f)
+            }
+            if (t.isEditableCard && t.backgroundColorHex != "TRANSPARENT") {
+                val cardBg = safeParseColor(t.backgroundColorHex ?: "#FFFFFF", Color.WHITE)
+                val cardRect = RectF(t.x, t.y, t.x + t.width, t.y + cardH)
+                noteFillPaint.color = cardBg
+                canvas.drawRoundRect(cardRect, 12f, 12f, noteFillPaint)
+                noteBorderPaint.color = Color.parseColor("#475569")
+                canvas.drawRoundRect(cardRect, 12f, 12f, noteBorderPaint)
             }
             canvas.translate(t.x + if (t.isEditableCard) 10f else 0f, t.y + if (t.isEditableCard) 10f else 0f)
             layout.draw(canvas)

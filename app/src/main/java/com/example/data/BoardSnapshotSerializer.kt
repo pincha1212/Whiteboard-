@@ -4,6 +4,8 @@ import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
+import com.example.model.DEFAULT_LAYER_ID
+import com.example.model.DrawingLayer
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
@@ -29,7 +31,20 @@ object BoardSnapshotSerializer {
         root.put("title", board.title)
         root.put("gridType", board.gridType.name)
         root.put("colorTheme", board.colorTheme.name)
+        root.put("activeLayerId", board.activeLayerId)
         root.put("timestamp", System.currentTimeMillis())
+
+        val layersArr = JSONArray()
+        board.layers.forEach { layer ->
+            layersArr.put(JSONObject().apply {
+                put("id", layer.id)
+                put("name", layer.name)
+                put("isVisible", layer.isVisible)
+                put("opacity", layer.opacity.toDouble())
+                put("isLocked", layer.isLocked)
+            })
+        }
+        root.put("layers", layersArr)
 
         val strokesArr = JSONArray()
         board.strokes.forEach { s ->
@@ -44,6 +59,7 @@ object BoardSnapshotSerializer {
             obj.put("zIndex", s.zIndex)
             obj.put("brushType", s.brushType.name)
             obj.put("opacity", s.opacity.toDouble())
+            obj.put("layerId", s.layerId)
             val ptsArr = JSONArray()
             s.points.forEach { p ->
                 ptsArr.put(JSONObject().apply {
@@ -82,6 +98,7 @@ object BoardSnapshotSerializer {
             sh.parentId?.let { obj.put("parentId", it) }
             obj.put("isCollapsed", sh.isCollapsed)
             obj.put("isHiddenByCollapse", sh.isHiddenByCollapse)
+            obj.put("layerId", sh.layerId)
             val vertsArr = JSONArray()
             sh.vertices.forEach { v ->
                 vertsArr.put(JSONObject().apply {
@@ -133,6 +150,7 @@ object BoardSnapshotSerializer {
                 t.backgroundColorHex?.let { put("backgroundColorHex", it) }
                 put("width", t.width.toDouble())
                 put("height", t.height.toDouble())
+                put("rotation", t.rotation.toDouble())
                 t.groupId?.let { put("groupId", it) }
                 t.parentId?.let { put("parentId", it) }
                 put("isHiddenByCollapse", t.isHiddenByCollapse)
@@ -192,6 +210,30 @@ object BoardSnapshotSerializer {
             val themeName = root.optString("colorTheme", currentBoard.colorTheme.name)
             val colorTheme = CanvasColorTheme.values().firstOrNull { it.name == themeName } ?: currentBoard.colorTheme
 
+            val layers = mutableListOf<DrawingLayer>()
+            val layersArr = root.optJSONArray("layers")
+            if (layersArr != null) {
+                for (i in 0 until layersArr.length()) {
+                    val obj = layersArr.getJSONObject(i)
+                    layers.add(
+                        DrawingLayer(
+                            id = obj.optString("id", DEFAULT_LAYER_ID),
+                            name = obj.optString("name", "Capa ${i + 1}"),
+                            isVisible = obj.optBoolean("isVisible", true),
+                            opacity = obj.optDouble("opacity", 1.0).toFloat().coerceIn(0.05f, 1.0f),
+                            isLocked = obj.optBoolean("isLocked", false)
+                        )
+                    )
+                }
+            }
+            val resolvedLayers = if (layers.isNotEmpty()) layers else listOf(DrawingLayer())
+            val requestedActiveLayer = root.optString("activeLayerId", resolvedLayers.first().id)
+            val resolvedActiveLayer = if (resolvedLayers.any { it.id == requestedActiveLayer }) {
+                requestedActiveLayer
+            } else {
+                resolvedLayers.first().id
+            }
+
             val strokes = mutableListOf<WhiteboardStroke>()
             val strokesArr = root.optJSONArray("strokes")
             if (strokesArr != null) {
@@ -213,7 +255,7 @@ object BoardSnapshotSerializer {
                     val defaultBrush = if (isHL) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN
                     val brushName = obj.optString("brushType", defaultBrush.name)
                     val brushType = StrokeBrushType.values().firstOrNull { it.name == brushName } ?: defaultBrush
-                    val opacity = obj.optDouble("opacity", brushType.defaultOpacity.toDouble()).toFloat().coerceIn(0.1f, 1.0f)
+                    val opacity = obj.optDouble("opacity", brushType.defaultOpacity.toDouble()).toFloat().coerceIn(0.05f, 1.0f)
                     strokes.add(
                         WhiteboardStroke(
                             id = obj.getString("id"),
@@ -226,7 +268,8 @@ object BoardSnapshotSerializer {
                             capStyle = capStyle,
                             zIndex = obj.optInt("zIndex", 0),
                             brushType = brushType,
-                            opacity = opacity
+                            opacity = opacity,
+                            layerId = obj.optString("layerId", DEFAULT_LAYER_ID)
                         )
                     )
                 }
@@ -278,7 +321,8 @@ object BoardSnapshotSerializer {
                             groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                             parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
                             isCollapsed = obj.optBoolean("isCollapsed", false),
-                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
+                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false),
+                            layerId = obj.optString("layerId", DEFAULT_LAYER_ID)
                         )
                     )
                 }
@@ -332,6 +376,7 @@ object BoardSnapshotSerializer {
                             backgroundColorHex = obj.optString("backgroundColorHex", "").takeIf { it.isNotEmpty() },
                             width = obj.optDouble("width", 190.0).toFloat(),
                             height = obj.optDouble("height", 0.0).toFloat(),
+                            rotation = obj.optDouble("rotation", 0.0).toFloat(),
                             groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                             parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
                             isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
@@ -404,6 +449,8 @@ object BoardSnapshotSerializer {
                 stickyNotes = notes,
                 textItems = texts,
                 stickers = stickers,
+                layers = resolvedLayers,
+                activeLayerId = resolvedActiveLayer,
                 auditLogs = if (auditLogs.isNotEmpty()) auditLogs else currentBoard.auditLogs,
                 snapshots = if (snapshots.isNotEmpty()) snapshots else currentBoard.snapshots
             )

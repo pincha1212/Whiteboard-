@@ -114,7 +114,8 @@ object ShapeRecognizer {
                     vertices = listOf(finalStart, finalEnd),
                     opacity = stroke.opacity,
                     isRainbow = stroke.isRainbow,
-                    brushType = stroke.brushType
+                    brushType = stroke.brushType,
+                    layerId = stroke.layerId
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.LINE,
@@ -128,7 +129,7 @@ object ShapeRecognizer {
         // ------------------------------------------------------------------
         // 2. CLOSED SHAPE CHECK (open curves / crescents stop right here)
         // ------------------------------------------------------------------
-        val closeLimit = max(max(36f, stroke.width * 2.2f), min(diag * 0.28f, rawLength * 0.22f))
+        val closeLimit = max(max(44f, stroke.width * 2.5f), min(diag * 0.36f, rawLength * 0.28f))
         if (directDist > closeLimit || min(width, height) < 20f || diag < 36f) {
             return null
         }
@@ -219,7 +220,8 @@ object ShapeRecognizer {
                     vertices = corners,
                     opacity = stroke.opacity,
                     isRainbow = stroke.isRainbow,
-                    brushType = stroke.brushType
+                    brushType = stroke.brushType,
+                    layerId = stroke.layerId
                 )
                 return RecognizedShapeResult(
                     shapeType = ShapeType.TRIANGLE,
@@ -230,14 +232,23 @@ object ShapeRecognizer {
             }
         }
 
+        val quadRectMetrics = if (corners.size == 4) evaluateApproxRectangleQuad(corners, diag) else null
+        val bestRectErr = if (quadRectMetrics != null) {
+            min(meanRectErr, meanCornerPolyErr)
+        } else {
+            meanRectErr
+        }
+
         // B. CIRCLE / ELLIPSE (low radial variance, smooth boundary, beats rectangle & diamond)
         val aspectRatio = width / height.coerceAtLeast(1f)
+        val looksSharpQuad = corners.size == 4 && quadRectMetrics != null && bestRectErr <= 0.080f && circularity < 0.85f
         if (
-            radialCV <= 0.165f &&
-            meanEllipseErr <= 0.080f &&
-            meanEllipseErr < meanRectErr * 0.88f &&
+            !looksSharpQuad &&
+            radialCV <= 0.148f &&
+            meanEllipseErr <= 0.078f &&
+            meanEllipseErr < bestRectErr * 0.86f &&
             meanEllipseErr < meanDiamondErr * 0.88f &&
-            (aspectRatio !in 0.72f..1.38f || circularity >= 0.72f)
+            (aspectRatio !in 0.72f..1.38f || circularity >= 0.75f)
         ) {
             // If nearly square aspect ratio, snap cleanly to a true circle centered at (cx, cy)
             val isNearCircle = aspectRatio in 0.82f..1.22f
@@ -258,7 +269,8 @@ object ShapeRecognizer {
                 strokeStyle = stroke.strokeStyle,
                 opacity = stroke.opacity,
                 isRainbow = stroke.isRainbow,
-                brushType = stroke.brushType
+                brushType = stroke.brushType,
+                layerId = stroke.layerId
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.CIRCLE,
@@ -270,7 +282,7 @@ object ShapeRecognizer {
 
         // C. DIAMOND / RHOMBUS (4 midpoint corners, fillRatio around 0.50)
         if (
-            fillRatio in 0.36f..0.66f &&
+            fillRatio in 0.36f..0.64f &&
             meanDiamondErr <= 0.080f &&
             meanDiamondErr < meanRectErr * 0.82f &&
             meanDiamondErr < meanEllipseErr * 0.88f
@@ -288,7 +300,8 @@ object ShapeRecognizer {
                 vertices = diamondVerts,
                 opacity = stroke.opacity,
                 isRainbow = stroke.isRainbow,
-                brushType = stroke.brushType
+                brushType = stroke.brushType,
+                layerId = stroke.layerId
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.DIAMOND,
@@ -298,20 +311,26 @@ object ShapeRecognizer {
             )
         }
 
-        // D. RECTANGLE / SQUARE (high fillRatio, low bounding-rect boundary error, ~4 corners)
-        if (
-            fillRatio >= 0.72f &&
-            meanRectErr <= 0.085f &&
-            meanRectErr < meanEllipseErr &&
-            (corners.size in 4..5 || corners.size == 3 && fillRatio >= 0.78f)
-        ) {
-            val isNearSquare = aspectRatio in 0.86f..1.16f
-            val finalW = if (isNearSquare) (width + height) / 2f else width
-            val finalH = if (isNearSquare) finalW else height
+        // D. RECTANGLE / SQUARE (axis-aligned OR 4-corner hand-drawn square/rectangle)
+        val isAxisRect = fillRatio >= 0.63f &&
+            meanRectErr <= 0.105f &&
+            (meanRectErr <= meanEllipseErr * 1.05f || corners.size in 4..6) &&
+            (corners.size in 4..6 || (corners.size == 3 && fillRatio >= 0.74f))
+        val isCornerRect = quadRectMetrics != null &&
+            fillRatio >= 0.56f &&
+            meanCornerPolyErr <= 0.085f
+
+        if (isAxisRect || isCornerRect) {
+            val rawW = quadRectMetrics?.first ?: width
+            val rawH = quadRectMetrics?.second ?: height
+            val rawAspect = rawW / rawH.coerceAtLeast(1f)
+            val isNearSquare = rawAspect in 0.80f..1.25f
+            val finalW = if (isNearSquare) (rawW + rawH) / 2f else rawW
+            val finalH = if (isNearSquare) finalW else rawH
             val finalX = cx - finalW / 2f
             val finalY = cy - finalH / 2f
 
-            val confidence = (1f - meanRectErr * 3f).coerceIn(0.82f, 0.98f)
+            val confidence = (1f - bestRectErr * 2.5f).coerceIn(0.83f, 0.98f)
             val rectShape = ShapeItem(
                 shapeType = ShapeType.RECTANGLE,
                 x = finalX,
@@ -323,7 +342,8 @@ object ShapeRecognizer {
                 strokeStyle = stroke.strokeStyle,
                 opacity = stroke.opacity,
                 isRainbow = stroke.isRainbow,
-                brushType = stroke.brushType
+                brushType = stroke.brushType,
+                layerId = stroke.layerId
             )
             return RecognizedShapeResult(
                 shapeType = ShapeType.RECTANGLE,
@@ -563,5 +583,44 @@ object ShapeRecognizer {
             if (interiorDeg < 18f || interiorDeg > 148f) return false
         }
         return true
+    }
+
+    /**
+     * Checks whether 4 corners form an approximate rectangle (including slightly tilted squares)
+     * and returns average (width, height) oriented along the quad's horizontal/vertical pairs.
+     */
+    private fun evaluateApproxRectangleQuad(corners: List<StrokePoint>, diag: Float): Pair<Float, Float>? {
+        if (corners.size != 4) return null
+        val edges = FloatArray(4)
+        for (i in 0 until 4) {
+            val a = corners[i]
+            val b = corners[(i + 1) % 4]
+            val len = hypot(b.x - a.x, b.y - a.y)
+            if (len < diag * 0.14f) return null
+            edges[i] = len
+        }
+        // Reject diamonds whose edges sit diagonally around 45 deg and opposite corners match mid-bounds?
+        // First check interior angles are roughly 90 deg (+/- 26 deg)
+        for (i in 0 until 4) {
+            val a = corners[i]
+            val b = corners[(i + 1) % 4]
+            val c = corners[(i + 2) % 4]
+            val ab = hypot(b.x - a.x, b.y - a.y)
+            val bc = hypot(c.x - b.x, c.y - b.y)
+            val dot = (((a.x - b.x) * (c.x - b.x) + (a.y - b.y) * (c.y - b.y)) / (ab * bc)).coerceIn(-1f, 1f)
+            val deg = (acos(dot) * 180.0 / PI).toFloat()
+            if (abs(deg - 90f) > 26f) return null
+        }
+        // Opposite edges should be reasonably balanced
+        val ratio02 = min(edges[0], edges[2]) / max(edges[0], edges[2]).coerceAtLeast(1f)
+        val ratio13 = min(edges[1], edges[3]) / max(edges[1], edges[3]).coerceAtLeast(1f)
+        if (ratio02 < 0.65f || ratio13 < 0.65f) return null
+
+        val avg02 = (edges[0] + edges[2]) * 0.5f
+        val avg13 = (edges[1] + edges[3]) * 0.5f
+        // Map pair 0-2 vs 1-3 to horizontal vs vertical by average |dx| > |dy|
+        val dx0 = abs(corners[1].x - corners[0].x)
+        val dy0 = abs(corners[1].y - corners[0].y)
+        return if (dx0 >= dy0) avg02 to avg13 else avg13 to avg02
     }
 }

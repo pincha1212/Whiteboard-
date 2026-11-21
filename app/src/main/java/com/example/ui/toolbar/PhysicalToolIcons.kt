@@ -83,6 +83,7 @@ fun PhysicalFountainPenIcon(
 
 @Composable
 fun PhysicalPencilIcon(
+    graphiteColor: Color = Color(0xFF1E293B),
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
@@ -99,25 +100,32 @@ fun PhysicalPencilIcon(
         }
         drawPath(cone, color = Color(0xFFFDE68A))
 
-        // Graphite lead tip
+        // Colored graphite/lead tip
         val tip = Path().apply {
             moveTo(cx, h * 0.12f)
             lineTo(cx + w * 0.095f, h * 0.26f)
             lineTo(cx - w * 0.095f, h * 0.26f)
             close()
         }
-        drawPath(tip, color = Color(0xFF1E293B))
+        drawPath(tip, color = graphiteColor)
+
+        // Color collar band near top of wooden barrel
+        drawRect(
+            color = graphiteColor,
+            topLeft = Offset(cx - w * 0.23f, h * 0.46f),
+            size = Size(w * 0.46f, h * 0.10f)
+        )
 
         // Hexagonal yellow wooden body anchored to bottom
         drawRect(
             color = Color(0xFFF59E0B),
-            topLeft = Offset(cx - w * 0.23f, h * 0.46f),
-            size = Size(w * 0.46f, h * 0.60f)
+            topLeft = Offset(cx - w * 0.23f, h * 0.56f),
+            size = Size(w * 0.46f, h * 0.50f)
         )
         drawRect(
             color = Color(0xFFFDE047),
-            topLeft = Offset(cx - w * 0.09f, h * 0.46f),
-            size = Size(w * 0.18f, h * 0.60f)
+            topLeft = Offset(cx - w * 0.09f, h * 0.56f),
+            size = Size(w * 0.18f, h * 0.50f)
         )
 
         val outline = Path().apply {
@@ -734,4 +742,60 @@ fun PhysicalAirbrushIcon(
         )
     }
 }
+
+@Composable
+fun PhysicalEyedropperIcon(
+    sampledColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // Glass pipette tip pointing down-to-up inverted upright tool
+        val tip = Path().apply {
+            moveTo(cx, h * 0.10f)
+            lineTo(cx + w * 0.11f, h * 0.30f)
+            lineTo(cx - w * 0.11f, h * 0.30f)
+            close()
+        }
+        drawPath(tip, color = sampledColor)
+        drawPath(tip, color = Color(0xFF334155), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
+
+        // Clear glass tube with sampled liquid inside
+        drawRoundRect(
+            color = Color(0xFFF1F5F9),
+            topLeft = Offset(cx - w * 0.16f, h * 0.30f),
+            size = Size(w * 0.32f, h * 0.40f),
+            cornerRadius = CornerRadius(w * 0.05f)
+        )
+        drawRect(
+            color = sampledColor.copy(alpha = 0.88f),
+            topLeft = Offset(cx - w * 0.14f, h * 0.32f),
+            size = Size(w * 0.28f, h * 0.22f)
+        )
+        drawRoundRect(
+            color = Color(0xFF475569),
+            topLeft = Offset(cx - w * 0.16f, h * 0.30f),
+            size = Size(w * 0.32f, h * 0.40f),
+            cornerRadius = CornerRadius(w * 0.05f),
+            style = Stroke(width = w * 0.04f)
+        )
+
+        // Rubber squeeze bulb collar & body anchored at bottom
+        drawRoundRect(
+            color = Color(0xFF334155),
+            topLeft = Offset(cx - w * 0.26f, h * 0.68f),
+            size = Size(w * 0.52f, h * 0.38f),
+            cornerRadius = CornerRadius(w * 0.12f)
+        )
+        drawRect(
+            color = Color(0xFFCBD5E1),
+            topLeft = Offset(cx - w * 0.27f, h * 0.65f),
+            size = Size(w * 0.54f, h * 0.07f)
+        )
+    }
+}
+
 

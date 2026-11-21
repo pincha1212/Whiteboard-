@@ -7,6 +7,8 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.util.LruCache
+import com.example.model.DEFAULT_LAYER_ID
+import com.example.model.DrawingLayer
 import com.example.model.ShapeItem
 import com.example.model.WhiteboardStroke
 import kotlin.math.floor
@@ -33,7 +35,8 @@ class PaintTileRasterCache {
         val ty: Int,
         val signature: Long,
         val strokes: List<WhiteboardStroke>,
-        val shapes: List<ShapeItem>
+        val shapes: List<ShapeItem>,
+        val layers: List<DrawingLayer> = listOf(DrawingLayer())
     )
 
     class SpatialIndex(
@@ -101,11 +104,16 @@ class PaintTileRasterCache {
         selectedShapeId: String?,
         selectedShapeIds: Set<String>,
         isDarkBoard: Boolean,
-        handDrawnFactor: Float
+        handDrawnFactor: Float,
+        layers: List<DrawingLayer> = listOf(DrawingLayer())
     ): SpatialIndex {
         if (strokes.isEmpty() && shapes.isEmpty()) {
             return SpatialIndex(boardId, emptyMap())
         }
+
+        val resolvedLayers = layers.ifEmpty { listOf(DrawingLayer()) }
+        val layerById = resolvedLayers.associateBy { it.id }
+        val fallbackLayer = resolvedLayers.first()
 
         val strokeBuckets = HashMap<Long, MutableList<WhiteboardStroke>>()
         val shapeBuckets = HashMap<Long, MutableList<ShapeItem>>()
@@ -113,6 +121,8 @@ class PaintTileRasterCache {
 
         for (stroke in strokes) {
             if (stroke.id == selectedStrokeId || selectedStrokeIds.contains(stroke.id)) continue
+            val targetLayer = layerById[stroke.layerId] ?: fallbackLayer
+            if (!targetLayer.isVisible) continue
             val metrics = stroke.geometryMetrics
             if (!metrics.hasPoints) continue
             val pad = stroke.width * 2.2f + 16f
@@ -132,6 +142,8 @@ class PaintTileRasterCache {
         for (shape in shapes) {
             if (shape.isHiddenByCollapse) continue
             if (shape.id == selectedShapeId || selectedShapeIds.contains(shape.id)) continue
+            val targetLayer = layerById[shape.layerId] ?: fallbackLayer
+            if (!targetLayer.isVisible) continue
 
             val cx = shape.x + shape.width * 0.5f
             val cy = shape.y + shape.height * 0.5f
@@ -167,10 +179,16 @@ class PaintTileRasterCache {
         }
 
         val buckets = HashMap<Long, TileBucket>(activeKeys.size)
-        val baseSig = mixHash(
+        var baseSig = mixHash(
             mixHash(boardId.hashCode().toLong(), if (isDarkBoard) 1L else 0L),
             handDrawnFactor.toBits().toLong()
         )
+        baseSig = mixHash(baseSig, resolvedLayers.size.toLong())
+        for (layer in resolvedLayers) {
+            baseSig = mixHash(baseSig, layer.id.hashCode().toLong())
+            baseSig = mixHash(baseSig, if (layer.isVisible) 1L else 0L)
+            baseSig = mixHash(baseSig, layer.opacity.toBits().toLong())
+        }
 
         for (key in activeKeys) {
             val tx = unpackTx(key)
@@ -218,18 +236,19 @@ class PaintTileRasterCache {
                 )
             }
 
-            buckets[key] = TileBucket(
-                boardId = boardId,
-                tx = tx,
-                ty = ty,
-                signature = sig,
-                strokes = tileStrokes,
-                shapes = tileShapes
-            )
-        }
+                buckets[key] = TileBucket(
+                    boardId = boardId,
+                    tx = tx,
+                    ty = ty,
+                    signature = sig,
+                    strokes = tileStrokes,
+                    shapes = tileShapes,
+                    layers = resolvedLayers
+                )
+            }
 
-        return SpatialIndex(boardId, buckets)
-    }
+            return SpatialIndex(boardId, buckets)
+        }
 
     fun renderVisibleTiles(
         canvas: Canvas,
@@ -329,39 +348,71 @@ class PaintTileRasterCache {
         val tilePanX = -(bucket.tx * TILE_WORLD_SIZE)
         val tilePanY = -(bucket.ty * TILE_WORLD_SIZE)
 
-        for (stroke in bucket.strokes) {
-            UnifiedBrushPipeline.renderStroke(
-                canvas = reusableCanvas,
-                stroke = stroke,
-                panX = tilePanX,
-                panY = tilePanY,
-                scale = 1.0f,
-                animPhase = 0f,
-                isSelected = false,
-                isDarkBoard = isDarkBoard,
-                isOpaqueCanvasBackground = false,
-                handDrawnFactor = handDrawnFactor,
-                viewportW = 0f,
-                viewportH = 0f,
-                preserveInputPoints = false
-            )
-        }
+        val resolvedLayers = bucket.layers.ifEmpty { listOf(DrawingLayer()) }
+        val knownLayerIds = resolvedLayers.map { it.id }.toSet()
+        val firstLayerId = resolvedLayers.first().id
 
-        for (shape in bucket.shapes) {
-            UnifiedBrushPipeline.renderShape(
-                canvas = reusableCanvas,
-                shape = shape,
-                panX = tilePanX,
-                panY = tilePanY,
-                scale = 1.0f,
-                animPhase = 0f,
-                isDarkBoard = isDarkBoard,
-                isOpaqueCanvasBackground = false,
-                handDrawnFactor = handDrawnFactor,
-                drawLabel = true,
-                viewportW = 0f,
-                viewportH = 0f
-            )
+        for (layer in resolvedLayers) {
+            if (!layer.isVisible) continue
+            val layerStrokes = bucket.strokes.filter { s ->
+                val resolvedId = if (knownLayerIds.contains(s.layerId)) s.layerId else firstLayerId
+                resolvedId == layer.id
+            }
+            val layerShapes = bucket.shapes.filter { sh ->
+                val resolvedId = if (knownLayerIds.contains(sh.layerId)) sh.layerId else firstLayerId
+                resolvedId == layer.id
+            }
+            if (layerStrokes.isEmpty() && layerShapes.isEmpty()) continue
+
+            val layerOpacityAlpha = (layer.opacity.coerceIn(0f, 1f) * 255f).roundToInt().coerceIn(0, 255)
+            if (layerOpacityAlpha == 0) continue
+
+            val needsSaveLayer = layerOpacityAlpha < 253
+            val saveCount = if (needsSaveLayer) {
+                reusableCanvas.saveLayerAlpha(0f, 0f, TILE_WORLD_SIZE, TILE_WORLD_SIZE, layerOpacityAlpha)
+            } else {
+                -1
+            }
+            try {
+                for (stroke in layerStrokes) {
+                    UnifiedBrushPipeline.renderStroke(
+                        canvas = reusableCanvas,
+                        stroke = stroke,
+                        panX = tilePanX,
+                        panY = tilePanY,
+                        scale = 1.0f,
+                        animPhase = 0f,
+                        isSelected = false,
+                        isDarkBoard = isDarkBoard,
+                        isOpaqueCanvasBackground = false,
+                        handDrawnFactor = handDrawnFactor,
+                        viewportW = 0f,
+                        viewportH = 0f,
+                        preserveInputPoints = false
+                    )
+                }
+
+                for (shape in layerShapes) {
+                    UnifiedBrushPipeline.renderShape(
+                        canvas = reusableCanvas,
+                        shape = shape,
+                        panX = tilePanX,
+                        panY = tilePanY,
+                        scale = 1.0f,
+                        animPhase = 0f,
+                        isDarkBoard = isDarkBoard,
+                        isOpaqueCanvasBackground = false,
+                        handDrawnFactor = handDrawnFactor,
+                        drawLabel = true,
+                        viewportW = 0f,
+                        viewportH = 0f
+                    )
+                }
+            } finally {
+                if (needsSaveLayer && saveCount != -1) {
+                    reusableCanvas.restoreToCount(saveCount)
+                }
+            }
         }
 
         return bitmap

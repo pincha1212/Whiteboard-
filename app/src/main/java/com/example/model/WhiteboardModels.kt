@@ -5,12 +5,16 @@ import java.util.UUID
 
 enum class ToolType {
     HAND,
+    PENCIL,
     PEN,
     FINE_MARKER,
+    PAINT_BRUSH,
+    AIRBRUSH,
     HIGHLIGHTER,
     LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
+    EYEDROPPER,
     SELECT_LASSO,
     STICKY_NOTE,
     TEXT,
@@ -22,10 +26,31 @@ enum class StrokeBrushType(
     val stabilization: Float,
     val defaultOpacity: Float
 ) {
-    FOUNTAIN_PEN("Pluma / Estilógrafo", 0.35f, 1.0f),
-    FINE_MARKER("Marcador fino", 0.68f, 1.0f),
+    PENCIL("Lápiz grafito", 0.30f, 0.92f),
+    FOUNTAIN_PEN("Pluma técnica", 0.35f, 1.0f),
+    FINE_MARKER("Rotulador Copic", 0.68f, 1.0f),
+    PAINT_BRUSH("Pincel pintura", 0.42f, 0.88f),
+    AIRBRUSH("Aerógrafo", 0.45f, 0.55f),
     HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
 }
+
+enum class SymmetryMode(val displayName: String) {
+    NONE("Sin simetría"),
+    VERTICAL("Simetría vertical"),
+    HORIZONTAL("Simetría horizontal"),
+    QUAD("Simetría radial (4 ejes)")
+}
+
+const val DEFAULT_LAYER_ID = "layer_1"
+
+@Immutable
+data class DrawingLayer(
+    val id: String = DEFAULT_LAYER_ID,
+    val name: String = "Capa 1",
+    val isVisible: Boolean = true,
+    val opacity: Float = 1.0f,
+    val isLocked: Boolean = false
+)
 
 @Immutable
 data class BrushSlot(
@@ -33,12 +58,16 @@ data class BrushSlot(
     val brushType: StrokeBrushType,
     val colorHex: String,
     val strokeWidth: Float,
+    val opacity: Float = brushType.defaultOpacity,
     val isRainbow: Boolean = false
 ) {
     val toolType: ToolType
         get() = when (brushType) {
+            StrokeBrushType.PENCIL -> ToolType.PENCIL
             StrokeBrushType.FOUNTAIN_PEN -> ToolType.PEN
             StrokeBrushType.FINE_MARKER -> ToolType.FINE_MARKER
+            StrokeBrushType.PAINT_BRUSH -> ToolType.PAINT_BRUSH
+            StrokeBrushType.AIRBRUSH -> ToolType.AIRBRUSH
             StrokeBrushType.HIGHLIGHTER -> ToolType.HIGHLIGHTER
         }
 }
@@ -138,7 +167,8 @@ data class WhiteboardStroke(
     val capStyle: LineCapStyle = LineCapStyle.NONE,
     val zIndex: Int = 0,
     val brushType: StrokeBrushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN,
-    val opacity: Float = if (isHighlighter) StrokeBrushType.HIGHLIGHTER.defaultOpacity else 1.0f
+    val opacity: Float = if (isHighlighter) StrokeBrushType.HIGHLIGHTER.defaultOpacity else 1.0f,
+    val layerId: String = DEFAULT_LAYER_ID
 ) {
     /**
      * Lazily computed once per immutable stroke instance. New geometry must be created with copy(),
@@ -228,7 +258,8 @@ data class ShapeItem(
     val groupId: String? = null,
     val parentId: String? = null,
     val isCollapsed: Boolean = false,
-    val isHiddenByCollapse: Boolean = false
+    val isHiddenByCollapse: Boolean = false,
+    val layerId: String = DEFAULT_LAYER_ID
 ) {
     /** Relative vertex coordinates are unchanged by pan/move and are reused in render cache keys. */
     internal val relativeVerticesHash: Int by lazy {
@@ -303,7 +334,9 @@ data class WhiteboardBoard(
     val textItems: List<TextItem> = emptyList(),
     val stickers: List<StickerItem> = emptyList(),
     val auditLogs: List<AuditLogEntry> = emptyList(),
-    val snapshots: List<BoardVersionSnapshot> = emptyList()
+    val snapshots: List<BoardVersionSnapshot> = emptyList(),
+    val layers: List<DrawingLayer> = listOf(DrawingLayer()),
+    val activeLayerId: String = DEFAULT_LAYER_ID
 )
 
 data class ShapeRecognitionProposal(

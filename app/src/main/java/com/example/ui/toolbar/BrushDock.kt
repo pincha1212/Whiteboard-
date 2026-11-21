@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -66,7 +68,7 @@ import kotlin.math.roundToInt
 /**
  * Dock de pinceles conectado al [WhiteboardViewModel] que observa directamente
  * la lista de 3 [BrushSlot] configurables, mostrando solo el color del pincel
- * y desplegando el menú vertical de iconos al mantener presionado.
+ * y desplegando el menú vertical iconográfico Sketchbook al mantener presionado.
  */
 @Composable
 fun BrushDock(
@@ -77,8 +79,11 @@ fun BrushDock(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val hasPendingPlacement = uiState.pendingStickyNoteColor != null
     val isBrushToolActive = !hasPendingPlacement && (
-        uiState.currentTool == ToolType.PEN ||
+        uiState.currentTool == ToolType.PENCIL ||
+            uiState.currentTool == ToolType.PEN ||
             uiState.currentTool == ToolType.FINE_MARKER ||
+            uiState.currentTool == ToolType.PAINT_BRUSH ||
+            uiState.currentTool == ToolType.AIRBRUSH ||
             uiState.currentTool == ToolType.HIGHLIGHTER
         )
 
@@ -97,6 +102,10 @@ fun BrushDock(
                 isRainbow = isRainbow
             )
         },
+        onUpdateSlotOpacity = { index, opacity ->
+            viewModel.updateBrushSlot(slotIndex = index, opacity = opacity)
+        },
+        onOpenColorStudio = { viewModel.openColorStudio() },
         onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
         isVertical = isVertical,
         modifier = modifier
@@ -106,7 +115,7 @@ fun BrushDock(
 /**
  * Componente visual que renderiza los tres [BrushSlot] en el dock mostrando únicamente
  * la representación coloreada de cada pincel y abriendo al mantener presionado el menú
- * vertical iconográfico de tipo, color y grosor.
+ * vertical iconográfico de tipo, color, grosor y opacidad.
  */
 @Composable
 fun BrushDock(
@@ -116,6 +125,8 @@ fun BrushDock(
     autoShapeRecognition: Boolean,
     onSelectBrushSlot: (Int) -> Unit,
     onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onUpdateSlotOpacity: (Int, Float) -> Unit = { _, _ -> },
+    onOpenColorStudio: () -> Unit = {},
     onToggleAutoShape: () -> Unit,
     isVertical: Boolean = false,
     modifier: Modifier = Modifier
@@ -131,11 +142,7 @@ fun BrushDock(
                 parseDockColorSafe(slot.colorHex, fallbackInk)
             }
             val iconTintColor = if (slot.isRainbow) Color(0xFFEC4899) else slotColor
-            val slotLabel = when (slot.brushType) {
-                StrokeBrushType.FOUNTAIN_PEN -> "Lápiz"
-                StrokeBrushType.FINE_MARKER -> "Marcador"
-                StrokeBrushType.HIGHLIGHTER -> "Resaltador"
-            }
+            val slotLabel = slot.brushType.displayName
 
             Box {
                 BrushSlotButton(
@@ -149,20 +156,11 @@ fun BrushDock(
                     },
                     testTag = "dock_brush_slot_$index"
                 ) {
-                    when (slot.brushType) {
-                        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
-                            inkColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
-                            markerColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
-                            highlighterColor = iconTintColor,
-                            modifier = Modifier.size(width = 26.dp, height = 38.dp)
-                        )
-                    }
+                    RenderBrushSlotPhysicalIcon(
+                        brushType = slot.brushType,
+                        tintColor = iconTintColor,
+                        modifier = Modifier.size(width = 26.dp, height = 38.dp)
+                    )
                 }
 
                 BrushSlotDropdownMenu(
@@ -179,6 +177,13 @@ fun BrushDock(
                     },
                     onUpdateWidth = { width ->
                         onUpdateBrushSlot(index, null, null, width, null)
+                    },
+                    onUpdateOpacity = { opacity ->
+                        onUpdateSlotOpacity(index, opacity)
+                    },
+                    onOpenColorStudio = {
+                        expandedSlotIndex = null
+                        onOpenColorStudio()
                     },
                     onToggleAutoShape = onToggleAutoShape
                 )
@@ -202,6 +207,40 @@ fun BrushDock(
         ) {
             slotItems()
         }
+    }
+}
+
+@Composable
+private fun RenderBrushSlotPhysicalIcon(
+    brushType: StrokeBrushType,
+    tintColor: Color,
+    modifier: Modifier = Modifier
+) {
+    when (brushType) {
+        StrokeBrushType.PENCIL -> PhysicalPencilIcon(
+            graphiteColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
+            inkColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
+            markerColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.PAINT_BRUSH -> PhysicalBrushIcon(
+            paintColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.AIRBRUSH -> PhysicalAirbrushIcon(
+            sprayColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
+            highlighterColor = tintColor,
+            modifier = modifier
+        )
     }
 }
 
@@ -288,6 +327,8 @@ internal fun BrushSlotDropdownMenu(
     onChangeBrushType: (StrokeBrushType) -> Unit,
     onUpdateColor: (String, isRainbow: Boolean) -> Unit,
     onUpdateWidth: (Float) -> Unit,
+    onUpdateOpacity: (Float) -> Unit,
+    onOpenColorStudio: () -> Unit,
     onToggleAutoShape: () -> Unit
 ) {
     val activeInkTint = if (slot.isRainbow) Color(0xFFEC4899) else parsedColor
@@ -302,8 +343,8 @@ internal fun BrushSlotDropdownMenu(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier
-            .width(176.dp)
-            .heightIn(max = 460.dp)
+            .width(184.dp)
+            .heightIn(max = 520.dp)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
             .testTag("dock_brush_slot_dropdown")
     ) {
@@ -336,16 +377,20 @@ internal fun BrushSlotDropdownMenu(
                         quadraticTo(w * 0.86f, h * 0.22f, w, h * 0.52f)
                     }
                     val isHighlighter = slot.brushType == StrokeBrushType.HIGHLIGHTER
-                    val alpha = if (isHighlighter) 0.45f else 1f
+                    val alpha = (if (isHighlighter) minOf(slot.opacity, 0.45f) else slot.opacity).coerceIn(0.08f, 1f)
                     val previewWidth = when (slot.brushType) {
                         StrokeBrushType.HIGHLIGHTER -> (slot.strokeWidth * 1.4f).coerceIn(10f, 24f)
-                        StrokeBrushType.FINE_MARKER -> (slot.strokeWidth * 0.7f).coerceIn(2f, 10f)
-                        StrokeBrushType.FOUNTAIN_PEN -> slot.strokeWidth.coerceIn(2f, 22f)
+                        StrokeBrushType.FINE_MARKER -> (slot.strokeWidth * 0.85f).coerceIn(3f, 16f)
+                        StrokeBrushType.PAINT_BRUSH -> (slot.strokeWidth * 1.25f).coerceIn(6f, 24f)
+                        StrokeBrushType.AIRBRUSH -> (slot.strokeWidth * 1.6f).coerceIn(8f, 26f)
+                        StrokeBrushType.PENCIL -> (slot.strokeWidth * 0.75f).coerceIn(2f, 12f)
+                        StrokeBrushType.FOUNTAIN_PEN -> slot.strokeWidth.coerceIn(2f, 20f)
                     }
                     if (slot.isRainbow && !isHighlighter) {
                         drawPath(
                             path = path,
                             brush = Brush.horizontalGradient(DockRainbowColors),
+                            alpha = alpha,
                             style = Stroke(width = previewWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
                         )
                     } else {
@@ -358,53 +403,50 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 2. Icon-Only Brush Type Selector (Lápiz / Marcador / Resaltador)
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // 2. Icon-Only 2x3 Brush Type Grid (6 Sketchbook brushes, zero words)
+            val brushGridRows = listOf(
+                listOf(StrokeBrushType.PENCIL, StrokeBrushType.FOUNTAIN_PEN, StrokeBrushType.FINE_MARKER),
+                listOf(StrokeBrushType.PAINT_BRUSH, StrokeBrushType.AIRBRUSH, StrokeBrushType.HIGHLIGHTER)
+            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val brushTypes = listOf(
-                    StrokeBrushType.FOUNTAIN_PEN to "Lápiz",
-                    StrokeBrushType.FINE_MARKER to "Marcador",
-                    StrokeBrushType.HIGHLIGHTER to "Resaltador"
-                )
-                brushTypes.forEach { (type, accessibilityLabel) ->
-                    val isTypeSelected = slot.brushType == type
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                if (isTypeSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                            )
-                            .border(
-                                width = if (isTypeSelected) 1.5.dp else 1.dp,
-                                color = if (isTypeSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                                shape = RoundedCornerShape(12.dp)
-                            )
-                            .clickable(role = Role.Button) { onChangeBrushType(type) }
-                            .semantics {
-                                contentDescription = accessibilityLabel
-                                selected = isTypeSelected
-                            }
-                            .testTag("slot_type_${type.name}")
+                brushGridRows.forEach { rowTypes ->
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        when (type) {
-                            StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
-                                inkColor = activeInkTint,
-                                modifier = Modifier.size(width = 22.dp, height = 34.dp)
-                            )
-                            StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
-                                markerColor = activeInkTint,
-                                modifier = Modifier.size(width = 22.dp, height = 34.dp)
-                            )
-                            StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
-                                highlighterColor = activeInkTint,
-                                modifier = Modifier.size(width = 22.dp, height = 34.dp)
-                            )
+                        rowTypes.forEach { type ->
+                            val isTypeSelected = slot.brushType == type
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isTypeSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+                                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                    )
+                                    .border(
+                                        width = if (isTypeSelected) 1.5.dp else 1.dp,
+                                        color = if (isTypeSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable(role = Role.Button) { onChangeBrushType(type) }
+                                    .semantics {
+                                        contentDescription = type.displayName
+                                        selected = isTypeSelected
+                                    }
+                                    .testTag("slot_type_${type.name}")
+                            ) {
+                                RenderBrushSlotPhysicalIcon(
+                                    brushType = type,
+                                    tintColor = activeInkTint,
+                                    modifier = Modifier.size(width = 20.dp, height = 32.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -412,9 +454,9 @@ internal fun BrushSlotDropdownMenu(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
 
-            // 3. 3x3 Color Swatch Matrix (8 solid colors + Rainbow, zero words)
+            // 3. 3x3 Color Swatch Matrix + Color Studio Wheel Launcher (zero words)
             Column(
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 val colorGridRows = listOf(
@@ -434,7 +476,7 @@ internal fun BrushSlotDropdownMenu(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp)
+                                    .height(36.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(
                                         if (isColorSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
@@ -450,7 +492,7 @@ internal fun BrushSlotDropdownMenu(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(26.dp)
+                                        .size(24.dp)
                                         .clip(CircleShape)
                                         .background(swatchColor)
                                         .border(
@@ -471,13 +513,12 @@ internal fun BrushSlotDropdownMenu(
                             }
                         }
 
-                        // Last cell of 3rd row: Rainbow swatch
                         if (rowIdx == 2) {
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(38.dp)
+                                    .height(36.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(
                                         if (slot.isRainbow) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
@@ -493,7 +534,7 @@ internal fun BrushSlotDropdownMenu(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(26.dp)
+                                        .size(24.dp)
                                         .clip(CircleShape)
                                         .background(Brush.sweepGradient(DockRainbowColors))
                                         .border(
@@ -515,6 +556,26 @@ internal fun BrushSlotDropdownMenu(
                         }
                     }
                 }
+
+                // Icon-only Color Studio Wheel Trigger
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .clickable(role = Role.Button, onClick = onOpenColorStudio)
+                        .semantics { contentDescription = "Abrir rueda de color HSB" }
+                        .testTag("dock_open_color_studio")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Palette,
+                        contentDescription = null,
+                        tint = activeInkTint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
@@ -532,7 +593,7 @@ internal fun BrushSlotDropdownMenu(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .weight(1f)
-                            .height(40.dp)
+                            .height(38.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(
                                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
@@ -564,12 +625,12 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 5. Custom Tapered Thickness Scrubber Bar (bespoke icon-free continuous control)
+            // 5. Custom Tapered Thickness Scrubber Bar
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp)
+                    .height(34.dp)
                     .padding(horizontal = 8.dp)
                     .pointerInput(slot.id, onUpdateWidth) {
                         detectTapGestures { offset ->
@@ -592,15 +653,14 @@ internal fun BrushSlotDropdownMenu(
                 Canvas(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(24.dp)
+                        .height(22.dp)
                 ) {
                     val w = size.width
                     val cy = size.height / 2f
                     val frac = ((slot.strokeWidth.coerceIn(2f, 24f) - 2f) / 22f).coerceIn(0f, 1f)
                     val leftR = 1.8.dp.toPx()
-                    val rightR = 6.5.dp.toPx()
+                    val rightR = 6.2.dp.toPx()
 
-                    // Tapered track wedge (thin left -> thick right)
                     val trackPath = Path().apply {
                         moveTo(0f, cy - leftR)
                         lineTo(w, cy - rightR)
@@ -625,29 +685,89 @@ internal fun BrushSlotDropdownMenu(
                         drawPath(activePath, color = activeInkTint.copy(alpha = 0.85f))
                     }
 
-                    // Crisp thumb indicator
                     drawCircle(
                         color = surfaceColor,
-                        radius = 8.dp.toPx(),
+                        radius = 7.5.dp.toPx(),
                         center = Offset(thumbX, cy)
                     )
                     drawCircle(
                         color = primaryColor,
-                        radius = 6.dp.toPx(),
+                        radius = 5.5.dp.toPx(),
                         center = Offset(thumbX, cy)
                     )
                 }
             }
 
+            // 6. Icon-Only Opacity Scrubber Bar
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Opacity,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(15.dp)
+                )
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(30.dp)
+                        .pointerInput(slot.id, onUpdateOpacity) {
+                            detectTapGestures { offset ->
+                                val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                onUpdateOpacity(0.05f + frac * 0.95f)
+                            }
+                        }
+                        .pointerInput(slot.id, onUpdateOpacity) {
+                            detectHorizontalDragGestures { change, _ ->
+                                change.consume()
+                                val frac = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                onUpdateOpacity(0.05f + frac * 0.95f)
+                            }
+                        }
+                        .semantics {
+                            contentDescription = "Opacidad ${(slot.opacity * 100f).roundToInt()} por ciento"
+                        }
+                        .testTag("dock_pen_opacity_slider")
+                ) {
+                    Canvas(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                    ) {
+                        val w = size.width
+                        val cy = size.height / 2f
+                        val frac = ((slot.opacity.coerceIn(0.05f, 1f) - 0.05f) / 0.95f).coerceIn(0f, 1f)
+                        drawLine(
+                            brush = Brush.horizontalGradient(
+                                listOf(activeInkTint.copy(alpha = 0.08f), activeInkTint)
+                            ),
+                            start = Offset(0f, cy),
+                            end = Offset(w, cy),
+                            strokeWidth = 6.dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                        val thumbX = w * frac
+                        drawCircle(color = surfaceColor, radius = 6.5.dp.toPx(), center = Offset(thumbX, cy))
+                        drawCircle(color = primaryColor, radius = 4.5.dp.toPx(), center = Offset(thumbX, cy))
+                    }
+                }
+            }
+
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
 
-            // 6. Icon-Only Auto-Shape Recognition Toggle
+            // 7. Icon-Only Auto-Shape Recognition Toggle
             Row(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
+                    .height(44.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(
                         if (autoShapeRecognition) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)

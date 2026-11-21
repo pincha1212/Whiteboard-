@@ -27,10 +27,12 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Flip
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.Grid4x4
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Remove
@@ -56,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.SymmetryMode
 import kotlin.math.roundToInt
 
 @Composable
@@ -65,6 +68,11 @@ fun WhiteboardTopBar(
     canUndo: Boolean,
     canRedo: Boolean,
     isSnapToGrid: Boolean,
+    symmetryMode: SymmetryMode = SymmetryMode.NONE,
+    layerCount: Int = 1,
+    isLayersPanelOpen: Boolean = false,
+    onCycleSymmetryMode: () -> Unit = {},
+    onToggleLayersPanel: () -> Unit = {},
     onUndo: () -> Unit,
     onRedo: () -> Unit,
     onZoomIn: () -> Unit,
@@ -187,11 +195,29 @@ fun WhiteboardTopBar(
                     )
                 }
 
-                // Right: Essential History (Undo/Redo) + 3-Dots Overflow Menu
+                // Right: Symmetry, Layers, Undo/Redo & Overflow Menu
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    TopBarActionIcon(
+                        icon = Icons.Default.Flip,
+                        contentDescription = symmetryMode.displayName,
+                        enabled = true,
+                        isHighlighted = symmetryMode != SymmetryMode.NONE,
+                        onClick = onCycleSymmetryMode,
+                        testTag = "btn_topbar_symmetry"
+                    )
+
+                    TopBarActionIcon(
+                        icon = Icons.Default.Layers,
+                        contentDescription = "Capas ($layerCount)",
+                        enabled = true,
+                        isHighlighted = isLayersPanelOpen,
+                        onClick = onToggleLayersPanel,
+                        testTag = "btn_topbar_layers"
+                    )
+
                     TopBarActionIcon(
                         icon = Icons.AutoMirrored.Filled.Undo,
                         contentDescription = "Deshacer",
@@ -384,6 +410,25 @@ fun WhiteboardTopBar(
                             )
 
                             DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = symmetryMode.displayName,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (symmetryMode != SymmetryMode.NONE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Flip,
+                                        contentDescription = null,
+                                        tint = if (symmetryMode != SymmetryMode.NONE) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                },
+                                onClick = { onCycleSymmetryMode() }
+                            )
+
+                            DropdownMenuItem(
                                 text = { Text("Modo Enfoque", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
                                 leadingIcon = {
                                     Icon(Icons.Default.Fullscreen, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -536,17 +581,33 @@ private fun TopBarActionIcon(
     icon: ImageVector,
     contentDescription: String,
     enabled: Boolean,
+    isHighlighted: Boolean = false,
     onClick: () -> Unit,
     testTag: String
 ) {
-    val bgColor = if (!enabled) Color.Transparent else MaterialTheme.colorScheme.surfaceVariant
-    val tintColor = if (!enabled) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.onSurface
+    val bgColor = when {
+        !enabled -> Color.Transparent
+        isHighlighted -> MaterialTheme.colorScheme.primaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val tintColor = when {
+        !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+        isHighlighted -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurface
+    }
 
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(31.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(bgColor)
+            .then(
+                if (isHighlighted && enabled) {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                } else {
+                    Modifier
+                }
+            )
             .clickable(enabled = enabled, onClick = onClick)
             .testTag(testTag),
         contentAlignment = Alignment.Center
@@ -555,7 +616,7 @@ private fun TopBarActionIcon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = tintColor,
-            modifier = Modifier.size(17.dp)
+            modifier = Modifier.size(16.dp)
         )
     }
 }
