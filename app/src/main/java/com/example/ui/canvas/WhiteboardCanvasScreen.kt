@@ -153,7 +153,7 @@ fun WhiteboardCanvasScreen(
 
 
     var pixelEraserCursorWorld by remember { mutableStateOf<StrokePoint?>(null) }
-    var activeRotationHud by remember { mutableStateOf<Pair<Offset, String>?>(null) }
+    val activeRotationHudState = remember { mutableStateOf<Pair<Offset, String>?>(null) }
 
     val localActivePoints = remember { mutableStateListOf<StrokePoint>() }
     val localLassoPoints = remember { mutableStateListOf<StrokePoint>() }
@@ -499,7 +499,7 @@ fun WhiteboardCanvasScreen(
                                                 val deg = ((kotlin.math.atan2((p1.y - p0.y).toDouble(), (p1.x - p0.x).toDouble()) * 180.0 / PI).toFloat() % 360f + 360f) % 360f
                                                 val midX = ((p0.x + p1.x) * 0.5f) * liveCamera.scale + liveCamera.panX
                                                 val midY = ((p0.y + p1.y) * 0.5f) * liveCamera.scale + liveCamera.panY - with(density) { 48.dp.toPx() }
-                                                activeRotationHud = Offset(midX, midY) to "${deg.roundToInt()}°"
+                                                activeRotationHudState.value = Offset(midX, midY) to "${deg.roundToInt()}°"
                                             }
                                         }
                                         change.consume()
@@ -516,7 +516,7 @@ fun WhiteboardCanvasScreen(
                                         if (updatedShape != null) {
                                             val screenX = (updatedShape.x + updatedShape.width / 2f) * liveCamera.scale + liveCamera.panX
                                             val screenY = updatedShape.y * liveCamera.scale + liveCamera.panY - with(density) { 64.dp.toPx() }
-                                            activeRotationHud = Offset(screenX, screenY) to "${updatedShape.rotation.roundToInt()}°"
+                                            activeRotationHudState.value = Offset(screenX, screenY) to "${updatedShape.rotation.roundToInt()}°"
                                         }
                                         change.consume()
                                     }
@@ -556,7 +556,7 @@ fun WhiteboardCanvasScreen(
                                             if (delta < -180f) delta += 360f
                                             val hudX = c.x * liveCamera.scale + liveCamera.panX
                                             val hudY = (activeStroke?.points?.minOfOrNull { it.y } ?: c.y) * liveCamera.scale + liveCamera.panY - with(density) { 64.dp.toPx() }
-                                            activeRotationHud = Offset(hudX, hudY) to "${delta.roundToInt()}°"
+                                            activeRotationHudState.value = Offset(hudX, hudY) to "${delta.roundToInt()}°"
                                         }
                                         change.consume()
                                     }
@@ -649,7 +649,7 @@ fun WhiteboardCanvasScreen(
 
                         isDrawingGestureActive = false
                         pixelEraserCursorWorld = null
-                        activeRotationHud = null
+                        activeRotationHudState.value = null
 
                         if (gestureMode == CanvasGestureMode.LASSO_SELECT && !isMultiTouch) {
                             if (localLassoPoints.size >= 5) {
@@ -883,30 +883,12 @@ fun WhiteboardCanvasScreen(
             drawLaserTrail(state.laserTrail)
         }
 
-        // Live rotation angle HUD pill on canvas while dragging any shape/line/stroke rotation handle
-        activeRotationHud?.let { (hudPos, angleText) ->
-            Surface(
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.inverseSurface,
-                contentColor = MaterialTheme.colorScheme.inverseOnSurface,
-                shadowElevation = 4.dp,
-                modifier = Modifier
-                    .offset {
-                        IntOffset(
-                            (hudPos.x - with(density) { 24.dp.toPx() }).roundToInt(),
-                            hudPos.y.roundToInt().coerceAtLeast(0)
-                        )
-                    }
-                    .testTag("canvas_rotation_hud")
-            ) {
-                Text(
-                    text = angleText,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
-                )
-            }
-        }
+        // Rotation feedback has its own state read scope: dragging the handle
+        // updates this small overlay without recomposing the whole whiteboard screen.
+        RotationHudOverlay(
+            hudState = activeRotationHudState,
+            density = density
+        )
 
         // Render Text Items (Locked axis/column labels + Modern floating editable text cards)
         state.board.textItems.forEach { tItem ->
@@ -1469,6 +1451,38 @@ fun WhiteboardCanvasScreen(
     }
 }
 
+
+@Composable
+private fun RotationHudOverlay(
+    hudState: State<Pair<Offset, String>?>,
+    density: androidx.compose.ui.unit.Density
+) {
+    // Read the frequently changing drag state only inside this restart scope.
+    val hud by hudState
+    val (hudPos, angleText) = hud ?: return
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        contentColor = MaterialTheme.colorScheme.inverseOnSurface,
+        shadowElevation = 4.dp,
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (hudPos.x - with(density) { 24.dp.toPx() }).roundToInt(),
+                    hudPos.y.roundToInt().coerceAtLeast(0)
+                )
+            }
+            .testTag("canvas_rotation_hud")
+    ) {
+        Text(
+            text = angleText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+        )
+    }
+}
 
 @Composable
 private fun CameraStateHost(
