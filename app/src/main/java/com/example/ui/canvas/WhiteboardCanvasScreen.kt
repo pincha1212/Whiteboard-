@@ -294,6 +294,52 @@ fun WhiteboardCanvasScreen(
         val screenHeightPx = canvasSizePx.height.toFloat().coerceAtLeast(1f)
 
         CameraStateHost(viewModel) { cameraState ->
+        // Keep text overlays composed only while they intersect the viewport.
+        // derivedStateOf observes camera movement but invalidates this scope only
+        // when the set of visible text items actually changes.
+        val visibleTextItems by remember(
+            state.board.textItems,
+            cameraState,
+            screenWidthPx,
+            screenHeightPx,
+            state.selectedTextId,
+            state.selectedTextIds
+        ) {
+            derivedStateOf {
+                val camera = cameraState.value
+                val safeScale = camera.scale.coerceAtLeast(0.1f)
+                val margin = 180f / safeScale
+                val visibleLeft = -camera.panX / safeScale - margin
+                val visibleTop = -camera.panY / safeScale - margin
+                val visibleRight = (screenWidthPx - camera.panX) / safeScale + margin
+                val visibleBottom = (screenHeightPx - camera.panY) / safeScale + margin
+                state.board.textItems.filter { item ->
+                    if (item.isHiddenByCollapse) {
+                        false
+                    } else if (
+                        item.id == state.selectedTextId ||
+                        state.selectedTextIds.contains(item.id)
+                    ) {
+                        true
+                    } else {
+                        val fontSize = item.fontSize.coerceIn(14f, 80f)
+                        val charsPerLine = (item.width.coerceAtLeast(60f) / (fontSize * 0.55f))
+                            .toInt().coerceAtLeast(1)
+                        val lineCount = ((item.text.length + charsPerLine - 1) / charsPerLine)
+                            .coerceAtLeast(1)
+                        val estimatedHeight = maxOf(fontSize * 2.5f, lineCount * fontSize * 1.5f)
+                        // A rotation-safe enclosing radius prevents clipping near viewport edges.
+                        val radius = hypot(item.width, estimatedHeight) * 0.5f
+                        val centerX = item.x + item.width * 0.5f
+                        val centerY = item.y + estimatedHeight * 0.5f
+                        centerX + radius >= visibleLeft &&
+                            centerX - radius <= visibleRight &&
+                            centerY + radius >= visibleTop &&
+                            centerY - radius <= visibleBottom
+                    }
+                }
+            }
+        }
         // Global Camera / Viewport Transform Layer (handles 2-finger pinch-to-zoom & pan over both canvas and sticky notes)
         Box(
             modifier = Modifier
@@ -891,7 +937,7 @@ fun WhiteboardCanvasScreen(
         )
 
         // Render Text Items (Locked axis/column labels + Modern floating editable text cards)
-        state.board.textItems.forEach { tItem ->
+        visibleTextItems.forEach { tItem ->
             if (tItem.isHiddenByCollapse) return@forEach
             val tColor = parseColor(tItem.colorHex, Color(0xFF0F172A))
             val widthDp = with(density) { tItem.width.coerceAtLeast(120f).toDp() }
