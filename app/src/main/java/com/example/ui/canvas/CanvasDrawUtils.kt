@@ -1,6 +1,7 @@
 package com.example.ui.canvas
 
 import android.graphics.Paint
+import android.graphics.Path as AndroidPath
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -25,6 +26,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 fun parseColor(hex: String, default: Color = Color.Black): Color {
     return try {
@@ -186,6 +188,17 @@ private fun DrawScope.drawGridPointsBatched(points: FloatArray, color: Color, ra
     }
 }
 
+// Live freehand preview is redrawn for every pointer update. Reuse native drawing
+// objects per thread so the hot path does not allocate a Compose Path and Paint per frame.
+private val liveStrokePath = ThreadLocal.withInitial { AndroidPath() }
+private val liveStrokePaint = ThreadLocal.withInitial {
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+}
+
 fun DrawScope.drawStrokeVector(
     stroke: WhiteboardStroke,
     panX: Float,
@@ -201,26 +214,32 @@ fun DrawScope.drawStrokeVector(
     preserveInputPoints: Boolean = false
 ) {
     if (preserveInputPoints && !stroke.isRainbow) {
-        val livePath = Path().apply {
-            val first = stroke.points.first()
-            moveTo(first.x * scale + panX, first.y * scale + panY)
-            for (index in 1 until stroke.points.size) {
-                val point = stroke.points[index]
-                lineTo(point.x * scale + panX, point.y * scale + panY)
-            }
+        if (stroke.points.isEmpty()) return
+
+        val path = liveStrokePath.get()!!
+        path.reset()
+        val first = stroke.points.first()
+        path.moveTo(first.x * scale + panX, first.y * scale + panY)
+        for (index in 1 until stroke.points.size) {
+            val point = stroke.points[index]
+            path.lineTo(point.x * scale + panX, point.y * scale + panY)
         }
-        val liveColor = parseColor(stroke.colorHex).copy(
-            alpha = (parseColor(stroke.colorHex).alpha * stroke.opacity).coerceIn(0f, 1f)
-        )
-        drawPath(
-            path = livePath,
-            color = liveColor,
-            style = Stroke(
-                width = (stroke.width * scale).coerceAtLeast(1f),
-                cap = androidx.compose.ui.graphics.StrokeCap.Round,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round
-            )
-        )
+
+        val paint = liveStrokePaint.get()!!
+        val baseColor = try {
+            android.graphics.Color.parseColor(stroke.colorHex)
+        } catch (_: IllegalArgumentException) {
+            android.graphics.Color.BLACK
+        }
+        paint.color = baseColor
+        paint.alpha = (android.graphics.Color.alpha(baseColor) * stroke.opacity)
+            .roundToInt()
+            .coerceIn(0, 255)
+        paint.strokeWidth = (stroke.width * scale).coerceAtLeast(1f)
+
+        drawIntoCanvas { canvas ->
+            canvas.nativeCanvas.drawPath(path, paint)
+        }
         return
     }
     drawIntoCanvas { composeCanvas ->
