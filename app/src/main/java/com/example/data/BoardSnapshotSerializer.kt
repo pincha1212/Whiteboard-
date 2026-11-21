@@ -132,6 +132,7 @@ object BoardSnapshotSerializer {
                 put("isEditableCard", t.isEditableCard)
                 t.backgroundColorHex?.let { put("backgroundColorHex", it) }
                 put("width", t.width.toDouble())
+                put("height", t.height.toDouble())
                 t.groupId?.let { put("groupId", it) }
                 t.parentId?.let { put("parentId", it) }
                 put("isHiddenByCollapse", t.isHiddenByCollapse)
@@ -330,6 +331,7 @@ object BoardSnapshotSerializer {
                             isEditableCard = obj.optBoolean("isEditableCard", false),
                             backgroundColorHex = obj.optString("backgroundColorHex", "").takeIf { it.isNotEmpty() },
                             width = obj.optDouble("width", 190.0).toFloat(),
+                            height = obj.optDouble("height", 0.0).toFloat(),
                             groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                             parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
                             isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
