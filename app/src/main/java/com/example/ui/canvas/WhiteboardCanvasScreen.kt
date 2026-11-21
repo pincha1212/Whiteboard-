@@ -251,8 +251,9 @@ fun WhiteboardCanvasScreen(
             paintTileCache.clear()
         }
     }
+    // All committed strokes use one board-resolution raster at every zoom.
+    // This keeps brush geometry fixed; zoom only scales the already-rendered pixels.
     val paintSpatialIndex = remember(
-        state.isPaintPixelMode,
         state.board.id,
         state.board.strokes,
         state.board.shapes,
@@ -263,21 +264,17 @@ fun WhiteboardCanvasScreen(
         isDarkBoard,
         state.handDrawnFactor
     ) {
-        if (state.isPaintPixelMode) {
-            paintTileCache.buildSpatialIndex(
-                boardId = state.board.id,
-                strokes = state.board.strokes,
-                shapes = state.board.shapes,
-                selectedStrokeId = state.selectedStrokeId,
-                selectedStrokeIds = selectedStrokeIdSet,
-                selectedShapeId = state.selectedShapeId,
-                selectedShapeIds = selectedShapeIdSet,
-                isDarkBoard = isDarkBoard,
-                handDrawnFactor = state.handDrawnFactor
-            )
-        } else {
-            null
-        }
+        paintTileCache.buildSpatialIndex(
+            boardId = state.board.id,
+            strokes = state.board.strokes,
+            shapes = state.board.shapes,
+            selectedStrokeId = state.selectedStrokeId,
+            selectedStrokeIds = selectedStrokeIdSet,
+            selectedShapeId = state.selectedShapeId,
+            selectedShapeIds = selectedShapeIdSet,
+            isDarkBoard = isDarkBoard,
+            handDrawnFactor = state.handDrawnFactor
+        )
     }
 
     Box(
@@ -743,7 +740,7 @@ fun WhiteboardCanvasScreen(
             val visibleWorldTop = -camera.panY / safeScale
             val visibleWorldRight = (size.width - camera.panX) / safeScale
             val visibleWorldBottom = (size.height - camera.panY) / safeScale
-            val usePaintRaster = state.isPaintPixelMode && paintSpatialIndex != null
+            val usePaintRaster = paintSpatialIndex != null
 
             if (usePaintRaster) {
                 drawIntoCanvas { composeCanvas ->
