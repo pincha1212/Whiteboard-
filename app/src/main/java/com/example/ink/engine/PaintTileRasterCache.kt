@@ -49,14 +49,27 @@ class PaintTileRasterCache {
         val bitmap: Bitmap
     )
 
-    private val maxCacheBytes: Int = run {
-        val maxMem = Runtime.getRuntime().maxMemory().coerceAtLeast(16L * 1024L * 1024L)
-        (maxMem / 8L).coerceIn(8L * 1024L * 1024L, 28L * 1024L * 1024L).toInt()
-    }
+    // Raster tiles are disposable derived data. Keep their budget conservative so
+    // low-memory devices do not reserve a large part of the app heap for cached pixels.
+    private val maxCacheBytes: Int =
+        calculateCacheBudgetBytes(Runtime.getRuntime().maxMemory())
 
     private val tileCache = object : LruCache<Long, CachedTile>(maxCacheBytes) {
         override fun sizeOf(key: Long, value: CachedTile): Int {
             return value.bitmap.byteCount.coerceAtLeast(1)
+        }
+
+        override fun entryRemoved(
+            evicted: Boolean,
+            key: Long,
+            oldValue: CachedTile,
+            newValue: CachedTile?
+        ) {
+            if (evicted && oldValue.bitmap !== newValue?.bitmap) {
+                // Canvas retains its last bitmap target; detach before releasing native pixels.
+                reusableCanvas.setBitmap(null)
+                if (!oldValue.bitmap.isRecycled) oldValue.bitmap.recycle()
+            }
         }
     }
 
@@ -69,7 +82,14 @@ class PaintTileRasterCache {
     }
 
     fun clear() {
+        reusableCanvas.setBitmap(null)
         tileCache.evictAll()
+    }
+
+    /** Release half of the disposable raster cache when Android reports memory pressure. */
+    fun trimMemory() {
+        reusableCanvas.setBitmap(null)
+        tileCache.trimToSize(maxCacheBytes / 2)
     }
 
     fun buildSpatialIndex(
@@ -348,6 +368,16 @@ class PaintTileRasterCache {
     }
 
     companion object {
+        private const val MIN_CACHE_BYTES = 4 * 1024 * 1024
+        private const val MAX_CACHE_BYTES = 16 * 1024 * 1024
+
+        internal fun calculateCacheBudgetBytes(maxHeapBytes: Long): Int {
+            val safeHeapBytes = maxHeapBytes.coerceAtLeast(16L * 1024L * 1024L)
+            return (safeHeapBytes / 16L)
+                .coerceIn(MIN_CACHE_BYTES.toLong(), MAX_CACHE_BYTES.toLong())
+                .toInt()
+        }
+
         const val TILE_WORLD_SIZE = 512f
         const val TILE_PIXEL_SIZE = 512
         const val PIXELATE_SCALE_THRESHOLD = 1.02f
