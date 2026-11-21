@@ -1,7 +1,6 @@
 package com.example.ui.canvas
 
 import android.graphics.Paint
-import android.graphics.Path as AndroidPath
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -26,7 +25,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.ceil
-import kotlin.math.roundToInt
 
 fun parseColor(hex: String, default: Color = Color.Black): Color {
     return try {
