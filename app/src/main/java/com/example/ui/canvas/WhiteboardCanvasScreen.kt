@@ -1,5 +1,7 @@
 package com.example.ui.canvas
 
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -227,8 +229,27 @@ fun WhiteboardCanvasScreen(
 
     val isDarkBoard = state.board.colorTheme.isDark
     val paintTileCache = remember { PaintTileRasterCache() }
-    DisposableEffect(Unit) {
-        onDispose { paintTileCache.clear() }
+    DisposableEffect(context, paintTileCache) {
+        val appContext = context.applicationContext
+        val memoryCallbacks = object : ComponentCallbacks2 {
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+            override fun onLowMemory() {
+                paintTileCache.clear()
+            }
+
+            override fun onTrimMemory(level: Int) {
+                when {
+                    level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN -> paintTileCache.clear()
+                    level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> paintTileCache.trimMemory()
+                }
+            }
+        }
+        appContext.registerComponentCallbacks(memoryCallbacks)
+        onDispose {
+            appContext.unregisterComponentCallbacks(memoryCallbacks)
+            paintTileCache.clear()
+        }
     }
     val paintSpatialIndex = remember(
         state.isPaintPixelMode,
