@@ -20,7 +20,9 @@ import org.json.JSONObject
 
 object BoardSnapshotSerializer {
 
-    fun serializeBoard(board: WhiteboardBoard): String {
+    fun serializeBoard(board: WhiteboardBoard): String = serializeBoardObject(board).toString()
+
+    fun serializeBoardObject(board: WhiteboardBoard): JSONObject {
         val root = JSONObject()
         root.put("schemaVersion", 1)
         root.put("boardId", board.id)
@@ -177,7 +179,7 @@ object BoardSnapshotSerializer {
         }
         root.put("snapshots", snapshotsArr)
 
-        return root.toString()
+        return root
     }
 
     fun deserializeIntoBoard(json: String, currentBoard: WhiteboardBoard): WhiteboardBoard? {
