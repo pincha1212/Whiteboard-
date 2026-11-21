@@ -89,7 +89,8 @@ private data class BoardSnapshot(
     val strokes: List<WhiteboardStroke>,
     val notes: List<StickyNote>,
     val shapes: List<ShapeItem>,
-    val texts: List<TextItem>
+    val texts: List<TextItem>,
+    val estimatedBytes: Long
 )
 
 class WhiteboardViewModel(
@@ -98,6 +99,11 @@ class WhiteboardViewModel(
 
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
+
+    // A count-only limit allows large drawings to retain 30 very expensive snapshots.
+    // Keep the history bounded by a conservative estimate as well as by entry count.
+    private val undoHistoryBudgetBytes: Long
+        get() = (Runtime.getRuntime().maxMemory() / 32L).coerceIn(1L * 1024L * 1024L, 8L * 1024L * 1024L)
     private var isCommittingToStore = false
     // Sticky-note transforms update only the target note's StateFlow on every pointer event
     // and consolidate into WhiteboardUiState + the shared store once when the gesture ends.
@@ -2863,16 +2869,57 @@ class WhiteboardViewModel(
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
+    private fun createBoardSnapshot(board: WhiteboardBoard): BoardSnapshot {
+        // Approximate retained object cost; deliberately overestimates shared immutable
+        // objects so a long history cannot pin an unexpectedly large amount of memory.
+        var bytes = 256L
+        board.strokes.forEach { stroke ->
+            bytes += 128L + stroke.points.size.toLong() * 40L
+        }
+        board.shapes.forEach { shape ->
+            bytes += 160L + shape.vertices.size.toLong() * 40L
+        }
+        board.stickyNotes.forEach { note ->
+            bytes += 192L +
+                (note.text.length + (note.title?.length ?: 0)).toLong() * 2L +
+                note.tags.sumOf { it.length.toLong() * 2L + 24L }
+        }
+        board.textItems.forEach { item ->
+            bytes += 160L + item.text.length.toLong() * 2L
+        }
+        return BoardSnapshot(
+            strokes = board.strokes,
+            notes = board.stickyNotes,
+            shapes = board.shapes,
+            texts = board.textItems,
+            estimatedBytes = bytes
+        )
+    }
+
+    private fun trimUndoHistoryToBudget() {
+        fun retainedBytes(): Long =
+            undoStack.sumOf { it.estimatedBytes } + redoStack.sumOf { it.estimatedBytes }
+
+        while (undoStack.size + redoStack.size > 1 && retainedBytes() > undoHistoryBudgetBytes) {
+            when {
+                undoStack.size > 1 -> undoStack.removeAt(0)
+                redoStack.size > 1 -> redoStack.removeAt(0)
+                else -> break
+            }
+        }
+    }
+
     private fun saveUndoSnapshot() {
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val b = _uiState.value.board
-        if (undoStack.size >= 30) {
+        undoStack.add(createBoardSnapshot(b))
+        if (undoStack.size > 30) {
             undoStack.removeAt(0)
         }
-        undoStack.add(BoardSnapshot(b.strokes, b.stickyNotes, b.shapes, b.textItems))
         redoStack.clear()
-        _uiState.update { it.copy(canUndo = true, canRedo = false) }
+        trimUndoHistoryToBudget()
+        _uiState.update { it.copy(canUndo = undoStack.isNotEmpty(), canRedo = false) }
     }
 
     fun undo() {
@@ -2880,8 +2927,9 @@ class WhiteboardViewModel(
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
-        redoStack.add(BoardSnapshot(currentBoard.strokes, currentBoard.stickyNotes, currentBoard.shapes, currentBoard.textItems))
+        redoStack.add(createBoardSnapshot(currentBoard))
         val previous = undoStack.removeAt(undoStack.lastIndex)
+        trimUndoHistoryToBudget()
         stickyNotesStore.replaceAll(previous.notes)
 
         _uiState.update {
@@ -2912,8 +2960,9 @@ class WhiteboardViewModel(
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
-        undoStack.add(BoardSnapshot(currentBoard.strokes, currentBoard.stickyNotes, currentBoard.shapes, currentBoard.textItems))
+        undoStack.add(createBoardSnapshot(currentBoard))
         val next = redoStack.removeAt(redoStack.lastIndex)
+        trimUndoHistoryToBudget()
         stickyNotesStore.replaceAll(next.notes)
 
         _uiState.update {
