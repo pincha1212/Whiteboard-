@@ -2,10 +2,12 @@ package com.example.data
 
 import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
+import com.example.model.BrushStudioSettings
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.DEFAULT_LAYER_ID
 import com.example.model.DrawingLayer
+import com.example.model.LayerBlendMode
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
@@ -42,6 +44,10 @@ object BoardSnapshotSerializer {
                 put("isVisible", layer.isVisible)
                 put("opacity", layer.opacity.toDouble())
                 put("isLocked", layer.isLocked)
+                put("blendMode", layer.blendMode.name)
+                put("isAlphaLocked", layer.isAlphaLocked)
+                put("isReference", layer.isReference)
+                put("rasterRevision", layer.rasterRevision)
             })
         }
         root.put("layers", layersArr)
@@ -60,11 +66,23 @@ object BoardSnapshotSerializer {
             obj.put("brushType", s.brushType.name)
             obj.put("opacity", s.opacity.toDouble())
             obj.put("layerId", s.layerId)
+            obj.put("studioSettings", JSONObject().apply {
+                put("flow", s.studioSettings.flow.toDouble())
+                put("spacing", s.studioSettings.spacing.toDouble())
+                put("hardness", s.studioSettings.hardness.toDouble())
+                put("grainStrength", s.studioSettings.grainStrength.toDouble())
+                put("taperStart", s.studioSettings.taperStart.toDouble())
+                put("taperEnd", s.studioSettings.taperEnd.toDouble())
+                put("velocitySensitivity", s.studioSettings.velocitySensitivity.toDouble())
+                put("chiselAngleDeg", s.studioSettings.chiselAngleDeg.toDouble())
+            })
             val ptsArr = JSONArray()
             s.points.forEach { p ->
                 ptsArr.put(JSONObject().apply {
                     put("x", p.x.toDouble())
                     put("y", p.y.toDouble())
+                    if (p.timestampMs != 0L) put("t", p.timestampMs)
+                    if (p.pressure != 1.0f) put("p", p.pressure.toDouble())
                 })
             }
             obj.put("points", ptsArr)
@@ -215,13 +233,19 @@ object BoardSnapshotSerializer {
             if (layersArr != null) {
                 for (i in 0 until layersArr.length()) {
                     val obj = layersArr.getJSONObject(i)
+                    val blendName = obj.optString("blendMode", LayerBlendMode.NORMAL.name)
+                    val blendMode = LayerBlendMode.entries.firstOrNull { it.name == blendName } ?: LayerBlendMode.NORMAL
                     layers.add(
                         DrawingLayer(
                             id = obj.optString("id", DEFAULT_LAYER_ID),
                             name = obj.optString("name", "Capa ${i + 1}"),
                             isVisible = obj.optBoolean("isVisible", true),
-                            opacity = obj.optDouble("opacity", 1.0).toFloat().coerceIn(0.05f, 1.0f),
-                            isLocked = obj.optBoolean("isLocked", false)
+                            opacity = obj.optDouble("opacity", 1.0).toFloat().coerceIn(0.0f, 1.0f),
+                            isLocked = obj.optBoolean("isLocked", false),
+                            blendMode = blendMode,
+                            isAlphaLocked = obj.optBoolean("isAlphaLocked", false),
+                            isReference = obj.optBoolean("isReference", false),
+                            rasterRevision = obj.optLong("rasterRevision", 0L)
                         )
                     )
                 }
@@ -244,7 +268,14 @@ object BoardSnapshotSerializer {
                     if (ptsArr != null) {
                         for (j in 0 until ptsArr.length()) {
                             val po = ptsArr.getJSONObject(j)
-                            pts.add(StrokePoint(po.getDouble("x").toFloat(), po.getDouble("y").toFloat()))
+                            pts.add(
+                                StrokePoint(
+                                    x = po.getDouble("x").toFloat(),
+                                    y = po.getDouble("y").toFloat(),
+                                    timestampMs = po.optLong("t", po.optLong("timestampMs", 0L)),
+                                    pressure = po.optDouble("p", po.optDouble("pressure", 1.0)).toFloat()
+                                )
+                            )
                         }
                     }
                     val styleName = obj.optString("strokeStyle", StrokeStyle.SOLID.name)
@@ -256,6 +287,22 @@ object BoardSnapshotSerializer {
                     val brushName = obj.optString("brushType", defaultBrush.name)
                     val brushType = StrokeBrushType.values().firstOrNull { it.name == brushName } ?: defaultBrush
                     val opacity = obj.optDouble("opacity", brushType.defaultOpacity.toDouble()).toFloat().coerceIn(0.05f, 1.0f)
+                    val studioObj = obj.optJSONObject("studioSettings")
+                    val defaults = BrushStudioSettings.defaultFor(brushType)
+                    val studioSettings = if (studioObj != null) {
+                        BrushStudioSettings(
+                            flow = studioObj.optDouble("flow", defaults.flow.toDouble()).toFloat().coerceIn(0.05f, 1f),
+                            spacing = studioObj.optDouble("spacing", defaults.spacing.toDouble()).toFloat().coerceIn(0.05f, 1.2f),
+                            hardness = studioObj.optDouble("hardness", defaults.hardness.toDouble()).toFloat().coerceIn(0f, 1f),
+                            grainStrength = studioObj.optDouble("grainStrength", defaults.grainStrength.toDouble()).toFloat().coerceIn(0f, 1f),
+                            taperStart = studioObj.optDouble("taperStart", defaults.taperStart.toDouble()).toFloat().coerceIn(0f, 1f),
+                            taperEnd = studioObj.optDouble("taperEnd", defaults.taperEnd.toDouble()).toFloat().coerceIn(0f, 1f),
+                            velocitySensitivity = studioObj.optDouble("velocitySensitivity", defaults.velocitySensitivity.toDouble()).toFloat().coerceIn(0f, 1f),
+                            chiselAngleDeg = studioObj.optDouble("chiselAngleDeg", defaults.chiselAngleDeg.toDouble()).toFloat().coerceIn(0f, 180f)
+                        )
+                    } else {
+                        defaults
+                    }
                     strokes.add(
                         WhiteboardStroke(
                             id = obj.getString("id"),
@@ -269,7 +316,8 @@ object BoardSnapshotSerializer {
                             zIndex = obj.optInt("zIndex", 0),
                             brushType = brushType,
                             opacity = opacity,
-                            layerId = obj.optString("layerId", DEFAULT_LAYER_ID)
+                            layerId = obj.optString("layerId", DEFAULT_LAYER_ID),
+                            studioSettings = studioSettings
                         )
                     )
                 }

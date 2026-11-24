@@ -7,9 +7,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -37,6 +39,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -88,10 +91,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import com.example.ink.GuidesGeometry
+import com.example.ink.PerspectiveAxisLock
 import com.example.ink.StickyNoteResizeHandle
 import com.example.ink.StrokeStabilizer
+import com.example.model.BrushStudioSettings
 import com.example.model.DrawingLayer
+import com.example.model.GuideType
 import com.example.model.LineCapStyle
+import com.example.model.PerspectiveMode
 import com.example.model.ShapeItem
 import com.example.model.StickyNote
 import com.example.model.isLineLike
@@ -102,6 +111,7 @@ import com.example.model.SymmetryMode
 import com.example.model.TextItem
 import com.example.model.ToolType
 import com.example.model.WhiteboardStroke
+import com.example.ui.toolbar.BrushStudioSheet
 import com.example.ui.toolbar.DockLayoutMode
 import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
@@ -119,6 +129,7 @@ import kotlin.math.sin
 private enum class CanvasGestureMode {
     NONE,
     DRAW_STROKE,
+    SMUDGE,
     PAN,
     MOVE_SHAPE,
     RESIZE_SHAPE,
@@ -134,7 +145,7 @@ private enum class CanvasGestureMode {
     LASER
 }
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun WhiteboardCanvasScreen(
     viewModel: WhiteboardViewModel,
@@ -158,6 +169,7 @@ fun WhiteboardCanvasScreen(
 
 
     var pixelEraserCursorWorld by remember { mutableStateOf<StrokePoint?>(null) }
+    var smudgeCursorWorld by remember { mutableStateOf<StrokePoint?>(null) }
     var eyedropperPreviewState by remember { mutableStateOf<Pair<Offset, String>?>(null) }
     val activeRotationHudState = remember { mutableStateOf<Pair<Offset, String>?>(null) }
     val textMeasuredHeights = remember { mutableStateMapOf<String, Float>() }
@@ -168,6 +180,8 @@ fun WhiteboardCanvasScreen(
     // Keep one preview stroke wrapper while its backing point list changes in place.
     // The live renderer reads the current points directly and does not cache its geometry.
     val activePreviewBrush = viewModel.brushTypeForTool(state.currentTool)
+    val activeSlotStudioSettings = viewModel.brushSlots.getOrNull(state.activeBrushSlotIndex)?.studioSettings
+        ?: BrushStudioSettings.defaultFor(activePreviewBrush)
     val livePreviewStroke = remember(
         localActivePoints,
         state.currentTool,
@@ -175,6 +189,7 @@ fun WhiteboardCanvasScreen(
         state.penWidth,
         state.penOpacity,
         state.isRainbowPen,
+        activeSlotStudioSettings
     ) {
         WhiteboardStroke(
             id = "live_active_stroke",
@@ -186,7 +201,8 @@ fun WhiteboardCanvasScreen(
             strokeStyle = StrokeStyle.SOLID,
             capStyle = LineCapStyle.NONE,
             brushType = activePreviewBrush,
-            opacity = state.penOpacity.coerceIn(0.05f, 1.0f)
+            opacity = state.penOpacity.coerceIn(0.05f, 1.0f),
+            studioSettings = activeSlotStudioSettings
         )
     }
 
@@ -236,7 +252,7 @@ fun WhiteboardCanvasScreen(
     val selectedShapeIdSet = remember(state.selectedShapeIds) { state.selectedShapeIds.toHashSet() }
 
     val isDarkBoard = state.board.colorTheme.isDark
-    val paintTileCache = remember { PaintTileRasterCache() }
+    val paintTileCache = remember(viewModel) { PaintTileRasterCache(viewModel.mutableRasterTileStore) }
     DisposableEffect(context, paintTileCache) {
         val appContext = context.applicationContext
         val memoryCallbacks = object : ComponentCallbacks2 {
@@ -357,17 +373,34 @@ fun WhiteboardCanvasScreen(
                 .fillMaxSize()
                 .pointerInput("global_viewport_multitouch") {
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val gestureStartMs = down.uptimeMillis
+                        var maxPointerCount = 1
+                        var totalPanMovement = 0f
+                        var didPinchZoom = false
+                        var lastEventTimeMs = gestureStartMs
+
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
-                            // Count pressed pointers without allocating a filtered list on every event.
                             var activePointerCount = 0
                             for (change in event.changes) {
-                                if (change.pressed) activePointerCount++
+                                if (change.pressed) {
+                                    activePointerCount++
+                                    if (change.uptimeMillis > lastEventTimeMs) {
+                                        lastEventTimeMs = change.uptimeMillis
+                                    }
+                                }
+                            }
+                            if (activePointerCount > maxPointerCount) {
+                                maxPointerCount = activePointerCount
                             }
                             if (activePointerCount >= 2) {
                                 val zoom = event.calculateZoom()
                                 val pan = event.calculatePan()
+                                totalPanMovement += hypot(pan.x, pan.y)
+                                if (kotlin.math.abs(zoom - 1f) > 0.03f) {
+                                    didPinchZoom = true
+                                }
                                 val centroid = event.calculateCentroid(useCurrent = true)
                                 val fx = if (centroid != Offset.Unspecified) centroid.x else null
                                 val fy = if (centroid != Offset.Unspecified) centroid.y else null
@@ -375,6 +408,19 @@ fun WhiteboardCanvasScreen(
                                 event.changes.forEach { it.consume() }
                             }
                         } while (event.changes.any { it.pressed })
+
+                        val durationMs = lastEventTimeMs - gestureStartMs
+                        if ((maxPointerCount == 2 || maxPointerCount == 3) &&
+                            durationMs < 260L &&
+                            totalPanMovement < 22f &&
+                            !didPinchZoom
+                        ) {
+                            if (maxPointerCount == 2) {
+                                viewModel.undo()
+                            } else {
+                                viewModel.redo()
+                            }
+                        }
                     }
                 }
         ) {
@@ -401,10 +447,47 @@ fun WhiteboardCanvasScreen(
                         val rotHitTolerance = with(density) { 28.dp.toPx() } / curCamera.scale
                         val hitTolerance = with(density) { 18.dp.toPx() } / curCamera.scale
 
+                        var strokeOriginWorld: StrokePoint? = null
+                        var perspectiveAxisLock = PerspectiveAxisLock.NONE
+                        var didUsePrecisionGuide = false
+
+                        fun projectWithGuides(raw: StrokePoint, st: WhiteboardUiState): StrokePoint {
+                            if (st.isRulerActive) {
+                                val projected = StrokeStabilizer.projectPointToRulerIfNear(raw, st.rulerState)
+                                if (projected.x != raw.x || projected.y != raw.y) didUsePrecisionGuide = true
+                                return projected
+                            }
+                            if (st.guidesState.ellipse.isVisible) {
+                                val projected = GuidesGeometry.projectPointToEllipseGuide(raw, st.guidesState.ellipse)
+                                if (projected.x != raw.x || projected.y != raw.y) didUsePrecisionGuide = true
+                                return projected
+                            }
+                            if (st.guidesState.frenchCurve.isVisible) {
+                                val projected = GuidesGeometry.projectPointToFrenchCurveGuide(raw, st.guidesState.frenchCurve)
+                                if (projected.x != raw.x || projected.y != raw.y) didUsePrecisionGuide = true
+                                return projected
+                            }
+                            val persp = st.guidesState.perspective
+                            val origin = strokeOriginWorld
+                            if (persp.mode != PerspectiveMode.OFF && persp.isSnapEnabled && origin != null) {
+                                if (perspectiveAxisLock == PerspectiveAxisLock.NONE) {
+                                    perspectiveAxisLock = GuidesGeometry.detectPerspectiveAxisLock(origin, raw, persp)
+                                }
+                                if (perspectiveAxisLock != PerspectiveAxisLock.NONE) {
+                                    didUsePrecisionGuide = true
+                                    return GuidesGeometry.projectPointOnPerspectiveLock(origin, raw, perspectiveAxisLock, persp)
+                                }
+                            }
+                            return raw
+                        }
+
                         val isDrawingTool = curState.currentTool == ToolType.PENCIL ||
                             curState.currentTool == ToolType.PEN ||
+                            curState.currentTool == ToolType.TECHNICAL_INK ||
                             curState.currentTool == ToolType.FINE_MARKER ||
+                            curState.currentTool == ToolType.CHISEL_MARKER ||
                             curState.currentTool == ToolType.PAINT_BRUSH ||
+                            curState.currentTool == ToolType.WATERCOLOR ||
                             curState.currentTool == ToolType.AIRBRUSH ||
                             curState.currentTool == ToolType.HIGHLIGHTER
 
@@ -453,6 +536,16 @@ fun WhiteboardCanvasScreen(
                             val sampledHex = viewModel.sampleCanvasColorAt(wX, wY, curState.board.colorTheme.hex)
                             eyedropperPreviewState = down.position to sampledHex
                             gestureMode = CanvasGestureMode.EYEDROPPER
+                        } else if (curState.currentTool == ToolType.FLOOD_FILL) {
+                            if (!viewModel.canDrawOnActiveLayer()) {
+                                Toast.makeText(context, "La capa activa está oculta o bloqueada", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val res = viewModel.applyFloodFillTap(wX, wY)
+                                if (res.didHitRegionEdge) {
+                                    Toast.makeText(context, "Área abierta: rellenado hasta el límite activo", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            gestureMode = CanvasGestureMode.NONE
                         } else if (activeShape != null && getShapeHandleHitIndex(activeShape, wX, wY, handleTolerance, rotHitTolerance, curCamera.scale, density).also { activeHandleIndex = it } != -1) {
                             gestureMode = if (activeHandleIndex == 4) CanvasGestureMode.ROTATE_SHAPE else CanvasGestureMode.RESIZE_SHAPE
                         } else if (activeStroke != null && getStrokeHandleHitIndex(activeStroke, wX, wY, handleTolerance, rotHitTolerance, curCamera.scale, density).also { activeHandleIndex = it } != -1) {
@@ -481,17 +574,26 @@ fun WhiteboardCanvasScreen(
                             isPointHittingStrokeOrBounds(activeStroke, wX, wY, hitTolerance)
                         ) {
                             gestureMode = CanvasGestureMode.MOVE_STROKE
+                        } else if (curState.currentTool == ToolType.SMUDGE) {
+                            if (!viewModel.canDrawOnActiveLayer()) {
+                                Toast.makeText(context, "La capa activa está oculta o bloqueada", Toast.LENGTH_SHORT).show()
+                            } else {
+                                viewModel.beginRasterToolGesture()
+                                val downPt = StrokePoint(wX, wY, down.uptimeMillis, down.pressure.coerceIn(0.2f, 1.5f))
+                                smudgeCursorWorld = downPt
+                                localActivePoints.clear()
+                                localActivePoints.add(downPt)
+                                gestureMode = CanvasGestureMode.SMUDGE
+                            }
                         } else if (isDrawingTool) {
                             if (!viewModel.canDrawOnActiveLayer()) {
                                 Toast.makeText(context, "La capa activa está oculta o bloqueada", Toast.LENGTH_SHORT).show()
                             } else {
                                 localActivePoints.clear()
-                                val startPt = if (curState.isRulerActive) {
-                                    StrokeStabilizer.projectPointToRulerIfNear(StrokePoint(wX, wY), curState.rulerState)
-                                } else {
-                                    StrokePoint(wX, wY)
-                                }
-                                localActivePoints.add(startPt)
+                                val rawStart = StrokePoint(wX, wY, down.uptimeMillis, down.pressure.coerceIn(0.2f, 1.5f))
+                                val projectedStart = projectWithGuides(rawStart, curState)
+                                strokeOriginWorld = projectedStart
+                                localActivePoints.add(projectedStart)
                                 isDrawingGestureActive = true
                                 gestureMode = CanvasGestureMode.DRAW_STROKE
                             }
@@ -502,11 +604,23 @@ fun WhiteboardCanvasScreen(
                             val eraseTol = 24f / curCamera.scale
                             viewModel.eraseObjectAt(wX, wY, eraseTol, saveSnapshot = true)
                             gestureMode = CanvasGestureMode.ERASE_OBJECT
-                        } else if (curState.currentTool == ToolType.PIXEL_ERASER) {
-                            val eraseRadius = (curState.penWidth * 2.2f).coerceIn(14f, 36f) / curCamera.scale
+                        } else if (curState.currentTool == ToolType.PIXEL_ERASER || curState.currentTool == ToolType.SOFT_ERASER) {
+                            val isSoft = curState.currentTool == ToolType.SOFT_ERASER
+                            val eraseRadius = if (isSoft) {
+                                (curState.penWidth * 1.15f).coerceIn(10f, 90f)
+                            } else {
+                                (curState.penWidth * 2.2f).coerceIn(14f, 44f) / curCamera.scale
+                            }
                             pixelEraserCursorWorld = StrokePoint(wX, wY)
-                            if (viewModel.erasePixelAt(wX, wY, eraseRadius, saveSnapshot = true)) {
-                                hasTransformed = true
+                            if (isSoft) {
+                                viewModel.beginRasterToolGesture()
+                                if (viewModel.applySoftEraserSegment(StrokePoint(wX, wY), StrokePoint(wX, wY), eraseRadius)) {
+                                    hasTransformed = true
+                                }
+                            } else {
+                                if (viewModel.erasePixelAt(wX, wY, eraseRadius, saveSnapshot = true)) {
+                                    hasTransformed = true
+                                }
                             }
                             gestureMode = CanvasGestureMode.ERASE_PIXEL
                         } else {
@@ -539,11 +653,15 @@ fun WhiteboardCanvasScreen(
                         }
 
                         var lastDrawPointerPosition = down.position
+                        var lastDrawTimestampMs = down.uptimeMillis
+                        var lastDrawPressure = down.pressure.coerceIn(0.2f, 1.5f)
                         do {
                             val event = awaitPointerEvent()
                             val drawPointerChange = event.changes.firstOrNull { it.id == down.id }
                             if (gestureMode == CanvasGestureMode.DRAW_STROKE && drawPointerChange != null) {
                                 lastDrawPointerPosition = drawPointerChange.position
+                                lastDrawTimestampMs = drawPointerChange.uptimeMillis
+                                lastDrawPressure = drawPointerChange.pressure.coerceIn(0.2f, 1.5f)
                             }
                             // Avoid allocating a new List<PointerInputChange> for every move event.
                             var activePointerCount = 0
@@ -561,6 +679,7 @@ fun WhiteboardCanvasScreen(
                                 localActivePoints.clear()
                                 localLassoPoints.clear()
                                 pixelEraserCursorWorld = null
+                                smudgeCursorWorld = null
                             } else if (activePointerCount == 1 && !isMultiTouch) {
                                 val change = activePointer!!
                                 val liveState = viewModel.uiState.value
@@ -669,22 +788,48 @@ fun WhiteboardCanvasScreen(
                                         viewModel.onPanZoom(pan.x, pan.y, 1.0f)
                                         change.consume()
                                     }
+                                    CanvasGestureMode.SMUDGE -> {
+                                        val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
+                                        val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
+                                        val prevPt = smudgeCursorWorld ?: StrokePoint(nwX, nwY)
+                                        val nextPt = StrokePoint(nwX, nwY, change.uptimeMillis, change.pressure.coerceIn(0.2f, 1.5f))
+                                        smudgeCursorWorld = nextPt
+                                        val smudgeRadius = (liveState.penWidth * 1.15f).coerceIn(10f, 84f)
+                                        if (viewModel.applySmudgeSegment(listOf(prevPt, nextPt), smudgeRadius)) {
+                                            hasTransformed = true
+                                        }
+                                        change.consume()
+                                    }
                                     CanvasGestureMode.DRAW_STROKE -> {
                                         // Replay historical stylus samples that Android batches into a pointer event.
                                         for (historical in change.historical) {
                                             val hx = (historical.position.x - liveCamera.panX) / liveCamera.scale
                                             val hy = (historical.position.y - liveCamera.panY) / liveCamera.scale
-                                            val rawHistorical = StrokePoint(hx, hy)
-                                            val historicalPoint = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawHistorical, liveState.rulerState) else rawHistorical
+                                            val rawHistorical = StrokePoint(
+                                                x = hx,
+                                                y = hy,
+                                                timestampMs = historical.uptimeMillis,
+                                                pressure = change.pressure.coerceIn(0.2f, 1.5f)
+                                            )
+                                            val historicalPoint = projectWithGuides(rawHistorical, liveState)
                                             val previous = localActivePoints.lastOrNull()
-                                            if (previous == null || previous.x != historicalPoint.x || previous.y != historicalPoint.y) localActivePoints.add(historicalPoint)
+                                            if (previous == null || previous.x != historicalPoint.x || previous.y != historicalPoint.y) {
+                                                localActivePoints.add(historicalPoint)
+                                            }
                                         }
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
                                         val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
-                                        val rawPoint = StrokePoint(nwX, nwY)
-                                        val point = if (liveState.isRulerActive) StrokeStabilizer.projectPointToRulerIfNear(rawPoint, liveState.rulerState) else rawPoint
+                                        val rawPoint = StrokePoint(
+                                            x = nwX,
+                                            y = nwY,
+                                            timestampMs = change.uptimeMillis,
+                                            pressure = change.pressure.coerceIn(0.2f, 1.5f)
+                                        )
+                                        val point = projectWithGuides(rawPoint, liveState)
                                         val previous = localActivePoints.lastOrNull()
-                                        if (previous == null || previous.x != point.x || previous.y != point.y) localActivePoints.add(point)
+                                        if (previous == null || previous.x != point.x || previous.y != point.y) {
+                                            localActivePoints.add(point)
+                                        }
                                         change.consume()
                                     }
                                     CanvasGestureMode.LASER -> {
@@ -715,11 +860,21 @@ fun WhiteboardCanvasScreen(
                                     CanvasGestureMode.ERASE_PIXEL -> {
                                         val nwX = (change.position.x - liveCamera.panX) / liveCamera.scale
                                         val nwY = (change.position.y - liveCamera.panY) / liveCamera.scale
-                                        val eraseRadius = (liveState.penWidth * 2.2f).coerceIn(14f, 36f) / liveCamera.scale
+                                        val isSoft = liveState.currentTool == ToolType.SOFT_ERASER
+                                        val eraseRadius = if (isSoft) {
+                                            (liveState.penWidth * 1.15f).coerceIn(10f, 90f)
+                                        } else {
+                                            (liveState.penWidth * 2.2f).coerceIn(14f, 44f) / liveCamera.scale
+                                        }
                                         val prevCursor = pixelEraserCursorWorld ?: StrokePoint(nwX, nwY)
                                         val nextCursor = StrokePoint(nwX, nwY)
                                         pixelEraserCursorWorld = nextCursor
-                                        if (viewModel.erasePixelSegment(prevCursor, nextCursor, eraseRadius, saveSnapshot = !hasTransformed)) {
+                                        val didErase = if (isSoft) {
+                                            viewModel.applySoftEraserSegment(prevCursor, nextCursor, eraseRadius)
+                                        } else {
+                                            viewModel.erasePixelSegment(prevCursor, nextCursor, eraseRadius, saveSnapshot = !hasTransformed)
+                                        }
+                                        if (didErase) {
                                             hasTransformed = true
                                         }
                                         change.consume()
@@ -733,10 +888,14 @@ fun WhiteboardCanvasScreen(
                             // Include the actual pointer-up coordinate; the final event can arrive
                             // with pressed=false and therefore is not handled by the active-pointer branch.
                             val releaseCamera = viewModel.cameraState.value
-                            val finalPoint = StrokePoint(
+                            val releaseState = viewModel.uiState.value
+                            val rawFinal = StrokePoint(
                                 (lastDrawPointerPosition.x - releaseCamera.panX) / releaseCamera.scale,
-                                (lastDrawPointerPosition.y - releaseCamera.panY) / releaseCamera.scale
+                                (lastDrawPointerPosition.y - releaseCamera.panY) / releaseCamera.scale,
+                                timestampMs = lastDrawTimestampMs,
+                                pressure = lastDrawPressure
                             )
+                            val finalPoint = projectWithGuides(rawFinal, releaseState)
                             val previousPoint = localActivePoints.lastOrNull()
                             if (previousPoint == null ||
                                 hypot(finalPoint.x - previousPoint.x, finalPoint.y - previousPoint.y) >= 0.35f / releaseCamera.scale
@@ -747,9 +906,14 @@ fun WhiteboardCanvasScreen(
 
                         isDrawingGestureActive = false
                         pixelEraserCursorWorld = null
+                        smudgeCursorWorld = null
                         activeRotationHudState.value = null
 
-                        if (gestureMode == CanvasGestureMode.EYEDROPPER && !isMultiTouch) {
+                        if (gestureMode == CanvasGestureMode.SMUDGE ||
+                            (gestureMode == CanvasGestureMode.ERASE_PIXEL && state.currentTool == ToolType.SOFT_ERASER)
+                        ) {
+                            viewModel.commitRasterToolGesture()
+                        } else if (gestureMode == CanvasGestureMode.EYEDROPPER && !isMultiTouch) {
                             val pickedHex = eyedropperPreviewState?.second
                             eyedropperPreviewState = null
                             if (pickedHex != null) {
@@ -763,9 +927,11 @@ fun WhiteboardCanvasScreen(
                             }
                         } else if (gestureMode == CanvasGestureMode.DRAW_STROKE && localActivePoints.size >= 2 && !isMultiTouch) {
                             val pointsCopy = localActivePoints.toList()
-                            // A freehand gesture must always be committed as the same stroke.
-                            // Shape conversion is reserved for automatic shape recognition when enabled.
-                            viewModel.commitCompletedStroke(pointsCopy, state.currentTool == ToolType.HIGHLIGHTER)
+                            viewModel.commitCompletedStroke(
+                                points = pointsCopy,
+                                isHighlighter = state.currentTool == ToolType.HIGHLIGHTER,
+                                skipPrediction = didUsePrecisionGuide || perspectiveAxisLock != PerspectiveAxisLock.NONE
+                            )
                         } else if (hasTransformed && (
                                 gestureMode == CanvasGestureMode.ROTATE_SHAPE ||
                                     gestureMode == CanvasGestureMode.ROTATE_STROKE ||
@@ -866,9 +1032,22 @@ fun WhiteboardCanvasScreen(
                 }
             }
 
-            if (localActivePoints.size >= 2) {
+            if (localActivePoints.size >= 2 && state.currentTool != ToolType.SMUDGE) {
+                val hasActiveShapeGuide = state.isRulerActive ||
+                    state.guidesState.ellipse.isVisible ||
+                    state.guidesState.frenchCurve.isVisible
+                val previewPoints = if (!hasActiveShapeGuide && state.predictionLevel > 0) {
+                    StrokeStabilizer.stabilizeLivePreview(localActivePoints.toList(), state.predictionLevel)
+                } else {
+                    localActivePoints
+                }
+                val previewStrokeToRender = if (previewPoints === localActivePoints) {
+                    livePreviewStroke
+                } else {
+                    livePreviewStroke.copy(points = previewPoints)
+                }
                 drawStrokeVector(
-                    stroke = livePreviewStroke,
+                    stroke = previewStrokeToRender,
                     panX = camera.panX,
                     panY = camera.panY,
                     scale = camera.scale,
@@ -879,7 +1058,7 @@ fun WhiteboardCanvasScreen(
                 )
                 if (state.symmetryMode != SymmetryMode.NONE) {
                     val mirroredBranches = viewModel.mirrorPointsForSymmetry(
-                        points = localActivePoints,
+                        points = previewPoints,
                         mode = state.symmetryMode,
                         cx = state.symmetryCenterX,
                         cy = state.symmetryCenterY
@@ -919,7 +1098,11 @@ fun WhiteboardCanvasScreen(
             }
 
             pixelEraserCursorWorld?.let { cursor ->
-                val screenRadius = (state.penWidth * 2.2f).coerceIn(14f, 36f)
+                val screenRadius = if (state.currentTool == ToolType.SOFT_ERASER) {
+                    (state.penWidth * 1.15f).coerceIn(10f, 90f) * camera.scale
+                } else {
+                    (state.penWidth * 2.2f).coerceIn(14f, 44f)
+                }
                 val center = Offset(cursor.x * camera.scale + camera.panX, cursor.y * camera.scale + camera.panY)
                 drawCircle(
                     color = Color(0xFFEF4444).copy(alpha = 0.14f),
@@ -928,6 +1111,22 @@ fun WhiteboardCanvasScreen(
                 )
                 drawCircle(
                     color = Color(0xFFEF4444),
+                    radius = screenRadius,
+                    center = center,
+                    style = Stroke(width = 2f)
+                )
+            }
+
+            smudgeCursorWorld?.let { cursor ->
+                val screenRadius = (state.penWidth * 1.15f).coerceIn(10f, 84f) * camera.scale
+                val center = Offset(cursor.x * camera.scale + camera.panX, cursor.y * camera.scale + camera.panY)
+                drawCircle(
+                    color = com.example.ui.theme.GuideCyan.copy(alpha = 0.16f),
+                    radius = screenRadius,
+                    center = center
+                )
+                drawCircle(
+                    color = com.example.ui.theme.GuideCyan,
                     radius = screenRadius,
                     center = center,
                     style = Stroke(width = 2f)
@@ -1322,13 +1521,70 @@ fun WhiteboardCanvasScreen(
         }
         } // End Global Viewport Box
 
-        // Interactive Ruler
+        // Precision Guides Overlays (v3.4.0)
+        InteractivePerspectiveGridView(
+            guide = state.guidesState.perspective,
+            cameraState = cameraState,
+            onUpdate = { viewModel.updatePerspectiveGuide(it) }
+        )
+
+        InteractiveEllipseGuideView(
+            guide = state.guidesState.ellipse,
+            cameraState = cameraState,
+            onUpdate = { viewModel.updateEllipseGuide(it) },
+            onClose = { viewModel.selectGuide(GuideType.NONE) }
+        )
+
+        InteractiveFrenchCurveView(
+            guide = state.guidesState.frenchCurve,
+            cameraState = cameraState,
+            onUpdate = { viewModel.updateFrenchCurveGuide(it) },
+            onClose = { viewModel.selectGuide(GuideType.NONE) }
+        )
+
+        // Interactive Ruler (with 15° magnetic detents & lock)
         InteractiveRulerView(
             rulerState = state.rulerState,
             cameraState = cameraState,
             onMove = { dx, dy -> viewModel.moveRuler(dx, dy) },
-            onRotate = { da -> viewModel.rotateRuler(da) }
+            onRotate = { da -> viewModel.rotateRuler(da) },
+            onToggleAngleLock = { viewModel.toggleRulerAngleLock() }
         )
+
+        // Sketchbook Double Puck (Size / Opacity Quick HUD)
+        val hasAnySelectionForPuck = state.selectedStrokeIds.isNotEmpty() ||
+            state.selectedShapeIds.isNotEmpty() ||
+            state.selectedNoteIds.isNotEmpty() ||
+            state.selectedTextIds.isNotEmpty() ||
+            state.selectedShapeId != null ||
+            state.selectedStrokeId != null ||
+            state.selectedNoteId != null ||
+            state.selectedTextId != null
+        val isBrushOrEraserPuckTool = when (state.currentTool) {
+            ToolType.PENCIL, ToolType.PEN, ToolType.TECHNICAL_INK,
+            ToolType.FINE_MARKER, ToolType.CHISEL_MARKER,
+            ToolType.PAINT_BRUSH, ToolType.WATERCOLOR,
+            ToolType.AIRBRUSH, ToolType.HIGHLIGHTER,
+            ToolType.SMUDGE, ToolType.SOFT_ERASER, ToolType.PIXEL_ERASER -> true
+            else -> false
+        }
+        if (!state.isZenMode && !hasAnySelectionForPuck && isBrushOrEraserPuckTool) {
+            SketchbookDoublePuck(
+                strokeWidth = state.penWidth,
+                opacity = state.penOpacity,
+                colorHex = state.penColorHex,
+                scale = cameraState.value.scale,
+                isExpanded = state.isDoublePuckExpanded,
+                onToggleExpanded = { viewModel.toggleDoublePuckExpanded() },
+                onUpdateSizeAndOpacity = { w, o -> viewModel.updateDoublePuckBrush(w, o) },
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(start = 12.dp)
+                    .zIndex(28f)
+            )
+        }
 
         } // End camera-only composition
 
@@ -1441,6 +1697,9 @@ fun WhiteboardCanvasScreen(
                 onMergeDown = { viewModel.mergeLayerDown(it) },
                 onDeleteLayer = { viewModel.deleteLayer(it) },
                 onDismiss = { viewModel.toggleLayersPanel() },
+                onChangeBlendMode = { id, mode -> viewModel.changeLayerBlendMode(id, mode) },
+                onToggleAlphaLock = { id -> viewModel.toggleLayerAlphaLock(id) },
+                onToggleReference = { id -> viewModel.toggleLayerReference(id) },
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .statusBarsPadding()
@@ -1463,6 +1722,17 @@ fun WhiteboardCanvasScreen(
                     viewModel.setTool(ToolType.EYEDROPPER)
                 },
                 onDismiss = { viewModel.closeColorStudio() }
+            )
+        }
+
+        // Brush Studio Parametric Sheet (v3.1.0)
+        val studioSlotIdx = state.brushStudioSlotIndex
+        if (studioSlotIdx != null && studioSlotIdx in viewModel.brushSlots.indices) {
+            BrushStudioSheet(
+                slot = viewModel.brushSlots[studioSlotIdx],
+                onUpdateSettings = { settings -> viewModel.updateBrushSlotStudioSettings(studioSlotIdx, settings) },
+                onResetSettings = { viewModel.resetBrushSlotStudioSettings(studioSlotIdx) },
+                onDismiss = { viewModel.dismissBrushStudio() }
             )
         }
 
@@ -1499,6 +1769,37 @@ fun WhiteboardCanvasScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // Zen Corner Trigger (Sketchbook quick full-canvas toggle on tap + brush/eraser switch on long-press)
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .navigationBarsPadding()
+                .displayCutoutPadding()
+                .padding(start = 12.dp, bottom = 14.dp)
+                .size(48.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                .clip(CircleShape)
+                .combinedClickable(
+                    onClick = { viewModel.toggleZenMode() },
+                    onLongClick = { viewModel.quickToggleBrushAndEraser() }
+                )
+                .zIndex(29f)
+                .testTag("zen_corner_trigger")
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (state.isZenMode) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (state.isZenMode) "Salir de enfoque (mantener: pincel/borrador)" else "Modo enfoque (mantener: pincel/borrador)",
+                    tint = if (state.isZenMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
 
@@ -1567,6 +1868,8 @@ fun WhiteboardCanvasScreen(
         if (showExportModal) {
             ExportBoardModal(
                 board = state.board,
+                mutableRasterTileStore = viewModel.mutableRasterTileStore,
+                activeLayerId = state.board.activeLayerId,
                 onDismiss = { showExportModal = false }
             )
         }
@@ -1770,6 +2073,14 @@ private fun CameraAwareWhiteboardTopBar(
             symmetryMode = state.symmetryMode,
             layerCount = state.board.layers.size.coerceAtLeast(1),
             isLayersPanelOpen = state.isLayersPanelOpen,
+            guidesState = state.guidesState,
+            isRulerVisible = state.isRulerActive,
+            predictionLevel = state.predictionLevel,
+            floodFillTolerance = state.floodFillTolerance,
+            onSelectGuide = { viewModel.selectGuide(it) },
+            onSelectPerspectiveMode = { viewModel.selectPerspectiveMode(it) },
+            onChangePredictionLevel = { viewModel.setPredictionLevel(it) },
+            onChangeFloodFillTolerance = { viewModel.setFloodFillTolerance(it) },
             onCycleSymmetryMode = { viewModel.cycleSymmetryMode() },
             onToggleLayersPanel = { viewModel.toggleLayersPanel() },
             onUndo = { viewModel.undo() },
@@ -1995,6 +2306,7 @@ private fun CanvasDockOverlay(
                 onSelectBrushSlot = onSelectBrushSlot,
                 onUpdateBrushSlot = onUpdateBrushSlot,
                 onUpdateSlotOpacity = onUpdateSlotOpacity,
+                onOpenBrushStudio = { viewModel.openBrushStudio(it) },
                 onOpenColorStudio = onOpenColorStudio,
                 onToggleAutoShape = onToggleAutoShape,
                 onToggleRuler = onToggleRuler,

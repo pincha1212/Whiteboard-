@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.whiteboard.vkyzrq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 18
-    versionName = "3.0.0"
+    versionCode = 23
+    versionName = "3.5.0"
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,
@@ -67,6 +67,9 @@ android {
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true
+  }
+  testOptions {
+    unitTests.isIncludeAndroidResources = true
   }
 }
 
@@ -127,6 +130,10 @@ dependencies {
   // implementation(libs.play.services.location)
   // implementation(libs.retrofit)
   debugImplementation(libs.androidx.compose.ui.tooling)
+  testImplementation(libs.junit)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.test.core.ktx)
+  testImplementation(libs.kotlinx.coroutines.test)
   // "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }

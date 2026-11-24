@@ -706,13 +706,14 @@ private fun SystemInfoTabContent(board: WhiteboardBoard) {
                 color = MaterialTheme.colorScheme.primary
             )
 
-            ModuleStatusRow("Motor de Tinta 2D", "${board.strokes.size} trazos activos ($totalPoints puntos)", true)
-            ModuleStatusRow("Formas Geométricas", "${board.shapes.size} formas vectoriales", true)
-            ModuleStatusRow("Notas Adhesivas", "${board.stickyNotes.size} notas (Sync Workspace)", true)
-            ModuleStatusRow("Texto Flotante", "${board.textItems.size} cajas de texto", true)
-            ModuleStatusRow("Almacenamiento Local-First", "AtomicFile + Debounced IO (SSOT)", true)
-            ModuleStatusRow("Control de Versiones", "${board.snapshots.size} snapshots serializados", true)
-            ModuleStatusRow("Auditoría de Operaciones", "${board.auditLogs.size} eventos en búfer", true)
+            ModuleStatusRow("Tinta Paramétrica + Studio", "${board.strokes.size} trazos · 9 pinceles ($totalPoints pts)", true)
+            ModuleStatusRow("Mezcla Raster Tile 512²", "Smudge, Flood Fill, Borrador Suave + PNG Sidecars", true)
+            ModuleStatusRow("Estabilizador 1€ + Predictivo", "Catmull-Rom + Arcos Kasa + Esquinas >38°", true)
+            ModuleStatusRow("Guías de Precisión", "Regla 15°, Elipse, Curvas Francesas, 1P/2P/3P/ISO", true)
+            ModuleStatusRow("Capas y Modos de Fusión", "${board.layers.size} capas (Blend, Alpha Lock, Referencia)", true)
+            ModuleStatusRow("Formas y Notas Adhesivas", "${board.shapes.size} formas · ${board.stickyNotes.size} notas · ${board.textItems.size} textos", true)
+            ModuleStatusRow("Persistencia Local-First", "AtomicFile + PNG Tiles + Snapshots (${board.snapshots.size})", true)
+            ModuleStatusRow("Auditoría de Operaciones", "${board.auditLogs.size} eventos registrados", true)
         }
     }
 }

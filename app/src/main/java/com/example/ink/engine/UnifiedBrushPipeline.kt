@@ -190,29 +190,54 @@ object UnifiedBrushPipeline {
         // Freehand strokes must stay on the captured pointer path; no organic offset or lag.
         val effectiveHandDrawn = 0f
 
+        val settings = stroke.studioSettings
         val config = BrushConfig(
             color = colorInt,
             strokeWidth = worldWidth,
-            alpha = stroke.opacity.coerceIn(0.15f, 1.0f),
+            alpha = stroke.opacity.coerceIn(0.05f, 1.0f),
             handDrawnFactor = effectiveHandDrawn,
             isDarkBackground = isDarkBoard,
             isOpaqueCanvasBackground = isOpaqueCanvasBackground,
             isRainbow = stroke.isRainbow,
             strokeStyle = stroke.strokeStyle,
             animPhase = animPhase,
-            seed = stroke.id.hashCode()
+            seed = stroke.id.hashCode(),
+            flow = settings.flow,
+            spacing = settings.spacing,
+            hardness = settings.hardness,
+            grainStrength = settings.grainStrength,
+            taperStart = settings.taperStart,
+            taperEnd = settings.taperEnd,
+            velocitySensitivity = settings.velocitySensitivity,
+            chiselAngleDeg = settings.chiselAngleDeg
         )
+
+        val timestampsMs = if (
+            stroke.points.size >= 2 &&
+            stroke.points.last().timestampMs > stroke.points.first().timestampMs
+        ) {
+            stroke.points.map { it.timestampMs }
+        } else {
+            null
+        }
+        val pressures = if (stroke.points.any { it.pressure != 1.0f }) {
+            stroke.points.map { it.pressure }
+        } else {
+            null
+        }
 
         val buildNodes = {
             val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = false)
             val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
             PathHumanizer.humanizePath(
-                styledPath,
-                effectiveHandDrawn,
-                PathHumanizer.DEFAULT_STEP_PX,
-                config.seed,
+                path = styledPath,
+                handDrawnFactor = effectiveHandDrawn,
+                stepPx = PathHumanizer.DEFAULT_STEP_PX,
+                seed = config.seed,
+                timestampsMs = timestampsMs,
                 // Keep open-stroke brush texture identical while drawing and after commit.
-                stableOpenContours = true
+                stableOpenContours = true,
+                pressures = pressures
             )
         }
         // The live preview changes on every pointer event. Caching every intermediate
@@ -220,7 +245,7 @@ object UnifiedBrushPipeline {
         val nodes: List<BrushNode> = if (preserveInputPoints) {
             buildNodes()
         } else {
-            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${(effectiveHandDrawn * 100).roundToInt()}"
+            val cacheKey = "S:${stroke.id}:${stroke.geometryMetrics.pointsHash}:${stroke.width}:${stroke.strokeStyle.name}:${stroke.capStyle.name}:${effectiveBrushType.name}:${settings.hashCode()}:${(effectiveHandDrawn * 100).roundToInt()}"
             nodeCache.get(cacheKey) ?: buildNodes().also { built ->
                 if (built.isNotEmpty()) nodeCache.put(cacheKey, built)
             }

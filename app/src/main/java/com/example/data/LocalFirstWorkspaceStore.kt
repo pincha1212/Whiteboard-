@@ -3,6 +3,7 @@ package com.example.data
 import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
+import com.example.ink.engine.MutableRasterTileStore
 import com.example.model.StickyNote
 import com.example.model.WhiteboardBoard
 import com.example.notes.data.NoteExportImportService
@@ -66,6 +67,11 @@ class LocalFirstWorkspaceStore(
         replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
+
+    val rasterTileStore = MutableRasterTileStore()
+    private val rasterSidecarStore: RasterTileSidecarStore? = storageFile?.parentFile?.let {
+        RasterTileSidecarStore(File(it, "raster_tiles"))
+    }
 
     private val _dbState = MutableStateFlow(
         if (loadFromDiskInBackground) WorkspaceDbState() else loadFromDiskOrEmpty()
@@ -225,6 +231,8 @@ class LocalFirstWorkspaceStore(
     }
 
     fun deleteBoard(boardId: String, fallbackBoard: WhiteboardBoard? = null): WorkspaceDbState {
+        rasterTileStore.removeBoard(boardId)
+        rasterSidecarStore?.deleteBoardDir(boardId)
         return commit { cur ->
             val remainingBoards = cur.boards.filter { it.id != boardId }
             val nextBoards = if (remainingBoards.isEmpty() && fallbackBoard != null) {
@@ -561,6 +569,7 @@ class LocalFirstWorkspaceStore(
             writer.flush()
             atomicFile.finishWrite(stream)
             outputStream = null
+            rasterSidecarStore?.syncWorkspace(state.boards, rasterTileStore)
             true
         } catch (error: Exception) {
             outputStream?.let { stream ->
@@ -600,6 +609,7 @@ class LocalFirstWorkspaceStore(
                     boards.add(restored)
                 }
             }
+            rasterSidecarStore?.loadAllInto(rasterTileStore)
             projectBoardsFromNotes(WorkspaceDbState(notes = notes, folders = folders, boards = boards))
         } catch (error: Exception) {
             val recoveryCopy = try {

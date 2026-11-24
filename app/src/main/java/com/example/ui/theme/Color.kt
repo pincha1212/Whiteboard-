@@ -59,3 +59,18 @@ val SurfaceContainerDark = Color(0xFF25282E)
 
 val OutlineSubtle = Color(0xFFE0E3E8)
 val OutlineDarkSubtle = Color(0xFF383C45)
+
+// Neutral Graphite Studio Chrome ("Estudio Oscuro Neutro")
+val StudioBg = Color(0xFF141416)
+val StudioSurface = Color(0xFF1E1E21)
+val StudioSurfaceVariant = Color(0xFF28282C)
+val StudioOutline = Color(0xFF3A3A40)
+val StudioOutlineVariant = Color(0xFF2C2C31)
+val StudioOnSurface = Color(0xFFF2F2F5)
+val StudioOnSurfaceVariant = Color(0xFF9A9AA3)
+val StudioActivePill = Color(0xFF3F3F46)
+val StudioActivePrimary = Color(0xFFE4E4E7)
+val StudioOnActivePrimary = Color(0xFF141416)
+val GuideCyan = Color(0xFF22D3EE)
+val GuideAmber = Color(0xFFF59E0B)
+

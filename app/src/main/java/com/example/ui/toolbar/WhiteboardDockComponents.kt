@@ -117,13 +117,19 @@ internal val DockRainbowColors = listOf(
 internal fun ToolType.isInkingOrEraseTool(): Boolean = when (this) {
     ToolType.PENCIL,
     ToolType.PEN,
+    ToolType.TECHNICAL_INK,
     ToolType.FINE_MARKER,
+    ToolType.CHISEL_MARKER,
     ToolType.PAINT_BRUSH,
+    ToolType.WATERCOLOR,
     ToolType.AIRBRUSH,
     ToolType.HIGHLIGHTER,
+    ToolType.SMUDGE,
+    ToolType.FLOOD_FILL,
     ToolType.LASER_POINTER,
     ToolType.ERASER,
     ToolType.PIXEL_ERASER,
+    ToolType.SOFT_ERASER,
     ToolType.EYEDROPPER -> true
     else -> false
 }
@@ -286,7 +292,11 @@ internal fun ModeSwitcherGroup(
                                 Modifier.background(Brush.horizontalGradient(DockRainbowColors))
                             } else {
                                 Modifier.background(
-                                    if (isDrawingActive && activeInkingTool != ToolType.ERASER && activeInkingTool != ToolType.PIXEL_ERASER) {
+                                    if (isDrawingActive &&
+                                        activeInkingTool != ToolType.ERASER &&
+                                        activeInkingTool != ToolType.PIXEL_ERASER &&
+                                        activeInkingTool != ToolType.SOFT_ERASER
+                                    ) {
                                         penColor
                                     } else {
                                         drawFg.copy(alpha = 0.55f)
@@ -345,7 +355,7 @@ private fun ActiveDrawingToolGlyph(
     modifier: Modifier = Modifier
 ) {
     when (tool) {
-        ToolType.ERASER, ToolType.PIXEL_ERASER -> {
+        ToolType.ERASER, ToolType.PIXEL_ERASER, ToolType.SOFT_ERASER -> {
             Canvas(modifier = modifier) {
                 val w = size.width
                 val h = size.height
@@ -363,6 +373,12 @@ private fun ActiveDrawingToolGlyph(
                     strokeWidth = w * 0.10f
                 )
             }
+        }
+        ToolType.SMUDGE -> {
+            PhysicalSmudgeIcon(tint = tint, modifier = modifier)
+        }
+        ToolType.FLOOD_FILL -> {
+            PhysicalFloodFillIcon(fillColor = tint, modifier = modifier)
         }
         ToolType.LASER_POINTER -> {
             Canvas(modifier = modifier) {
@@ -440,6 +456,7 @@ internal fun InkingToolsRow(
     onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
     onUpdateSlotOpacity: (Int, Float) -> Unit = { _, _ -> },
     onOpenColorStudio: () -> Unit = {},
+    onOpenBrushStudio: (Int) -> Unit = {},
     penColor: Color = Color.Black,
     isRainbowPen: Boolean = false,
     onToggleAutoShape: () -> Unit,
@@ -454,8 +471,11 @@ internal fun InkingToolsRow(
     val isAnyBrushToolActive = !hasPendingPlacement && (
         currentTool == ToolType.PENCIL ||
             currentTool == ToolType.PEN ||
+            currentTool == ToolType.TECHNICAL_INK ||
             currentTool == ToolType.FINE_MARKER ||
+            currentTool == ToolType.CHISEL_MARKER ||
             currentTool == ToolType.PAINT_BRUSH ||
+            currentTool == ToolType.WATERCOLOR ||
             currentTool == ToolType.AIRBRUSH ||
             currentTool == ToolType.HIGHLIGHTER
         )
@@ -470,6 +490,7 @@ internal fun InkingToolsRow(
             onUpdateBrushSlot = onUpdateBrushSlot,
             onUpdateSlotOpacity = onUpdateSlotOpacity,
             onOpenColorStudio = onOpenColorStudio,
+            onOpenBrushStudio = onOpenBrushStudio,
             onToggleAutoShape = onToggleAutoShape,
             isVertical = isVertical
         )
@@ -493,6 +514,29 @@ internal fun InkingToolsRow(
                         else Brush.radialGradient(listOf(penColor, penColor))
                     )
                     .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            )
+        }
+
+        TrayToolSlot(
+            isSelected = !hasPendingPlacement && currentTool == ToolType.SMUDGE,
+            description = "Difuminar y mezclar pigmento",
+            onClick = { onSelectTool(ToolType.SMUDGE) },
+            testTag = "dock_menu_tool_smudge"
+        ) {
+            PhysicalSmudgeIcon(
+                modifier = Modifier.size(width = 24.dp, height = 38.dp)
+            )
+        }
+
+        TrayToolSlot(
+            isSelected = !hasPendingPlacement && currentTool == ToolType.FLOOD_FILL,
+            description = "Relleno de cubeta",
+            onClick = { onSelectTool(ToolType.FLOOD_FILL) },
+            testTag = "dock_menu_tool_flood_fill"
+        ) {
+            PhysicalFloodFillIcon(
+                fillColor = if (isRainbowPen) Color(0xFFEC4899) else penColor,
+                modifier = Modifier.size(width = 26.dp, height = 38.dp)
             )
         }
 
@@ -539,6 +583,17 @@ internal fun InkingToolsRow(
             testTag = "dock_menu_tool_pixel_eraser"
         ) {
             PhysicalPixelEraserIcon(
+                modifier = Modifier.size(width = 26.dp, height = 38.dp)
+            )
+        }
+
+        TrayToolSlot(
+            isSelected = !hasPendingPlacement && currentTool == ToolType.SOFT_ERASER,
+            description = "Borrador suave gradual",
+            onClick = { onSelectTool(ToolType.SOFT_ERASER) },
+            testTag = "dock_menu_tool_soft_eraser"
+        ) {
+            PhysicalSoftEraserIcon(
                 modifier = Modifier.size(width = 26.dp, height = 38.dp)
             )
         }

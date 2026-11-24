@@ -36,11 +36,13 @@ import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -58,7 +60,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.model.GuideType
+import com.example.model.GuidesOverlayState
+import com.example.model.PerspectiveMode
 import com.example.model.SymmetryMode
+import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.roundToInt
 
 @Composable
@@ -71,6 +78,14 @@ fun WhiteboardTopBar(
     symmetryMode: SymmetryMode = SymmetryMode.NONE,
     layerCount: Int = 1,
     isLayersPanelOpen: Boolean = false,
+    guidesState: GuidesOverlayState = GuidesOverlayState(),
+    isRulerVisible: Boolean = false,
+    predictionLevel: Int = 2,
+    floodFillTolerance: Int = 36,
+    onSelectGuide: (GuideType) -> Unit = {},
+    onSelectPerspectiveMode: (PerspectiveMode) -> Unit = {},
+    onChangePredictionLevel: (Int) -> Unit = {},
+    onChangeFloodFillTolerance: (Int) -> Unit = {},
     onCycleSymmetryMode: () -> Unit = {},
     onToggleLayersPanel: () -> Unit = {},
     onUndo: () -> Unit,
@@ -93,7 +108,12 @@ fun WhiteboardTopBar(
     modifier: Modifier = Modifier
 ) {
     var showHeaderMenu by remember { mutableStateOf(false) }
+    var showGuidesMenu by remember { mutableStateOf(false) }
     val zoomPercent = (scale * 100f).roundToInt()
+    val hasAnyActiveGuide = isRulerVisible ||
+        guidesState.ellipse.isVisible ||
+        guidesState.frenchCurve.isVisible ||
+        guidesState.perspective.mode != PerspectiveMode.OFF
 
     Box(
         modifier = modifier
@@ -185,21 +205,155 @@ fun WhiteboardTopBar(
                         overflow = TextOverflow.Ellipsis
                     )
                     val snapLabel = if (isSnapToGrid) " · Imán" else ""
+                    val predLabel = if (predictionLevel > 0) " · P$predictionLevel" else ""
                     Text(
-                        text = "$zoomPercent%$snapLabel",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontSize = 10.sp,
+                        text = "$zoomPercent%$snapLabel$predLabel",
+                        style = StudioMonoTextStyle.copy(fontSize = 10.sp),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                // Right: Symmetry, Layers, Undo/Redo & Overflow Menu
+                // Right: Precision Guides, Symmetry, Layers, Undo/Redo & Overflow Menu
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
+                    Box {
+                        TopBarActionIcon(
+                            icon = Icons.Default.Straighten,
+                            contentDescription = "Guías de precisión y trazo predictivo",
+                            enabled = true,
+                            isHighlighted = hasAnyActiveGuide || showGuidesMenu,
+                            onClick = { showGuidesMenu = !showGuidesMenu },
+                            testTag = "btn_topbar_guides"
+                        )
+
+                        DropdownMenu(
+                            expanded = showGuidesMenu,
+                            onDismissRequest = { showGuidesMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .width(256.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+                                .testTag("topbar_guides_menu")
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "GUÍAS Y PRECISIÓN",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    GuideChipToggle(
+                                        label = "Regla",
+                                        selected = isRulerVisible,
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "guide_chip_ruler",
+                                        onClick = { onSelectGuide(GuideType.RULER) }
+                                    )
+                                    GuideChipToggle(
+                                        label = "Elipse",
+                                        selected = guidesState.ellipse.isVisible,
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "guide_chip_ellipse",
+                                        onClick = { onSelectGuide(GuideType.ELLIPSE) }
+                                    )
+                                    GuideChipToggle(
+                                        label = "Curva",
+                                        selected = guidesState.frenchCurve.isVisible,
+                                        modifier = Modifier.weight(1f),
+                                        testTag = "guide_chip_french",
+                                        onClick = { onSelectGuide(GuideType.FRENCH_CURVE) }
+                                    )
+                                }
+
+                                Text(
+                                    text = "PERSPECTIVA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    PerspectiveMode.entries.forEach { mode ->
+                                        GuideChipToggle(
+                                            label = mode.shortCode,
+                                            selected = guidesState.perspective.mode == mode,
+                                            modifier = Modifier.weight(1f),
+                                            testTag = "perspective_mode_${mode.name}",
+                                            onClick = { onSelectPerspectiveMode(mode) }
+                                        )
+                                    }
+                                }
+
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Trazo predictivo",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = if (predictionLevel == 0) "OFF" else "Nv. $predictionLevel",
+                                        style = StudioMonoTextStyle,
+                                        color = GuideCyan
+                                    )
+                                }
+                                Slider(
+                                    value = predictionLevel.toFloat(),
+                                    onValueChange = { onChangePredictionLevel(it.roundToInt().coerceIn(0, 5)) },
+                                    valueRange = 0f..5f,
+                                    steps = 4,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(26.dp)
+                                        .testTag("slider_prediction_level")
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "Tolerancia relleno",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "$floodFillTolerance",
+                                        style = StudioMonoTextStyle,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Slider(
+                                    value = floodFillTolerance.toFloat(),
+                                    onValueChange = { onChangeFloodFillTolerance(it.roundToInt().coerceIn(4, 96)) },
+                                    valueRange = 4f..96f,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(26.dp)
+                                        .testTag("slider_flood_tolerance")
+                                )
+                            }
+                        }
+                    }
+
                     TopBarActionIcon(
                         icon = Icons.Default.Flip,
                         contentDescription = symmetryMode.displayName,
@@ -620,3 +774,36 @@ private fun TopBarActionIcon(
         )
     }
 }
+
+@Composable
+private fun GuideChipToggle(
+    label: String,
+    selected: Boolean,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .height(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) GuideCyan.copy(alpha = 0.20f) else MaterialTheme.colorScheme.surfaceVariant)
+            .border(
+                width = 1.dp,
+                color = if (selected) GuideCyan else MaterialTheme.colorScheme.outlineVariant,
+                shape = RoundedCornerShape(8.dp)
+            )
+            .clickable(onClick = onClick)
+            .testTag(testTag)
+    ) {
+        Text(
+            text = label,
+            fontSize = 10.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (selected) GuideCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+    }
+}
+

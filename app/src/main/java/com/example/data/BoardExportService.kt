@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.os.Build
 import android.os.Environment
@@ -16,10 +18,15 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.core.content.FileProvider
 import com.example.ink.StickyNoteGeometry
+import com.example.ink.engine.MutableRasterTileStore
+import com.example.ink.engine.PaintTileRasterCache
 import com.example.ink.engine.UnifiedBrushPipeline
+import com.example.ink.engine.toAndroidBlendMode
+import com.example.ink.engine.toLegacyPorterDuff
 import com.example.model.CanvasGridType
 import com.example.model.DEFAULT_LAYER_ID
 import com.example.model.DrawingLayer
+import com.example.model.LayerBlendMode
 import com.example.model.WhiteboardBoard
 import java.io.File
 import java.io.FileOutputStream
@@ -33,8 +40,19 @@ object BoardExportService {
         board: WhiteboardBoard,
         includeBackground: Boolean = true,
         includeGrid: Boolean = true,
-        maxDimensionPx: Int = 1800
+        maxDimensionPx: Int = 1800,
+        mutableRasterStore: MutableRasterTileStore? = null,
+        onlyLayerId: String? = null,
+        resolutionMultiplier: Int = 1
     ): Bitmap {
+        val allLayers = board.layers.ifEmpty { listOf(DrawingLayer()) }
+        val targetLayers = if (onlyLayerId != null) {
+            allLayers.filter { it.id == onlyLayerId }
+        } else {
+            allLayers.filter { it.isVisible }
+        }
+        val targetLayerIds = targetLayers.map { it.id }.toSet()
+
         var minX = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE
         var minY = Float.MAX_VALUE
@@ -42,6 +60,7 @@ object BoardExportService {
         var hasContent = false
 
         board.strokes.forEach { s ->
+            if (onlyLayerId != null && s.layerId != onlyLayerId) return@forEach
             val strokePad = max(s.width * 2.2f, 24f)
             s.points.forEach { p ->
                 hasContent = true
@@ -52,6 +71,7 @@ object BoardExportService {
             }
         }
         board.shapes.forEach { sh ->
+            if (onlyLayerId != null && sh.layerId != onlyLayerId) return@forEach
             hasContent = true
             val shapePad = max(sh.strokeWidth * 2.2f, 18f)
             minX = min(minX, sh.x - shapePad)
@@ -59,19 +79,35 @@ object BoardExportService {
             minY = min(minY, sh.y - shapePad)
             maxY = max(maxY, sh.y + sh.height + shapePad)
         }
-        board.stickyNotes.forEach { n ->
-            hasContent = true
-            minX = min(minX, n.x)
-            maxX = max(maxX, n.x + n.width)
-            minY = min(minY, n.y)
-            maxY = max(maxY, n.y + n.height)
+        if (mutableRasterStore != null) {
+            for (layerId in targetLayerIds) {
+                val tiles = mutableRasterStore.getTilesForLayer(board.id, layerId)
+                for (coord in tiles.keys) {
+                    hasContent = true
+                    val tileLeft = coord.tx * PaintTileRasterCache.TILE_WORLD_SIZE
+                    val tileTop = coord.ty * PaintTileRasterCache.TILE_WORLD_SIZE
+                    minX = min(minX, tileLeft)
+                    maxX = max(maxX, tileLeft + PaintTileRasterCache.TILE_WORLD_SIZE)
+                    minY = min(minY, tileTop)
+                    maxY = max(maxY, tileTop + PaintTileRasterCache.TILE_WORLD_SIZE)
+                }
+            }
         }
-        board.textItems.forEach { t ->
-            hasContent = true
-            minX = min(minX, t.x)
-            maxX = max(maxX, t.x + 240f)
-            minY = min(minY, t.y)
-            maxY = max(maxY, t.y + 60f)
+        if (onlyLayerId == null) {
+            board.stickyNotes.forEach { n ->
+                hasContent = true
+                minX = min(minX, n.x)
+                maxX = max(maxX, n.x + n.width)
+                minY = min(minY, n.y)
+                maxY = max(maxY, n.y + n.height)
+            }
+            board.textItems.forEach { t ->
+                hasContent = true
+                minX = min(minX, t.x)
+                maxX = max(maxX, t.x + 240f)
+                minY = min(minY, t.y)
+                maxY = max(maxY, t.y + 60f)
+            }
         }
 
         if (!hasContent || minX == Float.MAX_VALUE) {
@@ -87,19 +123,25 @@ object BoardExportService {
             maxY += pad
         }
 
+        val mult = resolutionMultiplier.coerceIn(1, 4)
+        val effectiveMaxDim = (maxDimensionPx.toLong() * mult).coerceIn(480L, 4096L).toInt()
         val worldW = (maxX - minX).coerceAtLeast(360f)
         val worldH = (maxY - minY).coerceAtLeast(240f)
         val longest = max(worldW, worldH)
-        val scale = (maxDimensionPx.toFloat() / longest).coerceIn(0.6f, 2.2f)
-        val bmpW = (worldW * scale).roundToInt().coerceIn(480, maxDimensionPx)
-        val bmpH = (worldH * scale).roundToInt().coerceIn(320, maxDimensionPx)
+        val scale = (effectiveMaxDim.toFloat() / longest).coerceIn(0.6f, 2.2f * mult)
+        val bmpW = (worldW * scale).roundToInt().coerceIn(480, effectiveMaxDim)
+        val bmpH = (worldH * scale).roundToInt().coerceIn(320, effectiveMaxDim)
 
         val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        // 1. Background
-        val bgColor = if (includeBackground) safeParseColor(board.colorTheme.hex, Color.WHITE) else Color.WHITE
-        canvas.drawColor(bgColor)
+        // 1. Background (supports true transparency when includeBackground == false)
+        if (includeBackground) {
+            val bgColor = safeParseColor(board.colorTheme.hex, Color.WHITE)
+            canvas.drawColor(bgColor)
+        } else {
+            canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
+        }
 
         // 2. Grid
         if (includeBackground && includeGrid && board.gridType != CanvasGridType.BLANK) {
@@ -112,17 +154,35 @@ object BoardExportService {
 
         val isDarkBoard = board.colorTheme.isDark
 
-        // 3 & 4. Strokes & Shapes rendered layer-by-layer (bottom to top)
-        val layers = board.layers.ifEmpty { listOf(DrawingLayer()) }
-        val knownLayerIds = layers.map { it.id }.toSet()
+        // 3 & 4. Strokes, Shapes & Mutable Raster Tiles rendered layer-by-layer (bottom to top)
+        val knownLayerIds = allLayers.map { it.id }.toSet()
         val strokesByLayer = board.strokes.groupBy { s -> if (s.layerId in knownLayerIds) s.layerId else DEFAULT_LAYER_ID }
         val shapesByLayer = board.shapes.groupBy { sh -> if (sh.layerId in knownLayerIds) sh.layerId else DEFAULT_LAYER_ID }
 
-        layers.forEach { layer ->
-            if (!layer.isVisible || layer.opacity <= 0.01f) return@forEach
+        val tilePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val alphaLockTilePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
+        }
+
+        allLayers.forEach { layer ->
+            if (onlyLayerId != null && layer.id != onlyLayerId) return@forEach
+            if (onlyLayerId == null && !layer.isVisible) return@forEach
+            if (layer.opacity <= 0.01f) return@forEach
+
             val layerAlpha = (layer.opacity * 255f).roundToInt().coerceIn(0, 255)
-            val saveCount = if (layerAlpha < 252) {
-                canvas.saveLayerAlpha(null, layerAlpha)
+            val layerBlendPaint = Paint().apply {
+                alpha = layerAlpha
+                if (layer.blendMode != LayerBlendMode.NORMAL) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        blendMode = layer.blendMode.toAndroidBlendMode()
+                    } else {
+                        layer.blendMode.toLegacyPorterDuff()?.let { xfermode = PorterDuffXfermode(it) }
+                    }
+                }
+            }
+            val needsIsolation = layerAlpha < 252 || layer.blendMode != LayerBlendMode.NORMAL || layer.isAlphaLocked
+            val saveCount = if (needsIsolation) {
+                canvas.saveLayer(minX, minY, maxX, maxY, layerBlendPaint)
             } else -1
 
             strokesByLayer[layer.id].orEmpty().forEach { stroke ->
@@ -131,7 +191,7 @@ object BoardExportService {
                         canvas = canvas,
                         stroke = stroke,
                         isDarkBoard = isDarkBoard,
-                        isOpaqueCanvasBackground = true
+                        isOpaqueCanvasBackground = includeBackground
                     )
                 }
             }
@@ -142,9 +202,21 @@ object BoardExportService {
                         canvas = canvas,
                         shape = shape,
                         isDarkBoard = isDarkBoard,
-                        isOpaqueCanvasBackground = true,
+                        isOpaqueCanvasBackground = includeBackground,
                         drawLabel = true
                     )
+                }
+            }
+
+            if (mutableRasterStore != null) {
+                val layerTiles = mutableRasterStore.getTilesForLayer(board.id, layer.id)
+                val paintToUse = if (layer.isAlphaLocked) alphaLockTilePaint else tilePaint
+                for ((coord, tileBmp) in layerTiles) {
+                    if (!tileBmp.isRecycled) {
+                        val wx = coord.tx * PaintTileRasterCache.TILE_WORLD_SIZE
+                        val wy = coord.ty * PaintTileRasterCache.TILE_WORLD_SIZE
+                        canvas.drawBitmap(tileBmp, wx, wy, paintToUse)
+                    }
                 }
             }
 
@@ -153,118 +225,120 @@ object BoardExportService {
             }
         }
 
-        // 5. Sticky Notes
-        val noteFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        val noteBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = 2f
-            color = Color.argb(45, 15, 23, 42)
-        }
-        val noteTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 20f
-        }
-
-        board.stickyNotes.forEach { note ->
-            if (note.isHiddenByCollapse) return@forEach
-            canvas.save()
-            val cx = note.x + note.width / 2f
-            val cy = note.y + note.height / 2f
-            if (note.rotation != 0f) {
-                canvas.rotate(note.rotation, cx, cy)
+        if (onlyLayerId == null) {
+            // 5. Sticky Notes
+            val noteFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+            val noteBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 2f
+                color = Color.argb(45, 15, 23, 42)
             }
-            val bg = safeParseColor(note.colorHex, Color.parseColor("#FFF275"))
-            val rect = RectF(note.x, note.y, note.x + note.width, note.y + note.height)
-            noteFillPaint.color = bg
-            canvas.drawRoundRect(rect, 18f, 18f, noteFillPaint)
-            canvas.drawRoundRect(rect, 18f, 18f, noteBorderPaint)
-
-            val isDarkNote = note.colorHex.equals("#2D3139", ignoreCase = true)
-            val inkColor = if (isDarkNote) Color.WHITE else Color.parseColor("#0F172A")
-            noteTextPaint.color = inkColor
-            val cleanTitle = note.title?.trim().orEmpty()
-            val textBody = note.text.ifBlank { if (cleanTitle.isEmpty()) "Nota adhesiva" else "" }
-            val pad = StickyNoteGeometry.innerPaddingWorld(note.width, note.height)
-            val (innerW, innerH) = StickyNoteGeometry.innerTextBoxWorld(note.width, note.height)
-            val baseFont = StickyNoteGeometry.estimateAutoFitFontSizeWorld(
-                text = textBody,
-                innerWidthWorld = innerW,
-                innerHeightWorld = innerH,
-                title = note.title
-            )
-            val textWidth = innerW.roundToInt().coerceAtLeast(24)
-            canvas.translate(note.x + pad, note.y + StickyNoteGeometry.headerHeightWorld(note.height) + pad)
-
-            if (cleanTitle.isNotEmpty()) {
-                val titlePaint = TextPaint(noteTextPaint).apply {
-                    textSize = baseFont * 1.15f
-                    isFakeBoldText = true
-                }
-                @Suppress("DEPRECATION")
-                val titleLayout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    StaticLayout.Builder.obtain(cleanTitle, 0, cleanTitle.length, titlePaint, textWidth)
-                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                        .build()
-                } else {
-                    StaticLayout(cleanTitle, titlePaint, textWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
-                }
-                titleLayout.draw(canvas)
-                val dividerY = titleLayout.height + 4f
-                val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.argb(42, Color.red(inkColor), Color.green(inkColor), Color.blue(inkColor))
-                    strokeWidth = 1.2f
-                }
-                canvas.drawLine(0f, dividerY, textWidth.toFloat(), dividerY, dividerPaint)
-                canvas.translate(0f, dividerY + 5f)
+            val noteTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                textSize = 20f
             }
 
-            if (textBody.isNotEmpty()) {
-                noteTextPaint.textSize = baseFont
+            board.stickyNotes.forEach { note ->
+                if (note.isHiddenByCollapse) return@forEach
+                canvas.save()
+                val cx = note.x + note.width / 2f
+                val cy = note.y + note.height / 2f
+                if (note.rotation != 0f) {
+                    canvas.rotate(note.rotation, cx, cy)
+                }
+                val bg = safeParseColor(note.colorHex, Color.parseColor("#FFF275"))
+                val rect = RectF(note.x, note.y, note.x + note.width, note.y + note.height)
+                noteFillPaint.color = bg
+                canvas.drawRoundRect(rect, 18f, 18f, noteFillPaint)
+                canvas.drawRoundRect(rect, 18f, 18f, noteBorderPaint)
+
+                val isDarkNote = note.colorHex.equals("#2D3139", ignoreCase = true)
+                val inkColor = if (isDarkNote) Color.WHITE else Color.parseColor("#0F172A")
+                noteTextPaint.color = inkColor
+                val cleanTitle = note.title?.trim().orEmpty()
+                val textBody = note.text.ifBlank { if (cleanTitle.isEmpty()) "Nota adhesiva" else "" }
+                val pad = StickyNoteGeometry.innerPaddingWorld(note.width, note.height)
+                val (innerW, innerH) = StickyNoteGeometry.innerTextBoxWorld(note.width, note.height)
+                val baseFont = StickyNoteGeometry.estimateAutoFitFontSizeWorld(
+                    text = textBody,
+                    innerWidthWorld = innerW,
+                    innerHeightWorld = innerH,
+                    title = note.title
+                )
+                val textWidth = innerW.roundToInt().coerceAtLeast(24)
+                canvas.translate(note.x + pad, note.y + StickyNoteGeometry.headerHeightWorld(note.height) + pad)
+
+                if (cleanTitle.isNotEmpty()) {
+                    val titlePaint = TextPaint(noteTextPaint).apply {
+                        textSize = baseFont * 1.15f
+                        isFakeBoldText = true
+                    }
+                    @Suppress("DEPRECATION")
+                    val titleLayout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        StaticLayout.Builder.obtain(cleanTitle, 0, cleanTitle.length, titlePaint, textWidth)
+                            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                            .build()
+                    } else {
+                        StaticLayout(cleanTitle, titlePaint, textWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
+                    }
+                    titleLayout.draw(canvas)
+                    val dividerY = titleLayout.height + 4f
+                    val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.argb(42, Color.red(inkColor), Color.green(inkColor), Color.blue(inkColor))
+                        strokeWidth = 1.2f
+                    }
+                    canvas.drawLine(0f, dividerY, textWidth.toFloat(), dividerY, dividerPaint)
+                    canvas.translate(0f, dividerY + 5f)
+                }
+
+                if (textBody.isNotEmpty()) {
+                    noteTextPaint.textSize = baseFont
+                    @Suppress("DEPRECATION")
+                    val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        StaticLayout.Builder.obtain(textBody, 0, textBody.length, noteTextPaint, textWidth)
+                            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                            .build()
+                    } else {
+                        StaticLayout(textBody, noteTextPaint, textWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
+                    }
+                    layout.draw(canvas)
+                }
+                canvas.restore()
+            }
+
+            // 6. Text Items & Editable Template Cause Boxes
+            board.textItems.forEach { t ->
+                if (t.isHiddenByCollapse) return@forEach
+                canvas.save()
+                val tPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = t.fontSize.coerceIn(12f, 72f)
+                    color = safeParseColor(t.colorHex, Color.parseColor("#0F172A"))
+                    isFakeBoldText = t.isBold
+                }
+                val tw = t.width.roundToInt().coerceAtLeast(60)
                 @Suppress("DEPRECATION")
                 val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    StaticLayout.Builder.obtain(textBody, 0, textBody.length, noteTextPaint, textWidth)
+                    StaticLayout.Builder.obtain(t.text, 0, t.text.length, tPaint, tw)
                         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                         .build()
                 } else {
-                    StaticLayout(textBody, noteTextPaint, textWidth, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
+                    StaticLayout(t.text, tPaint, tw, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
                 }
+                val cardH = max(t.height, layout.height.toFloat() + 20f).coerceAtLeast(48f)
+                if (t.rotation != 0f) {
+                    canvas.rotate(t.rotation, t.x + t.width * 0.5f, t.y + cardH * 0.5f)
+                }
+                if (t.isEditableCard && t.backgroundColorHex != "TRANSPARENT") {
+                    val cardBg = safeParseColor(t.backgroundColorHex ?: "#FFFFFF", Color.WHITE)
+                    val cardRect = RectF(t.x, t.y, t.x + t.width, t.y + cardH)
+                    noteFillPaint.color = cardBg
+                    canvas.drawRoundRect(cardRect, 12f, 12f, noteFillPaint)
+                    noteBorderPaint.color = Color.parseColor("#475569")
+                    canvas.drawRoundRect(cardRect, 12f, 12f, noteBorderPaint)
+                }
+                canvas.translate(t.x + if (t.isEditableCard) 10f else 0f, t.y + if (t.isEditableCard) 10f else 0f)
                 layout.draw(canvas)
+                canvas.restore()
             }
-            canvas.restore()
-        }
-
-        // 6. Text Items & Editable Template Cause Boxes
-        board.textItems.forEach { t ->
-            if (t.isHiddenByCollapse) return@forEach
-            canvas.save()
-            val tPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                textSize = t.fontSize.coerceIn(12f, 72f)
-                color = safeParseColor(t.colorHex, Color.parseColor("#0F172A"))
-                isFakeBoldText = t.isBold
-            }
-            val tw = t.width.roundToInt().coerceAtLeast(60)
-            @Suppress("DEPRECATION")
-            val layout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                StaticLayout.Builder.obtain(t.text, 0, t.text.length, tPaint, tw)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .build()
-            } else {
-                StaticLayout(t.text, tPaint, tw, Layout.Alignment.ALIGN_NORMAL, 1.0f, 0f, false)
-            }
-            val cardH = max(t.height, layout.height.toFloat() + 20f).coerceAtLeast(48f)
-            if (t.rotation != 0f) {
-                canvas.rotate(t.rotation, t.x + t.width * 0.5f, t.y + cardH * 0.5f)
-            }
-            if (t.isEditableCard && t.backgroundColorHex != "TRANSPARENT") {
-                val cardBg = safeParseColor(t.backgroundColorHex ?: "#FFFFFF", Color.WHITE)
-                val cardRect = RectF(t.x, t.y, t.x + t.width, t.y + cardH)
-                noteFillPaint.color = cardBg
-                canvas.drawRoundRect(cardRect, 12f, 12f, noteFillPaint)
-                noteBorderPaint.color = Color.parseColor("#475569")
-                canvas.drawRoundRect(cardRect, 12f, 12f, noteBorderPaint)
-            }
-            canvas.translate(t.x + if (t.isEditableCard) 10f else 0f, t.y + if (t.isEditableCard) 10f else 0f)
-            layout.draw(canvas)
-            canvas.restore()
         }
 
         canvas.restore()

@@ -798,4 +798,330 @@ fun PhysicalEyedropperIcon(
     }
 }
 
+@Composable
+fun PhysicalTechnicalInkIcon(
+    inkColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // Ultra-fine chrome needle tip
+        drawLine(
+            color = Color(0xFFE2E8F0),
+            start = Offset(cx, h * 0.08f),
+            end = Offset(cx, h * 0.28f),
+            strokeWidth = w * 0.08f,
+            cap = StrokeCap.Round
+        )
+        drawCircle(
+            color = inkColor,
+            radius = w * 0.055f,
+            center = Offset(cx, h * 0.09f)
+        )
+
+        // Stepped metallic drafting collar
+        drawRect(
+            color = Color(0xFFCBD5E1),
+            topLeft = Offset(cx - w * 0.14f, h * 0.28f),
+            size = Size(w * 0.28f, h * 0.18f)
+        )
+        drawRect(
+            color = inkColor,
+            topLeft = Offset(cx - w * 0.23f, h * 0.46f),
+            size = Size(w * 0.46f, h * 0.10f)
+        )
+
+        // Matte dark drafting barrel
+        drawRoundRect(
+            color = Color(0xFF27272A),
+            topLeft = Offset(cx - w * 0.23f, h * 0.56f),
+            size = Size(w * 0.46f, h * 0.50f),
+            cornerRadius = CornerRadius(w * 0.06f)
+        )
+        drawRoundRect(
+            color = Color(0xFF52525B),
+            topLeft = Offset(cx - w * 0.23f, h * 0.56f),
+            size = Size(w * 0.46f, h * 0.50f),
+            cornerRadius = CornerRadius(w * 0.06f),
+            style = Stroke(width = w * 0.042f)
+        )
+    }
+}
+
+@Composable
+fun PhysicalChiselMarkerIcon(
+    markerColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        val chisel = Path().apply {
+            moveTo(cx - w * 0.16f, h * 0.34f)
+            lineTo(cx - w * 0.11f, h * 0.11f)
+            lineTo(cx + w * 0.16f, h * 0.22f)
+            lineTo(cx + w * 0.16f, h * 0.34f)
+            close()
+        }
+        drawPath(chisel, color = markerColor)
+        drawPath(chisel, color = Color(0xFF3F3F46), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
+
+        val collar = Path().apply {
+            moveTo(cx - w * 0.20f, h * 0.34f)
+            lineTo(cx + w * 0.20f, h * 0.34f)
+            lineTo(cx + w * 0.28f, h * 0.54f)
+            lineTo(cx - w * 0.28f, h * 0.54f)
+            close()
+        }
+        drawPath(collar, color = Color(0xFFE4E4E7))
+        drawPath(collar, color = Color(0xFF3F3F46), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
+
+        drawRoundRect(
+            color = Color(0xFFF4F4F5),
+            topLeft = Offset(cx - w * 0.28f, h * 0.54f),
+            size = Size(w * 0.56f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.07f)
+        )
+        drawRect(
+            color = markerColor,
+            topLeft = Offset(cx - w * 0.28f, h * 0.64f),
+            size = Size(w * 0.56f, h * 0.14f)
+        )
+        drawRoundRect(
+            color = Color(0xFF3F3F46),
+            topLeft = Offset(cx - w * 0.28f, h * 0.54f),
+            size = Size(w * 0.56f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.07f),
+            style = Stroke(width = w * 0.042f)
+        )
+    }
+}
+
+@Composable
+fun PhysicalWatercolorIcon(
+    pigmentColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // Soft teardrop wet bristle tuft
+        val tuft = Path().apply {
+            moveTo(cx, h * 0.10f)
+            quadraticTo(cx + w * 0.30f, h * 0.32f, cx + w * 0.19f, h * 0.49f)
+            lineTo(cx - w * 0.19f, h * 0.49f)
+            quadraticTo(cx - w * 0.30f, h * 0.32f, cx, h * 0.10f)
+            close()
+        }
+        drawPath(tuft, color = pigmentColor.copy(alpha = 0.68f))
+        drawPath(tuft, color = pigmentColor, style = Stroke(width = w * 0.045f, join = StrokeJoin.Round))
+
+        // Translucent aqua-brush water reservoir collar
+        drawRect(
+            color = Color(0xFFBAE6FD),
+            topLeft = Offset(cx - w * 0.20f, h * 0.49f),
+            size = Size(w * 0.40f, h * 0.12f)
+        )
+        drawRoundRect(
+            color = Color(0xFFE0F2FE).copy(alpha = 0.88f),
+            topLeft = Offset(cx - w * 0.22f, h * 0.61f),
+            size = Size(w * 0.44f, h * 0.44f),
+            cornerRadius = CornerRadius(w * 0.08f)
+        )
+        drawRect(
+            color = pigmentColor.copy(alpha = 0.45f),
+            topLeft = Offset(cx - w * 0.18f, h * 0.66f),
+            size = Size(w * 0.36f, h * 0.24f)
+        )
+        drawRoundRect(
+            color = Color(0xFF52525B),
+            topLeft = Offset(cx - w * 0.22f, h * 0.61f),
+            size = Size(w * 0.44f, h * 0.44f),
+            cornerRadius = CornerRadius(w * 0.08f),
+            style = Stroke(width = w * 0.04f)
+        )
+    }
+}
+
+@Composable
+fun PhysicalSmudgeIcon(
+    tint: Color = Color(0xFFD4D4D8),
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        // Rolled paper blending stump (tortillon)
+        val stump = Path().apply {
+            moveTo(cx, h * 0.12f)
+            lineTo(cx + w * 0.24f, h * 0.56f)
+            lineTo(cx + w * 0.24f, h * 1.04f)
+            lineTo(cx - w * 0.24f, h * 1.04f)
+            lineTo(cx - w * 0.24f, h * 0.56f)
+            close()
+        }
+        drawPath(stump, color = Color(0xFFE4E4E7))
+        // Graphite smudged tip
+        val tip = Path().apply {
+            moveTo(cx, h * 0.12f)
+            lineTo(cx + w * 0.12f, h * 0.34f)
+            lineTo(cx - w * 0.12f, h * 0.34f)
+            close()
+        }
+        drawPath(tip, color = Color(0xFF52525B))
+        // Spiral wrap lines
+        drawLine(
+            color = tint.copy(alpha = 0.7f),
+            start = Offset(cx - w * 0.20f, h * 0.62f),
+            end = Offset(cx + w * 0.20f, h * 0.74f),
+            strokeWidth = w * 0.045f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = tint.copy(alpha = 0.7f),
+            start = Offset(cx - w * 0.20f, h * 0.80f),
+            end = Offset(cx + w * 0.20f, h * 0.92f),
+            strokeWidth = w * 0.045f,
+            cap = StrokeCap.Round
+        )
+        drawPath(stump, color = Color(0xFF3F3F46), style = Stroke(width = w * 0.045f, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun PhysicalSoftEraserIcon(
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        drawCircle(
+            color = Color(0xFFFBCFE8).copy(alpha = 0.85f),
+            radius = w * 0.28f,
+            center = Offset(cx, h * 0.32f)
+        )
+        drawCircle(
+            color = Color(0xFF3F3F46),
+            radius = w * 0.28f,
+            center = Offset(cx, h * 0.32f),
+            style = Stroke(
+                width = w * 0.045f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(w * 0.10f, w * 0.07f), 0f)
+            )
+        )
+        drawRoundRect(
+            color = Color(0xFFA1A1AA),
+            topLeft = Offset(cx - w * 0.22f, h * 0.56f),
+            size = Size(w * 0.44f, h * 0.48f),
+            cornerRadius = CornerRadius(w * 0.08f)
+        )
+    }
+}
+
+@Composable
+fun PhysicalFloodFillIcon(
+    fillColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val u = size.minDimension
+        // Tilted paint bucket body
+        val bucket = Path().apply {
+            moveTo(u * 0.24f, u * 0.44f)
+            lineTo(u * 0.56f, u * 0.18f)
+            lineTo(u * 0.84f, u * 0.50f)
+            lineTo(u * 0.52f, u * 0.76f)
+            close()
+        }
+        drawPath(bucket, color = Color(0xFFD4D4D8))
+        drawPath(bucket, color = Color(0xFF3F3F46), style = Stroke(width = u * 0.055f, join = StrokeJoin.Round))
+
+        // Paint splash droplet pouring out
+        val drop = Path().apply {
+            moveTo(u * 0.20f, u * 0.54f)
+            quadraticTo(u * 0.10f, u * 0.74f, u * 0.20f, u * 0.86f)
+            quadraticTo(u * 0.30f, u * 0.74f, u * 0.20f, u * 0.54f)
+            close()
+        }
+        drawPath(drop, color = fillColor)
+    }
+}
+
+@Composable
+fun PhysicalEllipseGuideIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val u = size.minDimension
+        drawOval(
+            color = tint,
+            topLeft = Offset(u * 0.12f, u * 0.24f),
+            size = Size(u * 0.76f, u * 0.52f),
+            style = Stroke(width = u * 0.075f)
+        )
+        drawLine(
+            color = tint.copy(alpha = 0.55f),
+            start = Offset(u * 0.12f, u * 0.50f),
+            end = Offset(u * 0.88f, u * 0.50f),
+            strokeWidth = u * 0.045f
+        )
+        drawLine(
+            color = tint.copy(alpha = 0.55f),
+            start = Offset(u * 0.50f, u * 0.24f),
+            end = Offset(u * 0.50f, u * 0.76f),
+            strokeWidth = u * 0.045f
+        )
+    }
+}
+
+@Composable
+fun PhysicalFrenchCurveIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val u = size.minDimension
+        val curve = Path().apply {
+            moveTo(u * 0.16f, u * 0.78f)
+            cubicTo(u * 0.14f, u * 0.22f, u * 0.62f, u * 0.14f, u * 0.82f, u * 0.32f)
+            cubicTo(u * 0.92f, u * 0.44f, u * 0.68f, u * 0.62f, u * 0.48f, u * 0.60f)
+            quadraticTo(u * 0.32f, u * 0.58f, u * 0.26f, u * 0.82f)
+            close()
+        }
+        drawPath(curve, color = tint, style = Stroke(width = u * 0.075f, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+fun PhysicalPerspectiveIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val u = size.minDimension
+        val vpL = Offset(u * 0.12f, u * 0.50f)
+        val vpR = Offset(u * 0.88f, u * 0.50f)
+        drawLine(tint.copy(alpha = 0.45f), vpL, vpR, strokeWidth = u * 0.045f)
+        drawLine(tint, vpL, Offset(u * 0.50f, u * 0.16f), strokeWidth = u * 0.06f)
+        drawLine(tint, vpL, Offset(u * 0.50f, u * 0.84f), strokeWidth = u * 0.06f)
+        drawLine(tint, vpR, Offset(u * 0.50f, u * 0.16f), strokeWidth = u * 0.06f)
+        drawLine(tint, vpR, Offset(u * 0.50f, u * 0.84f), strokeWidth = u * 0.06f)
+        drawCircle(tint, radius = u * 0.065f, center = vpL)
+        drawCircle(tint, radius = u * 0.065f, center = vpR)
+    }
+}
+
+
 

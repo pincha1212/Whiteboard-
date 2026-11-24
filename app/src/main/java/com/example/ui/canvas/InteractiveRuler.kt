@@ -1,27 +1,44 @@
 package com.example.ui.canvas
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.example.ink.StrokeStabilizer
 import com.example.ink.ViewportTransform
 import com.example.model.RulerState
+import com.example.ui.theme.GuideAmber
+import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -31,16 +48,17 @@ fun InteractiveRulerView(
     cameraState: State<ViewportTransform>,
     onMove: (Float, Float) -> Unit,
     onRotate: (Float) -> Unit,
+    onToggleAngleLock: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     if (!rulerState.isVisible) return
 
     val widthDp = rulerState.length.coerceAtLeast(1f).dp
     val heightDp = rulerState.width.coerceAtLeast(1f).dp
+    val isDetentSnapped = StrokeStabilizer.isNearRulerDetent(rulerState.angleDegrees)
 
     Box(
         modifier = modifier
-            // Camera is read in the layout phase, not during parent composition.
             .offset {
                 val camera = cameraState.value
                 val baseWidthPx = widthDp.toPx()
@@ -61,9 +79,11 @@ fun InteractiveRulerView(
             .rotate(rulerState.angleDegrees)
             .shadow(12.dp, RoundedCornerShape(8.dp))
             .clip(RoundedCornerShape(8.dp))
-            .pointerInput(Unit) {
+            .pointerInput(rulerState.isAngleLocked) {
                 detectTransformGestures { _, pan, _, rotation ->
-                    if (rotation != 0f) onRotate(rotation)
+                    if (!rulerState.isAngleLocked && rotation != 0f) {
+                        onRotate(rotation)
+                    }
                     if (pan != Offset.Zero) {
                         onMove(
                             pan.x / cameraState.value.scale,
@@ -78,11 +98,13 @@ fun InteractiveRulerView(
             val w = size.width
             val h = size.height
 
-            // Ruler body background (frosted acrylic glass)
-            drawRect(color = Color(0xECFFFFFF))
-            drawRect(color = Color(0xFF0078D4), style = Stroke(width = 3f))
+            // Neutral frosted dark studio acrylic
+            drawRect(color = Color(0xE01E1E21))
+            drawRect(
+                color = if (isDetentSnapped) GuideAmber else GuideCyan.copy(alpha = 0.78f),
+                style = Stroke(width = 3f)
+            )
 
-            // Tick geometry stays in ruler-local coordinates; the graphics layer scales it.
             val numTicks = (w / 10f).toInt()
             for (i in 0..numTicks) {
                 val xPos = i * 10f
@@ -91,12 +113,60 @@ fun InteractiveRulerView(
 
                 val tickH = when {
                     isMajor -> 20f
-                    isMedium -> 14f
-                    else -> 8f
+                    isMedium -> 13f
+                    else -> 7f
                 }
 
-                drawLine(color = Color(0xFF1E1E1E), start = Offset(xPos, 0f), end = Offset(xPos, tickH), strokeWidth = if (isMajor) 2.5f else 1f)
-                drawLine(color = Color(0xFF1E1E1E), start = Offset(xPos, h), end = Offset(xPos, h - tickH), strokeWidth = if (isMajor) 2.5f else 1f)
+                val tickColor = if (isMajor) Color(0xFFF2F2F5) else Color(0xFF9A9AA3)
+                drawLine(
+                    color = tickColor,
+                    start = Offset(xPos, 0f),
+                    end = Offset(xPos, tickH),
+                    strokeWidth = if (isMajor) 2.2f else 1f
+                )
+                drawLine(
+                    color = tickColor,
+                    start = Offset(xPos, h),
+                    end = Offset(xPos, h - tickH),
+                    strokeWidth = if (isMajor) 2.2f else 1f
+                )
+            }
+        }
+
+        // Center angle readout & lock chip
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .align(Alignment.Center)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0xCC141416))
+                .border(
+                    1.dp,
+                    if (isDetentSnapped) GuideAmber else Color(0xFF3A3A40),
+                    RoundedCornerShape(999.dp)
+                )
+                .padding(horizontal = 10.dp, vertical = 3.dp)
+        ) {
+            Text(
+                text = "${rulerState.angleDegrees.roundToInt()}°",
+                style = StudioMonoTextStyle,
+                color = if (isDetentSnapped) GuideAmber else Color(0xFFF2F2F5)
+            )
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onToggleAngleLock)
+                    .testTag("ruler_lock_angle_btn")
+            ) {
+                Icon(
+                    imageVector = if (rulerState.isAngleLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                    contentDescription = if (rulerState.isAngleLocked) "Desbloquear ángulo" else "Bloquear ángulo",
+                    tint = if (rulerState.isAngleLocked) GuideAmber else Color(0xFF9A9AA3),
+                    modifier = Modifier.size(13.dp)
+                )
             }
         }
     }

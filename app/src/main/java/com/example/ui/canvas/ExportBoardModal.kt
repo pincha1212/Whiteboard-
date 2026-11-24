@@ -50,24 +50,50 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.BoardExportService
+import com.example.ink.engine.MutableRasterTileStore
 import com.example.model.WhiteboardBoard
+import com.example.ui.theme.StudioMonoTextStyle
 
 @Composable
 fun ExportBoardModal(
     board: WhiteboardBoard,
+    mutableRasterTileStore: MutableRasterTileStore? = null,
+    activeLayerId: String? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     var includeBackground by remember { mutableStateOf(true) }
     var includeGrid by remember { mutableStateOf(true) }
+    var exportActiveLayerOnly by remember { mutableStateOf(false) }
+    var resolutionMultiplier by remember { mutableStateOf(1) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    val previewBitmap = remember(board, includeBackground, includeGrid) {
+    val resolvedLayerFilter = if (exportActiveLayerOnly) activeLayerId else null
+
+    val previewBitmap = remember(board, includeBackground, includeGrid, resolvedLayerFilter, resolutionMultiplier) {
         BoardExportService.renderBoardToBitmap(
             board = board,
             includeBackground = includeBackground,
             includeGrid = includeGrid,
-            maxDimensionPx = 1600
+            maxDimensionPx = 1200,
+            mutableRasterStore = mutableRasterTileStore,
+            onlyLayerId = resolvedLayerFilter,
+            resolutionMultiplier = 1
+        )
+    }
+
+    val estimatedExportW = previewBitmap.width * resolutionMultiplier
+    val estimatedExportH = previewBitmap.height * resolutionMultiplier
+
+    fun buildFinalExportBitmap(): android.graphics.Bitmap {
+        return BoardExportService.renderBoardToBitmap(
+            board = board,
+            includeBackground = includeBackground,
+            includeGrid = includeGrid,
+            maxDimensionPx = 1200,
+            mutableRasterStore = mutableRasterTileStore,
+            onlyLayerId = resolvedLayerFilter,
+            resolutionMultiplier = resolutionMultiplier
         )
     }
 
@@ -108,8 +134,8 @@ fun ExportBoardModal(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${board.title} · ${previewBitmap.width}×${previewBitmap.height} px",
-                                style = MaterialTheme.typography.labelSmall,
+                                text = "${board.title} · ~${estimatedExportW}×${estimatedExportH} px (${resolutionMultiplier}x)",
+                                style = StudioMonoTextStyle,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -151,18 +177,42 @@ fun ExportBoardModal(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     ExportToggleChip(
-                        label = "Incluir fondo",
+                        label = if (includeBackground) "Con fondo" else "PNG transparente",
                         checked = includeBackground,
                         onClick = { includeBackground = !includeBackground },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("export_toggle_background")
                     )
                     ExportToggleChip(
-                        label = "Incluir cuadrícula",
+                        label = "Cuadrícula",
                         checked = includeGrid && includeBackground,
                         enabled = includeBackground,
                         onClick = { includeGrid = !includeGrid },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f).testTag("export_toggle_grid")
                     )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (activeLayerId != null) {
+                        ExportToggleChip(
+                            label = "Solo capa activa",
+                            checked = exportActiveLayerOnly,
+                            onClick = { exportActiveLayerOnly = !exportActiveLayerOnly },
+                            modifier = Modifier.weight(1.25f).testTag("export_only_active_layer")
+                        )
+                    }
+                    listOf(1, 2, 4).forEach { mult ->
+                        ExportToggleChip(
+                            label = "${mult}x",
+                            checked = resolutionMultiplier == mult,
+                            onClick = { resolutionMultiplier = mult },
+                            modifier = Modifier.weight(0.6f).testTag("export_res_${mult}x")
+                        )
+                    }
                 }
 
                 if (statusMessage != null) {
@@ -187,7 +237,8 @@ fun ExportBoardModal(
 
                 Button(
                     onClick = {
-                        val res = BoardExportService.saveBitmapToDevice(context, previewBitmap, board.title)
+                        val finalBmp = buildFinalExportBitmap()
+                        val res = BoardExportService.saveBitmapToDevice(context, finalBmp, board.title)
                         res.onSuccess { msg ->
                             statusMessage = msg
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
@@ -200,7 +251,7 @@ fun ExportBoardModal(
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Guardar PNG en Galería")
+                    Text("Guardar PNG en Galería (${resolutionMultiplier}x)")
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -211,7 +262,8 @@ fun ExportBoardModal(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            BoardExportService.createSharePngIntent(context, previewBitmap, board.title)
+                            val finalBmp = buildFinalExportBitmap()
+                            BoardExportService.createSharePngIntent(context, finalBmp, board.title)
                                 .onSuccess { intent -> context.startActivity(intent) }
                                 .onFailure { err ->
                                     statusMessage = "No se pudo compartir: ${err.localizedMessage}"

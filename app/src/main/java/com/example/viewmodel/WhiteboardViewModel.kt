@@ -11,16 +11,30 @@ import com.example.ink.ShapeRecognizer
 import com.example.ink.StickyNoteBounds
 import com.example.ink.StickyNoteGeometry
 import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.StrokeStabilizer
 import com.example.ink.ViewportTransform
+import com.example.ink.engine.FloodFillResult
+import com.example.ink.engine.MutableRasterTileStore
+import com.example.ink.engine.PaintTileRasterCache
+import com.example.ink.engine.RasterTileCoord
+import com.example.ink.engine.TileRasterUndoPatch
 import com.example.model.AuditLogEntry
 import com.example.model.BoardVersionSnapshot
 import com.example.model.BrushSlot
+import com.example.model.BrushStudioSettings
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.DEFAULT_LAYER_ID
 import com.example.model.DrawingLayer
+import com.example.model.EllipseGuideState
+import com.example.model.FrenchCurveGuideState
+import com.example.model.GuideType
+import com.example.model.GuidesOverlayState
 import com.example.model.LaserPoint
+import com.example.model.LayerBlendMode
 import com.example.model.LineCapStyle
+import com.example.model.PerspectiveGuideState
+import com.example.model.PerspectiveMode
 import com.example.model.RulerState
 import com.example.model.ShapeItem
 import com.example.model.ShapeRecognitionProposal
@@ -93,7 +107,12 @@ data class WhiteboardUiState(
     val isPaintPixelMode: Boolean = true,
     val canUndo: Boolean = false,
     val canRedo: Boolean = false,
-    val activeBrushSlotIndex: Int = 0
+    val activeBrushSlotIndex: Int = 0,
+    val brushStudioSlotIndex: Int? = null,
+    val guidesState: GuidesOverlayState = GuidesOverlayState(),
+    val predictionLevel: Int = 2,
+    val floodFillTolerance: Int = 36,
+    val isDoublePuckExpanded: Boolean = false
 )
 
 private data class BoardSnapshot(
@@ -103,12 +122,21 @@ private data class BoardSnapshot(
     val texts: List<TextItem>,
     val layers: List<DrawingLayer>,
     val activeLayerId: String,
+    val rasterPatches: List<TileRasterUndoPatch> = emptyList(),
     val estimatedBytes: Long
 )
 
 class WhiteboardViewModel(
     private val store: LocalFirstWorkspaceStore = LocalFirstWorkspaceStore()
 ) : ViewModel() {
+
+    val mutableRasterTileStore: MutableRasterTileStore
+        get() = store.rasterTileStore
+
+    private val studioEngine = StudioEngineController(store.rasterTileStore)
+    private var lastNonEraserTool: ToolType = ToolType.PENCIL
+    private var pendingRasterUndoSnapshotPushed = false
+    private var pendingRasterPatch: TileRasterUndoPatch? = null
 
     private val undoStack = mutableListOf<BoardSnapshot>()
     private val redoStack = mutableListOf<BoardSnapshot>()
@@ -321,8 +349,11 @@ class WhiteboardViewModel(
     private fun ToolType.isBrushSlotTool(): Boolean = when (this) {
         ToolType.PENCIL,
         ToolType.PEN,
+        ToolType.TECHNICAL_INK,
         ToolType.FINE_MARKER,
+        ToolType.CHISEL_MARKER,
         ToolType.PAINT_BRUSH,
+        ToolType.WATERCOLOR,
         ToolType.AIRBRUSH,
         ToolType.HIGHLIGHTER -> true
         else -> false
@@ -331,6 +362,9 @@ class WhiteboardViewModel(
     fun setTool(tool: ToolType) {
         if (tool == ToolType.HAND) {
             flushPendingStickyNoteSync(persist = true)
+        }
+        if (tool.isBrushSlotTool() || tool == ToolType.SMUDGE || tool == ToolType.FLOOD_FILL) {
+            lastNonEraserTool = tool
         }
         _uiState.update { state ->
             if (tool == ToolType.HAND) {
@@ -348,24 +382,32 @@ class WhiteboardViewModel(
                 )
             } else if (tool.isBrushSlotTool()) {
                 val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
-                val targetIndex = if (activeSlot != null && activeSlot.toolType == tool) {
-                    state.activeBrushSlotIndex
-                } else {
-                    brushSlots.indexOfFirst { it.toolType == tool }.takeIf { it >= 0 }
-                        ?: state.activeBrushSlotIndex
-                }
-                val resolvedSlot = brushSlots.getOrNull(targetIndex)
-                if (resolvedSlot != null) {
+                if (activeSlot != null && activeSlot.toolType == tool) {
                     state.copy(
-                        activeBrushSlotIndex = targetIndex,
-                        currentTool = resolvedSlot.toolType,
-                        penColorHex = resolvedSlot.colorHex,
-                        penWidth = resolvedSlot.strokeWidth,
-                        penOpacity = resolvedSlot.opacity,
-                        isRainbowPen = resolvedSlot.isRainbow
+                        currentTool = activeSlot.toolType,
+                        penColorHex = activeSlot.colorHex,
+                        penWidth = activeSlot.strokeWidth,
+                        penOpacity = activeSlot.opacity,
+                        isRainbowPen = activeSlot.isRainbow
                     )
                 } else {
-                    state.copy(currentTool = tool)
+                    val matchingIndex = brushSlots.indexOfFirst { it.toolType == tool }
+                    if (matchingIndex >= 0) {
+                        val resolvedSlot = brushSlots[matchingIndex]
+                        state.copy(
+                            activeBrushSlotIndex = matchingIndex,
+                            currentTool = resolvedSlot.toolType,
+                            penColorHex = resolvedSlot.colorHex,
+                            penWidth = resolvedSlot.strokeWidth,
+                            penOpacity = resolvedSlot.opacity,
+                            isRainbowPen = resolvedSlot.isRainbow
+                        )
+                    } else {
+                        state.copy(
+                            currentTool = tool,
+                            penOpacity = brushTypeForTool(tool).defaultOpacity
+                        )
+                    }
                 }
             } else {
                 state.copy(currentTool = tool)
@@ -376,6 +418,7 @@ class WhiteboardViewModel(
     fun selectBrushSlot(slotIndex: Int) {
         if (slotIndex !in brushSlots.indices) return
         val slot = brushSlots[slotIndex]
+        lastNonEraserTool = slot.toolType
         _uiState.update { state ->
             state.copy(
                 activeBrushSlotIndex = slotIndex,
@@ -400,18 +443,21 @@ class WhiteboardViewModel(
         if (slotIndex !in brushSlots.indices) return
         val current = brushSlots[slotIndex]
         val resolvedBrush = brushType ?: current.brushType
+        val brushChanged = brushType != null && brushType != current.brushType
         val resolvedOpacity = opacity?.coerceIn(0.05f, 1.0f)
-            ?: if (brushType != null && brushType != current.brushType) {
-                brushType.defaultOpacity
-            } else {
-                current.opacity
-            }
+            ?: if (brushChanged) resolvedBrush.defaultOpacity else current.opacity
+        val resolvedSettings = if (brushChanged) {
+            BrushStudioSettings.defaultFor(resolvedBrush)
+        } else {
+            current.studioSettings
+        }
         val updated = current.copy(
             brushType = resolvedBrush,
             colorHex = colorHex ?: current.colorHex,
-            strokeWidth = strokeWidth?.coerceIn(2f, 24f) ?: current.strokeWidth,
+            strokeWidth = strokeWidth?.coerceIn(1f, 160f) ?: current.strokeWidth,
             opacity = resolvedOpacity,
-            isRainbow = isRainbow ?: current.isRainbow
+            isRainbow = isRainbow ?: current.isRainbow,
+            studioSettings = resolvedSettings
         )
         brushSlots[slotIndex] = updated
         if (slotIndex == _uiState.value.activeBrushSlotIndex) {
@@ -430,6 +476,63 @@ class WhiteboardViewModel(
                     isRainbowPen = updated.isRainbow
                 )
             }
+        }
+    }
+
+    fun openBrushStudio(slotIndex: Int) {
+        if (slotIndex !in brushSlots.indices) return
+        _uiState.update { it.copy(brushStudioSlotIndex = slotIndex) }
+    }
+
+    fun dismissBrushStudio() {
+        _uiState.update { it.copy(brushStudioSlotIndex = null) }
+    }
+
+    fun updateBrushSlotStudioSettings(slotIndex: Int, settings: BrushStudioSettings) {
+        if (slotIndex !in brushSlots.indices) return
+        brushSlots[slotIndex] = brushSlots[slotIndex].copy(studioSettings = settings)
+    }
+
+    fun resetBrushSlotStudioSettings(slotIndex: Int) {
+        if (slotIndex !in brushSlots.indices) return
+        val current = brushSlots[slotIndex]
+        brushSlots[slotIndex] = current.copy(
+            studioSettings = BrushStudioSettings.defaultFor(current.brushType),
+            opacity = current.brushType.defaultOpacity
+        )
+        if (slotIndex == _uiState.value.activeBrushSlotIndex) {
+            _uiState.update { it.copy(penOpacity = current.brushType.defaultOpacity) }
+        }
+    }
+
+    fun toggleDoublePuckExpanded() {
+        _uiState.update { it.copy(isDoublePuckExpanded = !it.isDoublePuckExpanded) }
+    }
+
+    fun updateDoublePuckBrush(newWidth: Float, newOpacity: Float) {
+        val clampedWidth = newWidth.coerceIn(1f, 160f)
+        val clampedOpacity = newOpacity.coerceIn(0.05f, 1.0f)
+        val activeIdx = _uiState.value.activeBrushSlotIndex
+        if (activeIdx in brushSlots.indices) {
+            brushSlots[activeIdx] = brushSlots[activeIdx].copy(
+                strokeWidth = clampedWidth,
+                opacity = clampedOpacity
+            )
+        }
+        _uiState.update {
+            it.copy(penWidth = clampedWidth, penOpacity = clampedOpacity)
+        }
+    }
+
+    fun quickToggleBrushAndEraser() {
+        val curTool = _uiState.value.currentTool
+        val isEraser = curTool == ToolType.PIXEL_ERASER ||
+            curTool == ToolType.SOFT_ERASER ||
+            curTool == ToolType.ERASER
+        if (isEraser) {
+            setTool(lastNonEraserTool)
+        } else {
+            setTool(ToolType.SOFT_ERASER)
         }
     }
 
@@ -636,18 +739,69 @@ class WhiteboardViewModel(
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
+    fun changeLayerBlendMode(layerId: String, mode: LayerBlendMode) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val cur = ensureBoardLayers(b)
+                b.copy(layers = cur.map { l -> if (l.id == layerId) l.copy(blendMode = mode) else l })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun toggleLayerAlphaLock(layerId: String) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val cur = ensureBoardLayers(b)
+                b.copy(layers = cur.map { l -> if (l.id == layerId) l.copy(isAlphaLocked = !l.isAlphaLocked) else l })
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
+    fun toggleLayerReference(layerId: String) {
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                val cur = ensureBoardLayers(b)
+                val target = cur.find { it.id == layerId } ?: return@withUpdatedBoard b
+                val nextRef = !target.isReference
+                b.copy(
+                    layers = cur.map { l ->
+                        when {
+                            l.id == layerId -> l.copy(isReference = nextRef)
+                            nextRef -> l.copy(isReference = false)
+                            else -> l
+                        }
+                    }
+                )
+            }
+        }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+    }
+
     fun duplicateLayer(layerId: String) {
         val board = _uiState.value.board
         val cur = ensureBoardLayers(board)
         val sourceIdx = cur.indexOfFirst { it.id == layerId }
         if (sourceIdx < 0) return
         val source = cur[sourceIdx]
-        saveUndoSnapshot()
         val newLayerId = "layer_${UUID.randomUUID().toString().take(8)}"
+        mutableRasterTileStore.duplicateLayerTiles(board.id, layerId, newLayerId)
+        val dupPatch = studioEngine.createClearLayerPatch(board.id, newLayerId)?.let {
+            TileRasterUndoPatch(
+                boardId = board.id,
+                layerId = newLayerId,
+                beforeTiles = it.beforeTiles.keys.associateWith { null },
+                afterTiles = it.beforeTiles
+            )
+        }
+        saveUndoSnapshot(listOfNotNull(dupPatch))
         val duplicatedLayer = source.copy(
             id = newLayerId,
             name = "${source.name} copia",
-            isLocked = false
+            isLocked = false,
+            isReference = false,
+            rasterRevision = mutableRasterTileStore.getLayerRevision(board.id, newLayerId)
         )
         val newStrokes = board.strokes.filter { it.layerId == layerId }.map {
             it.copy(id = UUID.randomUUID().toString(), layerId = newLayerId)
@@ -674,9 +828,35 @@ class WhiteboardViewModel(
         val cur = ensureBoardLayers(board)
         val idx = cur.indexOfFirst { it.id == layerId }
         if (idx <= 0) return
+        val topLayer = cur[idx]
         val targetLayer = cur[idx - 1]
-        saveUndoSnapshot()
-        val nextLayers = cur.filterNot { it.id == layerId }
+
+        val topClearPatch = studioEngine.createClearLayerPatch(board.id, layerId)
+        val bottomBefore = mutableRasterTileStore.snapshotLayerTileBytes(board.id, targetLayer.id)
+
+        mutableRasterTileStore.mergeLayerTilesDown(
+            boardId = board.id,
+            topLayerId = topLayer.id,
+            topOpacity = topLayer.opacity,
+            topBlendMode = topLayer.blendMode,
+            bottomLayerId = targetLayer.id
+        )
+        val bottomAfter = mutableRasterTileStore.snapshotLayerTileBytes(board.id, targetLayer.id)
+        val bottomPatch = if (bottomBefore != bottomAfter) {
+            val allCoords = bottomBefore.keys + bottomAfter.keys
+            TileRasterUndoPatch(
+                boardId = board.id,
+                layerId = targetLayer.id,
+                beforeTiles = allCoords.associateWith { bottomBefore[it] },
+                afterTiles = allCoords.associateWith { bottomAfter[it] }
+            )
+        } else null
+
+        saveUndoSnapshot(listOfNotNull(topClearPatch, bottomPatch))
+        val newTargetRev = mutableRasterTileStore.getLayerRevision(board.id, targetLayer.id)
+        val nextLayers = cur
+            .filterNot { it.id == layerId }
+            .map { if (it.id == targetLayer.id) it.copy(rasterRevision = newTargetRev) else it }
         val nextStrokes = board.strokes.map { if (it.layerId == layerId) it.copy(layerId = targetLayer.id) else it }
         val nextShapes = board.shapes.map { if (it.layerId == layerId) it.copy(layerId = targetLayer.id) else it }
         _uiState.update { state ->
@@ -698,7 +878,9 @@ class WhiteboardViewModel(
         if (cur.size <= 1) return
         val idx = cur.indexOfFirst { it.id == layerId }
         if (idx < 0) return
-        saveUndoSnapshot()
+        val clearPatch = studioEngine.createClearLayerPatch(board.id, layerId)
+        saveUndoSnapshot(listOfNotNull(clearPatch))
+        mutableRasterTileStore.removeLayer(board.id, layerId)
         val remaining = cur.filterNot { it.id == layerId }
         val nextActiveId = if (board.activeLayerId == layerId) {
             remaining.getOrNull((idx - 1).coerceAtLeast(0))?.id ?: remaining.first().id
@@ -789,7 +971,13 @@ class WhiteboardViewModel(
     fun toggleRuler() {
         _uiState.update {
             val next = !it.isRulerActive
-            it.copy(isRulerActive = next, rulerState = it.rulerState.copy(isVisible = next))
+            it.copy(
+                isRulerActive = next,
+                rulerState = it.rulerState.copy(isVisible = next),
+                guidesState = it.guidesState.copy(
+                    activeGuide = if (next) GuideType.RULER else if (it.guidesState.activeGuide == GuideType.RULER) GuideType.NONE else it.guidesState.activeGuide
+                )
+            )
         }
     }
 
@@ -803,7 +991,252 @@ class WhiteboardViewModel(
     fun rotateRuler(deltaAngle: Float) {
         _uiState.update {
             val r = it.rulerState
-            it.copy(rulerState = r.copy(angleDegrees = (r.angleDegrees + deltaAngle) % 360f))
+            val snapped = StrokeStabilizer.snapRulerAngleToDetents(
+                rawAngleDeg = r.angleDegrees + deltaAngle,
+                snapEnabled = r.snapAnglesEnabled,
+                isLocked = r.isAngleLocked,
+                currentAngleDeg = r.angleDegrees
+            )
+            it.copy(rulerState = r.copy(angleDegrees = snapped))
+        }
+    }
+
+    fun toggleRulerAngleLock() {
+        _uiState.update {
+            val r = it.rulerState
+            it.copy(rulerState = r.copy(isAngleLocked = !r.isAngleLocked))
+        }
+    }
+
+    fun selectGuide(guideType: GuideType) {
+        val cam = _cameraState.value
+        val worldCenterX = cam.screenToWorldX(cam.viewportWidthPx * 0.5f)
+        val worldCenterY = cam.screenToWorldY(cam.viewportHeightPx * 0.5f)
+        _uiState.update { state ->
+            val currentGuides = state.guidesState
+            val resolvedType = if (guideType != GuideType.NONE && currentGuides.activeGuide == guideType) {
+                GuideType.NONE
+            } else {
+                guideType
+            }
+            val showRuler = resolvedType == GuideType.RULER
+            val showEllipse = resolvedType == GuideType.ELLIPSE
+            val showFrenchCurve = resolvedType == GuideType.FRENCH_CURVE
+            val nextPersp = if (resolvedType == GuideType.PERSPECTIVE) {
+                if (currentGuides.perspective.mode == PerspectiveMode.OFF) {
+                    currentGuides.perspective.copy(mode = PerspectiveMode.TWO_POINT)
+                } else {
+                    currentGuides.perspective
+                }
+            } else {
+                currentGuides.perspective.copy(mode = PerspectiveMode.OFF)
+            }
+            state.copy(
+                isRulerActive = showRuler,
+                rulerState = state.rulerState.copy(
+                    isVisible = showRuler,
+                    centerX = if (showRuler && !state.rulerState.isVisible) worldCenterX else state.rulerState.centerX,
+                    centerY = if (showRuler && !state.rulerState.isVisible) worldCenterY else state.rulerState.centerY
+                ),
+                guidesState = currentGuides.copy(
+                    activeGuide = resolvedType,
+                    ellipse = currentGuides.ellipse.copy(
+                        isVisible = showEllipse,
+                        centerX = if (showEllipse && !currentGuides.ellipse.isVisible) worldCenterX else currentGuides.ellipse.centerX,
+                        centerY = if (showEllipse && !currentGuides.ellipse.isVisible) worldCenterY else currentGuides.ellipse.centerY
+                    ),
+                    frenchCurve = currentGuides.frenchCurve.copy(
+                        isVisible = showFrenchCurve,
+                        centerX = if (showFrenchCurve && !currentGuides.frenchCurve.isVisible) worldCenterX else currentGuides.frenchCurve.centerX,
+                        centerY = if (showFrenchCurve && !currentGuides.frenchCurve.isVisible) worldCenterY else currentGuides.frenchCurve.centerY
+                    ),
+                    perspective = nextPersp
+                )
+            )
+        }
+    }
+
+    fun updateEllipseGuide(guide: EllipseGuideState) {
+        _uiState.update { state ->
+            state.copy(
+                isRulerActive = false,
+                rulerState = state.rulerState.copy(isVisible = false),
+                guidesState = state.guidesState.copy(
+                    activeGuide = if (guide.isVisible) GuideType.ELLIPSE else GuideType.NONE,
+                    ellipse = guide
+                )
+            )
+        }
+    }
+
+    fun updateFrenchCurveGuide(guide: FrenchCurveGuideState) {
+        _uiState.update { state ->
+            state.copy(
+                isRulerActive = false,
+                rulerState = state.rulerState.copy(isVisible = false),
+                guidesState = state.guidesState.copy(
+                    activeGuide = if (guide.isVisible) GuideType.FRENCH_CURVE else GuideType.NONE,
+                    frenchCurve = guide
+                )
+            )
+        }
+    }
+
+    fun selectPerspectiveMode(mode: PerspectiveMode) {
+        val cam = _cameraState.value
+        val worldCenterX = cam.screenToWorldX(cam.viewportWidthPx * 0.5f)
+        val worldCenterY = cam.screenToWorldY(cam.viewportHeightPx * 0.5f)
+        _uiState.update { state ->
+            val prevPersp = state.guidesState.perspective
+            val wasOff = prevPersp.mode == PerspectiveMode.OFF
+            val updatedPersp = prevPersp.copy(
+                mode = mode,
+                horizonY = if (wasOff) worldCenterY - 40f else prevPersp.horizonY,
+                vp1 = if (wasOff) prevPersp.vp1.copy(x = worldCenterX - 420f, y = worldCenterY - 40f) else prevPersp.vp1,
+                vp2 = if (wasOff) prevPersp.vp2.copy(x = worldCenterX + 420f, y = worldCenterY - 40f) else prevPersp.vp2,
+                vp3 = if (wasOff) prevPersp.vp3.copy(x = worldCenterX, y = worldCenterY + 620f) else prevPersp.vp3
+            )
+            state.copy(
+                isRulerActive = false,
+                rulerState = state.rulerState.copy(isVisible = false),
+                guidesState = state.guidesState.copy(
+                    activeGuide = if (mode != PerspectiveMode.OFF) GuideType.PERSPECTIVE else GuideType.NONE,
+                    ellipse = state.guidesState.ellipse.copy(isVisible = false),
+                    frenchCurve = state.guidesState.frenchCurve.copy(isVisible = false),
+                    perspective = updatedPersp
+                )
+            )
+        }
+    }
+
+    fun updatePerspectiveGuide(guide: PerspectiveGuideState) {
+        _uiState.update { state ->
+            state.copy(
+                guidesState = state.guidesState.copy(
+                    activeGuide = if (guide.mode != PerspectiveMode.OFF) GuideType.PERSPECTIVE else GuideType.NONE,
+                    perspective = guide
+                )
+            )
+        }
+    }
+
+    fun setPredictionLevel(level: Int) {
+        _uiState.update { it.copy(predictionLevel = level.coerceIn(0, 5)) }
+    }
+
+    fun setFloodFillTolerance(tolerance: Int) {
+        _uiState.update { it.copy(floodFillTolerance = tolerance.coerceIn(8, 96)) }
+    }
+
+    fun beginRasterToolGesture() {
+        pendingRasterUndoSnapshotPushed = false
+        pendingRasterPatch = null
+    }
+
+    fun applySmudgeSegment(
+        points: List<StrokePoint>,
+        brushRadiusWorld: Float,
+        strength: Float = 0.72f
+    ): Boolean {
+        val state = _uiState.value
+        val activeLayer = activeDrawingLayer(state.board)
+        if (!activeLayer.isVisible || activeLayer.isLocked || points.size < 2) return false
+        if (!pendingRasterUndoSnapshotPushed) {
+            saveUndoSnapshot()
+            pendingRasterUndoSnapshotPushed = true
+        }
+        val patch = studioEngine.executeSmudgeStroke(
+            board = state.board,
+            layer = activeLayer,
+            points = points,
+            brushRadiusWorld = brushRadiusWorld,
+            strength = strength,
+            handDrawnFactor = state.handDrawnFactor
+        ) ?: return false
+
+        pendingRasterPatch = StudioEngineController.mergeUndoPatches(pendingRasterPatch, patch)
+        refreshLayerRasterRevision(activeLayer.id)
+        return true
+    }
+
+    fun applySoftEraserSegment(
+        from: StrokePoint,
+        to: StrokePoint,
+        radiusWorld: Float
+    ): Boolean {
+        val state = _uiState.value
+        val activeLayer = activeDrawingLayer(state.board)
+        if (!activeLayer.isVisible || activeLayer.isLocked) return false
+        if (!pendingRasterUndoSnapshotPushed) {
+            saveUndoSnapshot()
+            pendingRasterUndoSnapshotPushed = true
+        }
+        val rasterPatch = studioEngine.executeSoftEraserSegment(
+            board = state.board,
+            layer = activeLayer,
+            points = listOf(from, to),
+            eraserRadiusWorld = radiusWorld,
+            strength = 0.78f
+        )
+        if (rasterPatch != null) {
+            pendingRasterPatch = StudioEngineController.mergeUndoPatches(pendingRasterPatch, rasterPatch)
+            refreshLayerRasterRevision(activeLayer.id)
+        }
+        val erasedVectors = erasePixelSegment(from, to, radiusWorld, saveSnapshot = false)
+        return rasterPatch != null || erasedVectors
+    }
+
+    fun commitRasterToolGesture() {
+        val patch = pendingRasterPatch
+        if (pendingRasterUndoSnapshotPushed && patch != null && undoStack.isNotEmpty()) {
+            val top = undoStack[undoStack.lastIndex]
+            undoStack[undoStack.lastIndex] = top.copy(rasterPatches = top.rasterPatches + patch)
+        }
+        val hadChanges = pendingRasterUndoSnapshotPushed
+        pendingRasterUndoSnapshotPushed = false
+        pendingRasterPatch = null
+        if (hadChanges) {
+            commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        }
+    }
+
+    fun applyFloodFillTap(worldX: Float, worldY: Float): FloodFillResult {
+        val state = _uiState.value
+        val activeLayer = activeDrawingLayer(state.board)
+        if (!activeLayer.isVisible || activeLayer.isLocked) {
+            return FloodFillResult(null, 0, didHitRegionEdge = false)
+        }
+        val result = studioEngine.executeFloodFill(
+            board = state.board,
+            targetLayer = activeLayer,
+            seedWorldX = worldX,
+            seedWorldY = worldY,
+            fillColorHex = state.penColorHex,
+            fillOpacity = state.penOpacity,
+            tolerance = state.floodFillTolerance,
+            handDrawnFactor = state.handDrawnFactor
+        )
+        val patch = result.undoPatch ?: return result
+        saveUndoSnapshot(listOf(patch))
+        refreshLayerRasterRevision(activeLayer.id, actionLog = AuditLogEntry(
+            actionName = "FLOOD_FILL",
+            details = "Relleno aplicado (${result.filledPixelCount} px) en ${activeLayer.name}",
+            category = "INK"
+        ))
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
+        return result
+    }
+
+    private fun refreshLayerRasterRevision(layerId: String, actionLog: AuditLogEntry? = null) {
+        _uiState.update { state ->
+            val newRev = mutableRasterTileStore.getLayerRevision(state.board.id, layerId)
+            state.withUpdatedBoard { b ->
+                val cur = ensureBoardLayers(b)
+                b.copy(
+                    layers = cur.map { l -> if (l.id == layerId) l.copy(rasterRevision = newRev) else l },
+                    auditLogs = if (actionLog != null) (b.auditLogs + actionLog).takeLast(100) else b.auditLogs
+                )
+            }
         }
     }
 
@@ -923,8 +1356,11 @@ class WhiteboardViewModel(
         return when (tool) {
             ToolType.PENCIL -> StrokeBrushType.PENCIL
             ToolType.PEN -> StrokeBrushType.FOUNTAIN_PEN
+            ToolType.TECHNICAL_INK -> StrokeBrushType.TECHNICAL_INK
             ToolType.FINE_MARKER -> StrokeBrushType.FINE_MARKER
+            ToolType.CHISEL_MARKER -> StrokeBrushType.CHISEL_MARKER
             ToolType.PAINT_BRUSH -> StrokeBrushType.PAINT_BRUSH
+            ToolType.WATERCOLOR -> StrokeBrushType.WATERCOLOR
             ToolType.AIRBRUSH -> StrokeBrushType.AIRBRUSH
             ToolType.HIGHLIGHTER -> StrokeBrushType.HIGHLIGHTER
             else -> StrokeBrushType.FOUNTAIN_PEN
@@ -933,12 +1369,15 @@ class WhiteboardViewModel(
 
     fun effectiveStrokeWidthForBrush(brushType: StrokeBrushType, basePenWidth: Float): Float {
         return when (brushType) {
-            StrokeBrushType.PENCIL -> (basePenWidth * 0.72f).coerceIn(1.5f, 12f)
-            StrokeBrushType.FOUNTAIN_PEN -> basePenWidth
-            StrokeBrushType.FINE_MARKER -> (basePenWidth * 0.75f).coerceIn(2f, 14f)
-            StrokeBrushType.PAINT_BRUSH -> (basePenWidth * 1.45f).coerceIn(4f, 36f)
-            StrokeBrushType.AIRBRUSH -> (basePenWidth * 2.1f).coerceIn(8f, 48f)
-            StrokeBrushType.HIGHLIGHTER -> (basePenWidth * 2.2f).coerceAtLeast(16f)
+            StrokeBrushType.PENCIL -> (basePenWidth * 0.72f).coerceIn(1f, 160f)
+            StrokeBrushType.FOUNTAIN_PEN -> basePenWidth.coerceIn(1f, 160f)
+            StrokeBrushType.TECHNICAL_INK -> basePenWidth.coerceIn(1f, 64f)
+            StrokeBrushType.FINE_MARKER -> (basePenWidth * 0.80f).coerceIn(1.5f, 160f)
+            StrokeBrushType.CHISEL_MARKER -> (basePenWidth * 1.15f).coerceIn(2f, 160f)
+            StrokeBrushType.PAINT_BRUSH -> (basePenWidth * 1.45f).coerceIn(3f, 160f)
+            StrokeBrushType.WATERCOLOR -> (basePenWidth * 1.65f).coerceIn(4f, 160f)
+            StrokeBrushType.AIRBRUSH -> (basePenWidth * 2.10f).coerceIn(6f, 160f)
+            StrokeBrushType.HIGHLIGHTER -> (basePenWidth * 2.20f).coerceIn(8f, 160f)
         }
     }
 
@@ -946,7 +1385,11 @@ class WhiteboardViewModel(
         return penColorHex
     }
 
-    fun commitCompletedStroke(points: List<StrokePoint>, isHighlighter: Boolean) {
+    fun commitCompletedStroke(
+        points: List<StrokePoint>,
+        isHighlighter: Boolean,
+        skipPrediction: Boolean = false
+    ) {
         if (points.size < 2) return
         val state = _uiState.value
         val activeLayer = activeDrawingLayer(state.board)
@@ -955,14 +1398,30 @@ class WhiteboardViewModel(
             return
         }
         saveUndoSnapshot()
+        val hasGuideConstraint = skipPrediction ||
+            state.isRulerActive ||
+            state.guidesState.ellipse.isVisible ||
+            state.guidesState.frenchCurve.isVisible
+        val processedPoints = if (!hasGuideConstraint && state.predictionLevel > 0) {
+            StrokeStabilizer.applyPredictiveStroke(points, state.predictionLevel)
+        } else {
+            points
+        }
+
         val brushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else brushTypeForTool(state.currentTool)
         val effectiveWidth = effectiveStrokeWidthForBrush(brushType, state.penWidth)
         val effectiveColor = effectiveColorForBrush(brushType, state.penColorHex)
         val isTranslucentEmphasis = brushType == StrokeBrushType.HIGHLIGHTER
         val effectiveOpacity = state.penOpacity.coerceIn(0.05f, 1.0f)
+        val activeSlot = brushSlots.getOrNull(state.activeBrushSlotIndex)
+        val studioSettings = if (activeSlot != null && activeSlot.brushType == brushType) {
+            activeSlot.studioSettings
+        } else {
+            BrushStudioSettings.defaultFor(brushType)
+        }
 
         val newStroke = WhiteboardStroke(
-            points = points,
+            points = processedPoints,
             colorHex = effectiveColor,
             width = effectiveWidth,
             isHighlighter = brushType == StrokeBrushType.HIGHLIGHTER,
@@ -971,11 +1430,12 @@ class WhiteboardViewModel(
             capStyle = LineCapStyle.NONE,
             brushType = brushType,
             opacity = effectiveOpacity,
-            layerId = activeLayer.id
+            layerId = activeLayer.id,
+            studioSettings = studioSettings
         )
 
         val recognized = if (state.autoShapeRecognition && state.symmetryMode == SymmetryMode.NONE) {
-            ShapeRecognizer.recognizeStroke(newStroke.copy(points = points))
+            ShapeRecognizer.recognizeStroke(newStroke.copy(points = processedPoints))
         } else {
             null
         }
@@ -999,7 +1459,7 @@ class WhiteboardViewModel(
             }
         } else {
             val mirroredStrokes = mirrorPointsForSymmetry(
-                points = points,
+                points = processedPoints,
                 mode = state.symmetryMode,
                 cx = state.symmetryCenterX,
                 cy = state.symmetryCenterY
@@ -1027,6 +1487,7 @@ class WhiteboardViewModel(
                 )
             }
         }
+        commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
     /**
@@ -2998,6 +3459,13 @@ class WhiteboardViewModel(
         val remappedImages = original.imageCards.map { it.copy(id = UUID.randomUUID().toString()) }
         val remappedStickers = original.stickers.map { it.copy(id = UUID.randomUUID().toString()) }
 
+        original.layers.forEach { layer ->
+            val tiles = mutableRasterTileStore.getTilesForLayer(original.id, layer.id)
+            for ((coord, bmp) in tiles) {
+                val copyBmp = bmp.copy(android.graphics.Bitmap.Config.ARGB_8888, true) ?: continue
+                mutableRasterTileStore.putDecodedTile(dupId, layer.id, coord.tx, coord.ty, copyBmp)
+            }
+        }
         val dup = original.copy(
             id = dupId,
             title = "${original.title} (Copia)",
@@ -3096,7 +3564,12 @@ class WhiteboardViewModel(
     }
 
     fun clearBoard() {
-        saveUndoSnapshot()
+        val board = _uiState.value.board
+        val clearPatches = ensureBoardLayers(board).mapNotNull { layer ->
+            studioEngine.createClearLayerPatch(board.id, layer.id)
+        }
+        saveUndoSnapshot(clearPatches)
+        mutableRasterTileStore.removeBoard(board.id)
         stickyNotesStore.replaceAll(emptyList())
         val log = AuditLogEntry(
             actionName = "BOARD_CLEARED",
@@ -3110,6 +3583,7 @@ class WhiteboardViewModel(
                     stickyNotes = emptyList(),
                     shapes = emptyList(),
                     textItems = emptyList(),
+                    layers = ensureBoardLayers(b).map { l -> l.copy(rasterRevision = 0L) },
                     auditLogs = (b.auditLogs + log).takeLast(100)
                 )
             }.copy(
@@ -3336,7 +3810,10 @@ class WhiteboardViewModel(
         commitBoardMutationToStore(_uiState.value.board, softDeleteMissingNotes = false, persist = true)
     }
 
-    private fun createBoardSnapshot(board: WhiteboardBoard): BoardSnapshot {
+    private fun createBoardSnapshot(
+        board: WhiteboardBoard,
+        rasterPatches: List<TileRasterUndoPatch> = emptyList()
+    ): BoardSnapshot {
         // Approximate retained object cost; deliberately overestimates shared immutable
         // objects so a long history cannot pin an unexpectedly large amount of memory.
         var bytes = 256L
@@ -3354,6 +3831,10 @@ class WhiteboardViewModel(
         board.textItems.forEach { item ->
             bytes += 160L + item.text.length.toLong() * 2L
         }
+        rasterPatches.forEach { patch ->
+            patch.beforeTiles.values.forEach { bytes += it?.size?.toLong() ?: 0L }
+            patch.afterTiles.values.forEach { bytes += it?.size?.toLong() ?: 0L }
+        }
         return BoardSnapshot(
             strokes = board.strokes,
             notes = board.stickyNotes,
@@ -3361,6 +3842,7 @@ class WhiteboardViewModel(
             texts = board.textItems,
             layers = board.layers,
             activeLayerId = board.activeLayerId,
+            rasterPatches = rasterPatches,
             estimatedBytes = bytes
         )
     }
@@ -3378,11 +3860,11 @@ class WhiteboardViewModel(
         }
     }
 
-    private fun saveUndoSnapshot() {
+    private fun saveUndoSnapshot(rasterPatches: List<TileRasterUndoPatch> = emptyList()) {
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val b = _uiState.value.board
-        undoStack.add(createBoardSnapshot(b))
+        undoStack.add(createBoardSnapshot(b, rasterPatches))
         if (undoStack.size > 30) {
             undoStack.removeAt(0)
         }
@@ -3396,19 +3878,25 @@ class WhiteboardViewModel(
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
-        redoStack.add(createBoardSnapshot(currentBoard))
         val previous = undoStack.removeAt(undoStack.lastIndex)
+        redoStack.add(createBoardSnapshot(currentBoard, previous.rasterPatches))
+        previous.rasterPatches.asReversed().forEach { patch ->
+            mutableRasterTileStore.applyPatch(patch, applyAfter = false)
+        }
         trimUndoHistoryToBudget()
         stickyNotesStore.replaceAll(previous.notes)
 
         _uiState.update {
             it.withUpdatedBoard { b ->
+                val updatedLayers = previous.layers.map { l ->
+                    l.copy(rasterRevision = mutableRasterTileStore.getLayerRevision(b.id, l.id))
+                }
                 b.copy(
                     strokes = previous.strokes,
                     stickyNotes = previous.notes,
                     shapes = previous.shapes,
                     textItems = previous.texts,
-                    layers = previous.layers,
+                    layers = updatedLayers,
                     activeLayerId = previous.activeLayerId
                 )
             }.copy(
@@ -3432,19 +3920,25 @@ class WhiteboardViewModel(
         flushPendingStickyNoteSync(persist = false)
         syncStickyNotesIntoBoardState()
         val currentBoard = _uiState.value.board
-        undoStack.add(createBoardSnapshot(currentBoard))
         val next = redoStack.removeAt(redoStack.lastIndex)
+        undoStack.add(createBoardSnapshot(currentBoard, next.rasterPatches))
+        next.rasterPatches.forEach { patch ->
+            mutableRasterTileStore.applyPatch(patch, applyAfter = true)
+        }
         trimUndoHistoryToBudget()
         stickyNotesStore.replaceAll(next.notes)
 
         _uiState.update {
             it.withUpdatedBoard { b ->
+                val updatedLayers = next.layers.map { l ->
+                    l.copy(rasterRevision = mutableRasterTileStore.getLayerRevision(b.id, l.id))
+                }
                 b.copy(
                     strokes = next.strokes,
                     stickyNotes = next.notes,
                     shapes = next.shapes,
                     textItems = next.texts,
-                    layers = next.layers,
+                    layers = updatedLayers,
                     activeLayerId = next.activeLayerId
                 )
             }.copy(
@@ -3483,7 +3977,7 @@ class WhiteboardViewModel(
     }
 
     fun setPenWidth(width: Float) {
-        val clamped = width.coerceIn(2f, 24f)
+        val clamped = width.coerceIn(1f, 160f)
         val activeIdx = _uiState.value.activeBrushSlotIndex
         if (activeIdx in brushSlots.indices) {
             brushSlots[activeIdx] = brushSlots[activeIdx].copy(strokeWidth = clamped)

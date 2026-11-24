@@ -30,7 +30,8 @@ data class BrushNode(
     // Open live previews use a constant mid-stroke value; committed strokes use an endpoint profile.
     val progress: Float,
     val contourIndex: Int = 0,
-    val isClosed: Boolean = false
+    val isClosed: Boolean = false,
+    val pressure: Float = 1.0f
 )
 
 /**
@@ -48,16 +49,18 @@ class PathHumanizer(
         handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
         stepPx: Float = defaultStepPx,
         seed: Int = 1337,
-        timestampsMs: List<Long>? = null
-    ): List<BrushNode> = humanizePath(path, handDrawnFactor, stepPx, seed, timestampsMs)
+        timestampsMs: List<Long>? = null,
+        pressures: List<Float>? = null
+    ): List<BrushNode> = humanizePath(path, handDrawnFactor, stepPx, seed, timestampsMs, pressures = pressures)
 
     fun humanizeContours(
         path: Path,
         handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
         stepPx: Float = defaultStepPx,
         seed: Int = 1337,
-        timestampsMs: List<Long>? = null
-    ): List<List<BrushNode>> = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs)
+        timestampsMs: List<Long>? = null,
+        pressures: List<Float>? = null
+    ): List<List<BrushNode>> = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs, pressures = pressures)
 
     companion object {
         const val DEFAULT_STEP_PX = 2f
@@ -72,8 +75,9 @@ class PathHumanizer(
             handDrawnFactor: Float = DEFAULT_HAND_DRAWN_FACTOR,
             stepPx: Float = DEFAULT_STEP_PX,
             seed: Int = 1337,
-            timestampsMs: List<Long>? = null
-        ): List<BrushNode> = humanizePath(path, handDrawnFactor, stepPx, seed, timestampsMs)
+            timestampsMs: List<Long>? = null,
+            pressures: List<Float>? = null
+        ): List<BrushNode> = humanizePath(path, handDrawnFactor, stepPx, seed, timestampsMs, pressures = pressures)
 
         fun humanizePath(
             path: Path,
@@ -81,9 +85,18 @@ class PathHumanizer(
             stepPx: Float = DEFAULT_STEP_PX,
             seed: Int = 1337,
             timestampsMs: List<Long>? = null,
-            stableOpenContours: Boolean = false
+            stableOpenContours: Boolean = false,
+            pressures: List<Float>? = null
         ): List<BrushNode> {
-            val contours = humanizePathContours(path, handDrawnFactor, stepPx, seed, timestampsMs, stableOpenContours)
+            val contours = humanizePathContours(
+                path = path,
+                handDrawnFactor = handDrawnFactor,
+                stepPx = stepPx,
+                seed = seed,
+                timestampsMs = timestampsMs,
+                stableOpenContours = stableOpenContours,
+                pressures = pressures
+            )
             if (contours.isEmpty()) return emptyList()
             val totalSize = contours.sumOf { it.size }
             val flat = ArrayList<BrushNode>(totalSize)
@@ -97,7 +110,8 @@ class PathHumanizer(
             stepPx: Float = DEFAULT_STEP_PX,
             seed: Int = 1337,
             timestampsMs: List<Long>? = null,
-            stableOpenContours: Boolean = false
+            stableOpenContours: Boolean = false,
+            pressures: List<Float>? = null
         ): List<List<BrushNode>> {
             val clampedFactor = handDrawnFactor.coerceIn(0f, 1f)
             val safeStep = stepPx.coerceIn(1f, 32f)
@@ -236,6 +250,17 @@ class PathHumanizer(
                         avgTimestampDtMs = avgTimestampDtMs
                     )
 
+                    val nodePressure = if (pressures != null && pressures.isNotEmpty()) {
+                        val t = (i.toFloat() / endIndex.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f) *
+                            pressures.lastIndex
+                        val idx0 = t.toInt().coerceIn(0, pressures.lastIndex)
+                        val idx1 = (idx0 + 1).coerceAtMost(pressures.lastIndex)
+                        val frac = (t - idx0).coerceIn(0f, 1f)
+                        (pressures[idx0] + (pressures[idx1] - pressures[idx0]) * frac).coerceIn(0.15f, 1.25f)
+                    } else {
+                        1.0f
+                    }
+
                     nodes.add(
                         BrushNode(
                             x = rawX[i],
@@ -244,7 +269,8 @@ class PathHumanizer(
                             velocity = velocity,
                             progress = progresses[i],
                             contourIndex = contourIndex,
-                            isClosed = isClosed
+                            isClosed = isClosed,
+                            pressure = nodePressure
                         )
                     )
                 }

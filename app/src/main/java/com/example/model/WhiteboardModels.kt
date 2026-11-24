@@ -8,9 +8,15 @@ enum class ToolType {
     PENCIL,
     PEN,
     FINE_MARKER,
+    CHISEL_MARKER,
+    TECHNICAL_INK,
     PAINT_BRUSH,
+    WATERCOLOR,
     AIRBRUSH,
     HIGHLIGHTER,
+    SMUDGE,
+    SOFT_ERASER,
+    FLOOD_FILL,
     LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
@@ -27,11 +33,121 @@ enum class StrokeBrushType(
     val defaultOpacity: Float
 ) {
     PENCIL("Lápiz grafito", 0.30f, 0.92f),
-    FOUNTAIN_PEN("Pluma técnica", 0.35f, 1.0f),
+    FOUNTAIN_PEN("Pluma fuente", 0.35f, 1.0f),
+    TECHNICAL_INK("Estilógrafo", 0.55f, 1.0f),
     FINE_MARKER("Rotulador Copic", 0.68f, 1.0f),
+    CHISEL_MARKER("Rotulador biselado", 0.62f, 0.94f),
     PAINT_BRUSH("Pincel pintura", 0.42f, 0.88f),
+    WATERCOLOR("Acuarela húmeda", 0.48f, 0.72f),
     AIRBRUSH("Aerógrafo", 0.45f, 0.55f),
     HIGHLIGHTER("Resaltador", 0.40f, 0.30f),
+}
+
+@Immutable
+data class BrushStudioSettings(
+    val flow: Float = 1.0f,
+    val spacing: Float = 0.25f,
+    val hardness: Float = 0.85f,
+    val grainStrength: Float = 0.35f,
+    val taperStart: Float = 0.20f,
+    val taperEnd: Float = 0.35f,
+    val velocitySensitivity: Float = 0.50f,
+    val chiselAngleDeg: Float = 38f
+) {
+    companion object {
+        fun defaultFor(type: StrokeBrushType): BrushStudioSettings = when (type) {
+            StrokeBrushType.PENCIL -> BrushStudioSettings(
+                flow = 0.88f,
+                spacing = 0.22f,
+                hardness = 0.65f,
+                grainStrength = 0.72f,
+                taperStart = 0.25f,
+                taperEnd = 0.45f,
+                velocitySensitivity = 0.45f
+            )
+            StrokeBrushType.FOUNTAIN_PEN -> BrushStudioSettings(
+                flow = 1.0f,
+                spacing = 0.14f,
+                hardness = 0.96f,
+                grainStrength = 0.05f,
+                taperStart = 0.30f,
+                taperEnd = 0.55f,
+                velocitySensitivity = 0.72f
+            )
+            StrokeBrushType.TECHNICAL_INK -> BrushStudioSettings(
+                flow = 1.0f,
+                spacing = 0.12f,
+                hardness = 1.0f,
+                grainStrength = 0.0f,
+                taperStart = 0.0f,
+                taperEnd = 0.0f,
+                velocitySensitivity = 0.08f
+            )
+            StrokeBrushType.FINE_MARKER -> BrushStudioSettings(
+                flow = 0.96f,
+                spacing = 0.18f,
+                hardness = 0.90f,
+                grainStrength = 0.10f,
+                taperStart = 0.10f,
+                taperEnd = 0.18f,
+                velocitySensitivity = 0.20f
+            )
+            StrokeBrushType.CHISEL_MARKER -> BrushStudioSettings(
+                flow = 0.92f,
+                spacing = 0.15f,
+                hardness = 0.86f,
+                grainStrength = 0.14f,
+                taperStart = 0.08f,
+                taperEnd = 0.14f,
+                velocitySensitivity = 0.32f,
+                chiselAngleDeg = 38f
+            )
+            StrokeBrushType.PAINT_BRUSH -> BrushStudioSettings(
+                flow = 0.86f,
+                spacing = 0.18f,
+                hardness = 0.58f,
+                grainStrength = 0.48f,
+                taperStart = 0.20f,
+                taperEnd = 0.40f,
+                velocitySensitivity = 0.62f
+            )
+            StrokeBrushType.WATERCOLOR -> BrushStudioSettings(
+                flow = 0.72f,
+                spacing = 0.24f,
+                hardness = 0.32f,
+                grainStrength = 0.60f,
+                taperStart = 0.15f,
+                taperEnd = 0.30f,
+                velocitySensitivity = 0.48f
+            )
+            StrokeBrushType.AIRBRUSH -> BrushStudioSettings(
+                flow = 0.55f,
+                spacing = 0.28f,
+                hardness = 0.18f,
+                grainStrength = 0.30f,
+                taperStart = 0.08f,
+                taperEnd = 0.12f,
+                velocitySensitivity = 0.25f
+            )
+            StrokeBrushType.HIGHLIGHTER -> BrushStudioSettings(
+                flow = 0.90f,
+                spacing = 0.15f,
+                hardness = 0.92f,
+                grainStrength = 0.0f,
+                taperStart = 0.0f,
+                taperEnd = 0.0f,
+                velocitySensitivity = 0.05f,
+                chiselAngleDeg = 18f
+            )
+        }
+    }
+}
+
+enum class LayerBlendMode(val displayName: String, val shortCode: String) {
+    NORMAL("Normal", "NRM"),
+    MULTIPLY("Multiplicar", "MUL"),
+    SCREEN("Trama", "SCR"),
+    OVERLAY("Superponer", "OVR")
 }
 
 enum class SymmetryMode(val displayName: String) {
@@ -49,7 +165,11 @@ data class DrawingLayer(
     val name: String = "Capa 1",
     val isVisible: Boolean = true,
     val opacity: Float = 1.0f,
-    val isLocked: Boolean = false
+    val isLocked: Boolean = false,
+    val blendMode: LayerBlendMode = LayerBlendMode.NORMAL,
+    val isAlphaLocked: Boolean = false,
+    val isReference: Boolean = false,
+    val rasterRevision: Long = 0L
 )
 
 @Immutable
@@ -59,14 +179,18 @@ data class BrushSlot(
     val colorHex: String,
     val strokeWidth: Float,
     val opacity: Float = brushType.defaultOpacity,
-    val isRainbow: Boolean = false
+    val isRainbow: Boolean = false,
+    val studioSettings: BrushStudioSettings = BrushStudioSettings.defaultFor(brushType)
 ) {
     val toolType: ToolType
         get() = when (brushType) {
             StrokeBrushType.PENCIL -> ToolType.PENCIL
             StrokeBrushType.FOUNTAIN_PEN -> ToolType.PEN
+            StrokeBrushType.TECHNICAL_INK -> ToolType.TECHNICAL_INK
             StrokeBrushType.FINE_MARKER -> ToolType.FINE_MARKER
+            StrokeBrushType.CHISEL_MARKER -> ToolType.CHISEL_MARKER
             StrokeBrushType.PAINT_BRUSH -> ToolType.PAINT_BRUSH
+            StrokeBrushType.WATERCOLOR -> ToolType.WATERCOLOR
             StrokeBrushType.AIRBRUSH -> ToolType.AIRBRUSH
             StrokeBrushType.HIGHLIGHTER -> ToolType.HIGHLIGHTER
         }
@@ -119,7 +243,9 @@ val ShapeType.isLineLike: Boolean
 
 data class StrokePoint(
     val x: Float,
-    val y: Float
+    val y: Float,
+    val timestampMs: Long = 0L,
+    val pressure: Float = 1.0f
 )
 
 data class LaserPoint(
@@ -134,7 +260,81 @@ data class RulerState(
     val centerY: Float = 380f,
     val angleDegrees: Float = 0f,
     val length: Float = 480f,
-    val width: Float = 84f
+    val width: Float = 84f,
+    val snapAnglesEnabled: Boolean = true,
+    val isAngleLocked: Boolean = false
+)
+
+enum class GuideType {
+    NONE,
+    RULER,
+    ELLIPSE,
+    FRENCH_CURVE,
+    PERSPECTIVE
+}
+
+@Immutable
+data class EllipseGuideState(
+    val isVisible: Boolean = false,
+    val centerX: Float = 420f,
+    val centerY: Float = 420f,
+    val radiusX: Float = 220f,
+    val radiusY: Float = 135f,
+    val rotationDegrees: Float = 0f,
+    val isCircleLocked: Boolean = false
+)
+
+enum class FrenchCurveProfile(val displayName: String) {
+    TEARDROP("Gota clásica"),
+    EULER_SPIRAL("Espiral de Euler"),
+    S_ARCH("Curva en S")
+}
+
+@Immutable
+data class FrenchCurveGuideState(
+    val isVisible: Boolean = false,
+    val centerX: Float = 420f,
+    val centerY: Float = 420f,
+    val scale: Float = 1.0f,
+    val rotationDegrees: Float = 0f,
+    val isFlippedX: Boolean = false,
+    val profile: FrenchCurveProfile = FrenchCurveProfile.TEARDROP
+)
+
+enum class PerspectiveMode(val displayName: String, val shortCode: String) {
+    OFF("Apagada", "OFF"),
+    ONE_POINT("1 Punto", "1P"),
+    TWO_POINT("2 Puntos", "2P"),
+    THREE_POINT("3 Puntos", "3P"),
+    ISOMETRIC("Isométrica", "ISO")
+}
+
+@Immutable
+data class VanishingPoint(
+    val x: Float,
+    val y: Float
+)
+
+@Immutable
+data class PerspectiveGuideState(
+    val mode: PerspectiveMode = PerspectiveMode.OFF,
+    val horizonY: Float = 340f,
+    val vp1: VanishingPoint = VanishingPoint(-140f, 340f),
+    val vp2: VanishingPoint = VanishingPoint(980f, 340f),
+    val vp3: VanishingPoint = VanishingPoint(420f, 1180f),
+    val isometricAngleDeg: Float = 30f,
+    val gridDensity: Int = 12,
+    val isSnapEnabled: Boolean = true,
+    val isLocked: Boolean = false,
+    val showGridOverlay: Boolean = true
+)
+
+@Immutable
+data class GuidesOverlayState(
+    val activeGuide: GuideType = GuideType.NONE,
+    val ellipse: EllipseGuideState = EllipseGuideState(),
+    val frenchCurve: FrenchCurveGuideState = FrenchCurveGuideState(),
+    val perspective: PerspectiveGuideState = PerspectiveGuideState()
 )
 
 internal data class StrokeGeometryMetrics(
@@ -168,7 +368,8 @@ data class WhiteboardStroke(
     val zIndex: Int = 0,
     val brushType: StrokeBrushType = if (isHighlighter) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN,
     val opacity: Float = if (isHighlighter) StrokeBrushType.HIGHLIGHTER.defaultOpacity else 1.0f,
-    val layerId: String = DEFAULT_LAYER_ID
+    val layerId: String = DEFAULT_LAYER_ID,
+    val studioSettings: BrushStudioSettings = BrushStudioSettings.defaultFor(brushType)
 ) {
     /**
      * Lazily computed once per immutable stroke instance. New geometry must be created with copy(),

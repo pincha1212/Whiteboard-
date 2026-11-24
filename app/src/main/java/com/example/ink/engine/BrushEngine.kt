@@ -42,7 +42,15 @@ data class BrushConfig(
     val isRainbow: Boolean = false,
     val strokeStyle: StrokeStyle = StrokeStyle.SOLID,
     val animPhase: Float = 0f,
-    val seed: Int = 1337
+    val seed: Int = 1337,
+    val flow: Float = 1.0f,
+    val spacing: Float = 0.25f,
+    val hardness: Float = 0.85f,
+    val grainStrength: Float = 0.35f,
+    val taperStart: Float = 0.20f,
+    val taperEnd: Float = 0.35f,
+    val velocitySensitivity: Float = 0.50f,
+    val chiselAngleDeg: Float = 38f
 )
 
 /**
@@ -94,6 +102,34 @@ internal fun computeNodeBounds(nodes: List<BrushNode>, padding: Float): RectF {
 
 internal fun computeNodeWidthMultiplier(node: BrushNode, style: StrokeStyle): Float {
     return 1f
+}
+
+internal fun computeParametricWidthFactor(
+    index: Int,
+    contourSize: Int,
+    node: BrushNode,
+    config: BrushConfig
+): Float {
+    val pressureMul = (0.45f + 0.55f * node.pressure.coerceIn(0.15f, 1.25f))
+    val velDelta = (node.velocity - 0.35f) * config.velocitySensitivity.coerceIn(0f, 1f)
+    val velocityMul = (1.0f - 0.38f * velDelta).coerceIn(0.60f, 1.24f)
+    val taperMul = if (node.isClosed || contourSize < 6) {
+        1.0f
+    } else {
+        val posNorm = index.toFloat() / (contourSize - 1).coerceAtLeast(1)
+        val startSpan = (0.04f + 0.16f * config.taperStart).coerceIn(0.02f, 0.22f)
+        val endSpan = (0.04f + 0.18f * config.taperEnd).coerceIn(0.02f, 0.24f)
+        val sTaper = if (config.taperStart > 0.01f && posNorm < startSpan) {
+            val u = (posNorm / startSpan).coerceIn(0f, 1f)
+            (1f - config.taperStart * 0.72f) + (config.taperStart * 0.72f) * u
+        } else 1f
+        val eTaper = if (config.taperEnd > 0.01f && posNorm > 1f - endSpan) {
+            val u = ((1f - posNorm) / endSpan).coerceIn(0f, 1f)
+            (1f - config.taperEnd * 0.76f) + (config.taperEnd * 0.76f) * u
+        } else 1f
+        min(sTaper, eTaper)
+    }
+    return (pressureMul * velocityMul * taperMul).coerceIn(0.25f, 1.35f)
 }
 
 internal fun buildDynamicShaderIfNeeded(nodes: List<BrushNode>, config: BrushConfig): Shader? {
@@ -307,7 +343,8 @@ class FountainPenBrush : BrushEngine {
         if (contours.isEmpty()) return
 
         val baseHalfW = (config.strokeWidth * 0.5f).coerceAtLeast(0.85f)
-        val alphaInt = (config.alpha.coerceIn(0.18f, 1.0f) * 255f).roundToInt()
+        val effectiveAlpha = (config.alpha * config.flow).coerceIn(0.12f, 1.0f)
+        val alphaInt = (effectiveAlpha * 255f).roundToInt()
         val shader = buildDynamicShaderIfNeeded(nodes, config)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -319,7 +356,7 @@ class FountainPenBrush : BrushEngine {
 
         for (contour in contours) {
             if (contour.size == 1) {
-                canvas.drawCircle(contour[0].x, contour[0].y, baseHalfW, paint)
+                canvas.drawCircle(contour[0].x, contour[0].y, baseHalfW * contour[0].pressure, paint)
                 continue
             }
 
@@ -333,13 +370,8 @@ class FountainPenBrush : BrushEngine {
                 val nx = -sin(n.angle)
                 val ny = cos(n.angle)
                 val styleMul = computeNodeWidthMultiplier(n, config.strokeStyle)
-                val taperEnd = if (n.isClosed) {
-                    1f
-                } else {
-                    (0.76f + 0.24f * sin(n.progress * PI.toFloat()).coerceIn(0f, 1f))
-                }
-                val velScale = (1.08f - 0.24f * n.velocity).coerceIn(0.76f, 1.10f)
-                val hw = (baseHalfW * styleMul * taperEnd * velScale).coerceAtLeast(0.65f)
+                val paramMul = computeParametricWidthFactor(i, contour.size, n, config)
+                val hw = (baseHalfW * styleMul * paramMul).coerceAtLeast(0.55f)
                 leftX[i] = n.x + nx * hw
                 leftY[i] = n.y + ny * hw
                 rightX[i] = n.x - nx * hw
@@ -470,19 +502,20 @@ class PencilBrush : BrushEngine {
         if (contours.isEmpty()) return
 
         val baseHalfW = (config.strokeWidth * 0.44f).coerceAtLeast(0.65f)
-        val alphaFrac = config.alpha.coerceIn(0.12f, 1.0f)
+        val alphaFrac = (config.alpha * config.flow).coerceIn(0.08f, 1.0f)
+        val grain = config.grainStrength.coerceIn(0f, 1f)
         val shader = buildDynamicShaderIfNeeded(nodes, config)
 
         val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = config.color
-            alpha = (alphaFrac * 0.78f * 255f).roundToInt().coerceIn(18, 235)
+            alpha = (alphaFrac * (0.62f + 0.28f * config.hardness) * 255f).roundToInt().coerceIn(14, 240)
             this.shader = shader
         }
         val grainPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = config.color
-            alpha = (alphaFrac * 0.46f * 255f).roundToInt().coerceIn(12, 190)
+            alpha = (alphaFrac * (0.18f + 0.44f * grain) * 255f).roundToInt().coerceIn(8, 200)
             this.shader = shader
         }
 
@@ -503,8 +536,9 @@ class PencilBrush : BrushEngine {
                 val tooth = ((hashState and 0xFF) / 255f)
                 val nx = -sin(n.angle)
                 val ny = cos(n.angle)
-                val speedTrim = (1.0f - n.velocity * 0.16f).coerceIn(0.75f, 1.02f)
-                val hw = (baseHalfW * speedTrim * (0.76f + 0.28f * tooth)).coerceAtLeast(0.5f)
+                val paramMul = computeParametricWidthFactor(i, contour.size, n, config)
+                val toothJitter = (1f - grain * 0.28f) + grain * 0.34f * tooth
+                val hw = (baseHalfW * paramMul * toothJitter).coerceAtLeast(0.45f)
                 leftX[i] = n.x + nx * hw
                 leftY[i] = n.y + ny * hw
                 rightX[i] = n.x - nx * hw
@@ -520,23 +554,25 @@ class PencilBrush : BrushEngine {
             )
             canvas.drawPath(ribbon, corePaint)
 
-            // Graphite mineral speckles along paper grain
-            val speckRadius = (baseHalfW * 0.24f).coerceIn(0.45f, 1.8f)
-            val spread = baseHalfW * 1.15f
-            for (i in contour.indices step 1) {
-                val n = contour[i]
-                val nx = -sin(n.angle)
-                val ny = cos(n.angle)
-                val tx = cos(n.angle)
-                val ty = sin(n.angle)
-                for (g in 0 until 2) {
-                    hashState = nextHash(hashState)
-                    val offsetN = (((hashState and 0xFF) / 127.5f) - 1f) * spread
-                    hashState = nextHash(hashState)
-                    val offsetT = (((hashState and 0xFF) / 127.5f) - 1f) * (baseHalfW * 0.5f)
-                    val gx = n.x + nx * offsetN + tx * offsetT
-                    val gy = n.y + ny * offsetN + ty * offsetT
-                    canvas.drawCircle(gx, gy, speckRadius, grainPaint)
+            if (grain > 0.08f) {
+                val speckRadius = (baseHalfW * (0.16f + 0.14f * grain)).coerceIn(0.4f, 2.0f)
+                val spread = baseHalfW * (0.75f + 0.55f * grain)
+                val speckStep = (1 + ((config.spacing * 2f).roundToInt())).coerceIn(1, 3)
+                for (i in contour.indices step speckStep) {
+                    val n = contour[i]
+                    val nx = -sin(n.angle)
+                    val ny = cos(n.angle)
+                    val tx = cos(n.angle)
+                    val ty = sin(n.angle)
+                    for (g in 0 until 2) {
+                        hashState = nextHash(hashState)
+                        val offsetN = (((hashState and 0xFF) / 127.5f) - 1f) * spread
+                        hashState = nextHash(hashState)
+                        val offsetT = (((hashState and 0xFF) / 127.5f) - 1f) * (baseHalfW * 0.5f)
+                        val gx = n.x + nx * offsetN + tx * offsetT
+                        val gy = n.y + ny * offsetN + ty * offsetT
+                        canvas.drawCircle(gx, gy, speckRadius, grainPaint)
+                    }
                 }
             }
         }
@@ -555,28 +591,30 @@ class PaintBrush : BrushEngine {
         if (contours.isEmpty()) return
 
         val baseHalfW = (config.strokeWidth * 0.62f).coerceAtLeast(1.4f)
-        val alphaFrac = config.alpha.coerceIn(0.12f, 1.0f)
+        val alphaFrac = (config.alpha * config.flow).coerceIn(0.10f, 1.0f)
+        val hardness = config.hardness.coerceIn(0.1f, 1f)
+        val grain = config.grainStrength.coerceIn(0f, 1f)
         val shader = buildDynamicShaderIfNeeded(nodes, config)
 
         val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = config.color
-            alpha = (alphaFrac * 0.34f * 255f).roundToInt().coerceIn(10, 140)
+            alpha = (alphaFrac * (0.48f - 0.24f * hardness) * 255f).roundToInt().coerceIn(8, 150)
             this.shader = shader
         }
         val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = config.color
-            alpha = (alphaFrac * 0.74f * 255f).roundToInt().coerceIn(18, 220)
+            alpha = (alphaFrac * (0.58f + 0.30f * hardness) * 255f).roundToInt().coerceIn(18, 235)
             this.shader = shader
         }
         val bristlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
-            strokeWidth = (baseHalfW * 0.28f).coerceIn(1.0f, 5.5f)
+            strokeWidth = (baseHalfW * (0.18f + 0.18f * grain)).coerceIn(0.8f, 5.5f)
             color = config.color
-            alpha = (alphaFrac * 0.42f * 255f).roundToInt().coerceIn(12, 165)
+            alpha = (alphaFrac * (0.20f + 0.36f * grain) * 255f).roundToInt().coerceIn(10, 175)
             this.shader = shader
         }
 
@@ -604,14 +642,9 @@ class PaintBrush : BrushEngine {
                 val n = contour[i]
                 val nx = -sin(n.angle)
                 val ny = cos(n.angle)
-                val taper = if (n.isClosed) {
-                    1f
-                } else {
-                    (0.55f + 0.45f * sin(n.progress * PI.toFloat()).coerceIn(0f, 1f))
-                }
-                val press = (1.12f - 0.28f * n.velocity).coerceIn(0.76f, 1.16f)
-                val hwBody = (baseHalfW * 0.88f * taper * press).coerceAtLeast(0.75f)
-                val hwHalo = (baseHalfW * 1.16f * taper * press).coerceAtLeast(1.0f)
+                val paramMul = computeParametricWidthFactor(i, contour.size, n, config)
+                val hwBody = (baseHalfW * 0.88f * paramMul).coerceAtLeast(0.75f)
+                val hwHalo = (baseHalfW * (1.28f - 0.24f * hardness) * paramMul).coerceAtLeast(1.0f)
 
                 haloLX[i] = n.x + nx * hwHalo
                 haloLY[i] = n.y + ny * hwHalo
@@ -635,8 +668,10 @@ class PaintBrush : BrushEngine {
 
             canvas.drawPath(buildRoundedRibbonPath(contour, haloLX, haloLY, haloRX, haloRY), haloPaint)
             canvas.drawPath(buildRoundedRibbonPath(contour, bodyLX, bodyLY, bodyRX, bodyRY), bodyPaint)
-            canvas.drawPath(streakLeft, bristlePaint)
-            canvas.drawPath(streakRight, bristlePaint)
+            if (grain > 0.08f) {
+                canvas.drawPath(streakLeft, bristlePaint)
+                canvas.drawPath(streakRight, bristlePaint)
+            }
         }
     }
 }
@@ -653,11 +688,12 @@ class Airbrush : BrushEngine {
         if (contours.isEmpty()) return
 
         val sprayRadius = (config.strokeWidth * 1.15f).coerceAtLeast(5f)
-        val alphaFrac = config.alpha.coerceIn(0.08f, 1.0f)
-        val perStampAlpha = (alphaFrac * 0.24f * 255f).roundToInt().coerceIn(8, 96)
+        val alphaFrac = (config.alpha * config.flow).coerceIn(0.06f, 1.0f)
+        val perStampAlpha = (alphaFrac * (0.16f + 0.18f * config.hardness) * 255f).roundToInt().coerceIn(6, 110)
 
         val rgb = config.color and 0x00FFFFFF
         val centerColor = (perStampAlpha shl 24) or rgb
+        val midStop = (0.30f + 0.35f * config.hardness).coerceIn(0.25f, 0.75f)
         val midColor = ((perStampAlpha * 0.42f).roundToInt().coerceAtLeast(2) shl 24) or rgb
         val edgeColor = rgb
 
@@ -666,7 +702,7 @@ class Airbrush : BrushEngine {
             0f,
             1f,
             intArrayOf(centerColor, midColor, edgeColor),
-            floatArrayOf(0f, 0.48f, 1f),
+            floatArrayOf(0f, midStop, 1f),
             Shader.TileMode.CLAMP
         )
 
@@ -675,7 +711,7 @@ class Airbrush : BrushEngine {
             shader = unitRadial
         }
 
-        val stepDist = max(3.5f, sprayRadius * 0.30f)
+        val stepDist = max(2.5f, sprayRadius * config.spacing.coerceIn(0.10f, 0.75f))
         val rainbowPalette = intArrayOf(
             Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.MAGENTA
         )
@@ -692,7 +728,7 @@ class Airbrush : BrushEngine {
                     stampPaint.shader = RadialGradient(
                         0f, 0f, 1f,
                         intArrayOf((perStampAlpha shl 24) or cRgb, ((perStampAlpha / 2) shl 24) or cRgb, cRgb),
-                        floatArrayOf(0f, 0.48f, 1f),
+                        floatArrayOf(0f, midStop, 1f),
                         Shader.TileMode.CLAMP
                     )
                 }
@@ -703,21 +739,280 @@ class Airbrush : BrushEngine {
                 canvas.restore()
             }
 
-            drawSprayAt(lastStampX, lastStampY, sprayRadius, contour[0].progress)
+            drawSprayAt(lastStampX, lastStampY, sprayRadius * contour[0].pressure, contour[0].progress)
             for (i in 1 until contour.size) {
                 val n = contour[i]
                 val dist = hypot(n.x - lastStampX, n.y - lastStampY)
                 if (dist >= stepDist || i == contour.lastIndex) {
                     val subSteps = (dist / stepDist).toInt().coerceIn(1, 8)
+                    val r = sprayRadius * (0.5f + 0.5f * n.pressure)
                     for (s in 1..subSteps) {
                         val t = s / subSteps.toFloat()
                         val sx = lastStampX + (n.x - lastStampX) * t
                         val sy = lastStampY + (n.y - lastStampY) * t
-                        drawSprayAt(sx, sy, sprayRadius, n.progress)
+                        drawSprayAt(sx, sy, r, n.progress)
                     }
                     lastStampX = n.x
                     lastStampY = n.y
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 5. Estilógrafo Técnico ([TechnicalInkBrush]):
+ * Constant-caliber precision drafting ink pen with minimal velocity drop and sharp joins.
+ */
+class TechnicalInkBrush : BrushEngine {
+    override val brushId: String = "technical_ink"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val baseHalfW = (config.strokeWidth * 0.40f).coerceAtLeast(0.6f)
+        val alphaInt = ((config.alpha * config.flow).coerceIn(0.20f, 1.0f) * 255f).roundToInt()
+        val shader = buildDynamicShaderIfNeeded(nodes, config)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = alphaInt
+            this.shader = shader
+        }
+
+        for (contour in contours) {
+            if (contour.size == 1) {
+                canvas.drawCircle(contour[0].x, contour[0].y, baseHalfW, paint)
+                continue
+            }
+            val leftX = FloatArray(contour.size)
+            val leftY = FloatArray(contour.size)
+            val rightX = FloatArray(contour.size)
+            val rightY = FloatArray(contour.size)
+
+            for (i in contour.indices) {
+                val n = contour[i]
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                val hw = (baseHalfW * (0.94f + 0.06f * n.pressure)).coerceAtLeast(0.55f)
+                leftX[i] = n.x + nx * hw
+                leftY[i] = n.y + ny * hw
+                rightX[i] = n.x - nx * hw
+                rightY[i] = n.y - ny * hw
+            }
+            canvas.drawPath(buildRoundedRibbonPath(contour, leftX, leftY, rightX, rightY), paint)
+        }
+    }
+}
+
+/**
+ * 6. Rotulador Biselado ([ChiselMarkerBrush]):
+ * Calibrated flat chisel felt tip whose width varies cleanly by stroke tangent vs chiselAngleDeg.
+ */
+class ChiselMarkerBrush : BrushEngine {
+    override val brushId: String = "chisel_marker"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val halfNib = (config.strokeWidth * 0.68f).coerceAtLeast(1.5f)
+        val chiselRad = config.chiselAngleDeg * (PI.toFloat() / 180f)
+        val nibCos = cos(chiselRad)
+        val nibSin = sin(chiselRad)
+        val effectiveAlpha = (config.alpha * config.flow).coerceIn(0.15f, 1.0f)
+        val alphaInt = (effectiveAlpha * 255f).roundToInt()
+        val shader = buildDynamicShaderIfNeeded(nodes, config)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = alphaInt
+            this.shader = shader
+        }
+
+        for (contour in contours) {
+            if (contour.size == 1) {
+                val p = contour[0]
+                val dx = nibCos * halfNib
+                val dy = nibSin * halfNib
+                val perpX = -nibSin * halfNib * 0.30f
+                val perpY = nibCos * halfNib * 0.30f
+                val tip = Path().apply {
+                    moveTo(p.x - dx - perpX, p.y - dy - perpY)
+                    lineTo(p.x + dx - perpX, p.y + dy - perpY)
+                    lineTo(p.x + dx + perpX, p.y + dy + perpY)
+                    lineTo(p.x - dx + perpX, p.y - dy + perpY)
+                    close()
+                }
+                canvas.drawPath(tip, paint)
+                continue
+            }
+
+            val leftX = FloatArray(contour.size)
+            val leftY = FloatArray(contour.size)
+            val rightX = FloatArray(contour.size)
+            val rightY = FloatArray(contour.size)
+
+            for (i in contour.indices) {
+                val n = contour[i]
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                val tx = cos(n.angle)
+                val ty = sin(n.angle)
+                val align = abs(nx * nibCos + ny * nibSin)
+                val paramMul = computeParametricWidthFactor(i, contour.size, n, config)
+                val hw = (halfNib * (0.34f + 0.66f * align) * paramMul).coerceAtLeast(0.8f)
+                val bevelShift = if (!n.isClosed && (i == 0 || i == contour.lastIndex)) hw * 0.32f else 0f
+                leftX[i] = n.x + nx * hw + tx * bevelShift
+                leftY[i] = n.y + ny * hw + ty * bevelShift
+                rightX[i] = n.x - nx * hw - tx * bevelShift
+                rightY[i] = n.y - ny * hw - ty * bevelShift
+            }
+
+            val path = Path().apply {
+                moveTo(leftX[0], leftY[0])
+                for (i in 1 until contour.size) lineTo(leftX[i], leftY[i])
+                for (i in contour.lastIndex downTo 0) lineTo(rightX[i], rightY[i])
+                close()
+            }
+            canvas.drawPath(path, paint)
+        }
+    }
+}
+
+/**
+ * 7. Acuarela Húmeda ([WatercolorBrush]):
+ * Multi-pass translucent pigment wash with soft radial blooms and wet-edge pigment pooling.
+ */
+class WatercolorBrush : BrushEngine {
+    override val brushId: String = "watercolor"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        val contours = splitNodeContours(nodes)
+        if (contours.isEmpty()) return
+
+        val baseHalfW = (config.strokeWidth * 0.72f).coerceAtLeast(2.0f)
+        val alphaFrac = (config.alpha * config.flow).coerceIn(0.08f, 0.92f)
+        val shader = buildDynamicShaderIfNeeded(nodes, config)
+
+        val washPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = config.color
+            alpha = (alphaFrac * 0.42f * 255f).roundToInt().coerceIn(8, 130)
+            this.shader = shader
+        }
+        val wetEdgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
+            strokeWidth = (baseHalfW * 0.22f).coerceIn(1.0f, 4.5f)
+            color = config.color
+            alpha = (alphaFrac * 0.52f * 255f).roundToInt().coerceIn(10, 150)
+            this.shader = shader
+        }
+
+        val rgb = config.color and 0x00FFFFFF
+        val bloomAlpha = (alphaFrac * 0.16f * 255f).roundToInt().coerceIn(4, 58)
+        val bloomGrad = RadialGradient(
+            0f, 0f, 1f,
+            intArrayOf((bloomAlpha shl 24) or rgb, ((bloomAlpha / 2) shl 24) or rgb, rgb),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        val bloomPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            this.shader = bloomGrad
+        }
+
+        for (contour in contours) {
+            if (contour.size == 1) {
+                val p = contour[0]
+                canvas.save()
+                canvas.translate(p.x, p.y)
+                canvas.scale(baseHalfW * 1.4f, baseHalfW * 1.4f)
+                canvas.drawCircle(0f, 0f, 1f, bloomPaint)
+                canvas.restore()
+                canvas.drawCircle(p.x, p.y, baseHalfW * 0.85f, washPaint)
+                continue
+            }
+
+            val leftX = FloatArray(contour.size)
+            val leftY = FloatArray(contour.size)
+            val rightX = FloatArray(contour.size)
+            val rightY = FloatArray(contour.size)
+            var hashState = config.seed xor contour.size
+
+            for (i in contour.indices) {
+                val n = contour[i]
+                hashState = nextHash(hashState xor i)
+                val organicBleed = 0.88f + 0.24f * ((hashState and 0xFF) / 255f) * config.grainStrength
+                val paramMul = computeParametricWidthFactor(i, contour.size, n, config)
+                val hw = (baseHalfW * paramMul * organicBleed).coerceAtLeast(1.2f)
+                val nx = -sin(n.angle)
+                val ny = cos(n.angle)
+                leftX[i] = n.x + nx * hw
+                leftY[i] = n.y + ny * hw
+                rightX[i] = n.x - nx * hw
+                rightY[i] = n.y - ny * hw
+            }
+
+            val washRibbon = buildRoundedRibbonPath(contour, leftX, leftY, rightX, rightY)
+            canvas.drawPath(washRibbon, washPaint)
+            canvas.drawPath(washRibbon, wetEdgePaint)
+
+            val step = max(3, (baseHalfW * 0.45f).roundToInt())
+            for (i in contour.indices step step) {
+                val n = contour[i]
+                val r = baseHalfW * 1.25f * computeParametricWidthFactor(i, contour.size, n, config)
+                canvas.save()
+                canvas.translate(n.x, n.y)
+                canvas.scale(r, r)
+                canvas.drawCircle(0f, 0f, 1f, bloomPaint)
+                canvas.restore()
+            }
+        }
+    }
+}
+
+/**
+ * 8. Borrador Suave ([SoftEraserBrush]):
+ * Feathered CLEAR radial brush for smooth alpha attenuation on layer bitmaps.
+ */
+class SoftEraserBrush : BrushEngine {
+    override val brushId: String = "soft_eraser"
+
+    override fun render(canvas: Canvas, nodes: List<BrushNode>, config: BrushConfig) {
+        if (nodes.isEmpty()) return
+        val radius = (config.strokeWidth * 0.85f).coerceAtLeast(4f)
+        val maxAlpha = (config.alpha * config.flow * 255f).roundToInt().coerceIn(16, 255)
+        val unitGrad = RadialGradient(
+            0f, 0f, 1f,
+            intArrayOf((maxAlpha shl 24), ((maxAlpha * 0.45f).roundToInt() shl 24), 0),
+            floatArrayOf(0f, (0.35f + 0.45f * config.hardness).coerceIn(0.2f, 0.9f), 1f),
+            Shader.TileMode.CLAMP
+        )
+        val clearPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            shader = unitGrad
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+        }
+        val step = max(2f, radius * 0.25f)
+        var lastX = nodes[0].x
+        var lastY = nodes[0].y
+        for (i in nodes.indices) {
+            val n = nodes[i]
+            val dist = hypot(n.x - lastX, n.y - lastY)
+            if (i == 0 || dist >= step || i == nodes.lastIndex) {
+                canvas.save()
+                canvas.translate(n.x, n.y)
+                canvas.scale(radius * n.pressure, radius * n.pressure)
+                canvas.drawCircle(0f, 0f, 1f, clearPaint)
+                canvas.restore()
+                lastX = n.x
+                lastY = n.y
             }
         }
     }
@@ -730,16 +1025,23 @@ object BrushEngineRegistry {
     private val pencil = PencilBrush()
     private val highlighter = HighlighterBrush()
     private val fountainPen = FountainPenBrush()
+    private val technicalInk = TechnicalInkBrush()
     private val fineMarker = FineMarkerBrush()
+    private val chiselMarker = ChiselMarkerBrush()
     private val paintBrush = PaintBrush()
+    private val watercolor = WatercolorBrush()
     private val airbrush = Airbrush()
+    val softEraser = SoftEraserBrush()
 
     fun forBrushType(brushType: StrokeBrushType, strokeStyle: StrokeStyle = StrokeStyle.SOLID): BrushEngine {
         return when (brushType) {
             StrokeBrushType.PENCIL -> pencil
             StrokeBrushType.FOUNTAIN_PEN -> fountainPen
+            StrokeBrushType.TECHNICAL_INK -> technicalInk
             StrokeBrushType.FINE_MARKER -> fineMarker
+            StrokeBrushType.CHISEL_MARKER -> chiselMarker
             StrokeBrushType.PAINT_BRUSH -> paintBrush
+            StrokeBrushType.WATERCOLOR -> watercolor
             StrokeBrushType.AIRBRUSH -> airbrush
             StrokeBrushType.HIGHLIGHTER -> highlighter
         }
@@ -748,8 +1050,11 @@ object BrushEngineRegistry {
     fun allCoreBrushes(): List<BrushEngine> = listOf(
         pencil,
         fountainPen,
+        technicalInk,
         fineMarker,
+        chiselMarker,
         paintBrush,
+        watercolor,
         airbrush,
         highlighter
     )

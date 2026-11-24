@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -31,6 +32,8 @@ import androidx.compose.material.icons.automirrored.filled.MergeType
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,6 +41,10 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,13 +57,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.model.DrawingLayer
+import com.example.model.LayerBlendMode
 import com.example.model.ShapeItem
 import com.example.model.WhiteboardStroke
+import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.roundToInt
 
 /**
  * Floating Sketchbook-style Layers Drawer allowing users to create, reorder, duplicate,
- * merge, toggle visibility/lock, and adjust per-layer opacity.
+ * merge, toggle visibility/lock, blend mode, Alpha Lock, Reference Layer, and per-layer opacity.
  */
 @Composable
 fun SketchbookLayersPanel(
@@ -76,6 +86,9 @@ fun SketchbookLayersPanel(
     onMergeDown: (String) -> Unit,
     onDeleteLayer: (String) -> Unit,
     onDismiss: () -> Unit,
+    onChangeBlendMode: (String, LayerBlendMode) -> Unit = { _, _ -> },
+    onToggleAlphaLock: (String) -> Unit = {},
+    onToggleReference: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeLayer = layers.find { it.id == activeLayerId } ?: layers.lastOrNull()
@@ -154,6 +167,7 @@ fun SketchbookLayersPanel(
             }
 
             if (activeLayer != null) {
+                var showBlendMenu by remember(activeLayer.id) { mutableStateOf(false) }
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -169,8 +183,7 @@ fun SketchbookLayersPanel(
                     )
                     Text(
                         text = "${(activeLayer.opacity * 100f).roundToInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = StudioMonoTextStyle,
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -184,6 +197,94 @@ fun SketchbookLayersPanel(
                         .height(26.dp)
                         .testTag("layers_active_opacity_slider")
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Blend Mode Selector Chip
+                    Box {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                                .clickable { showBlendMenu = true }
+                                .testTag("layers_blend_mode_button")
+                        ) {
+                            Text(
+                                text = activeLayer.blendMode.displayName,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showBlendMenu,
+                            onDismissRequest = { showBlendMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ) {
+                            LayerBlendMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = { Text("${mode.shortCode} · ${mode.displayName}") },
+                                    onClick = {
+                                        showBlendMenu = false
+                                        onChangeBlendMode(activeLayer.id, mode)
+                                    },
+                                    modifier = Modifier.testTag("layer_blend_${mode.name}")
+                                )
+                            }
+                        }
+                    }
+
+                    // Alpha Lock Toggle Chip
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (activeLayer.isAlphaLocked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(
+                                1.dp,
+                                if (activeLayer.isAlphaLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onToggleAlphaLock(activeLayer.id) }
+                            .testTag("layers_alpha_lock_btn")
+                    ) {
+                        Text(
+                            text = "Alfa",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (activeLayer.isAlphaLocked) FontWeight.Bold else FontWeight.Medium,
+                            color = if (activeLayer.isAlphaLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+
+                    // Reference Layer Toggle Chip
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (activeLayer.isReference) GuideCyan.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(
+                                1.dp,
+                                if (activeLayer.isReference) GuideCyan else MaterialTheme.colorScheme.outline,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .clickable { onToggleReference(activeLayer.id) }
+                            .testTag("layers_reference_btn")
+                    ) {
+                        Text(
+                            text = "Ref",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = if (activeLayer.isReference) FontWeight.Bold else FontWeight.Medium,
+                            color = if (activeLayer.isReference) GuideCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                    }
+                }
             }
 
             HorizontalDivider(
@@ -254,9 +355,14 @@ fun SketchbookLayersPanel(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "$itemCount elem · ${(layer.opacity * 100f).roundToInt()}%",
+                                    text = buildString {
+                                        append("$itemCount elem · ${(layer.opacity * 100f).roundToInt()}%")
+                                        if (layer.blendMode != LayerBlendMode.NORMAL) append(" · ${layer.blendMode.shortCode}")
+                                        if (layer.isAlphaLocked) append(" · α")
+                                        if (layer.isReference) append(" · REF")
+                                    },
                                     fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (layer.isReference) GuideCyan else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 

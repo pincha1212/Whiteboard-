@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -81,8 +82,11 @@ fun BrushDock(
     val isBrushToolActive = !hasPendingPlacement && (
         uiState.currentTool == ToolType.PENCIL ||
             uiState.currentTool == ToolType.PEN ||
+            uiState.currentTool == ToolType.TECHNICAL_INK ||
             uiState.currentTool == ToolType.FINE_MARKER ||
+            uiState.currentTool == ToolType.CHISEL_MARKER ||
             uiState.currentTool == ToolType.PAINT_BRUSH ||
+            uiState.currentTool == ToolType.WATERCOLOR ||
             uiState.currentTool == ToolType.AIRBRUSH ||
             uiState.currentTool == ToolType.HIGHLIGHTER
         )
@@ -106,6 +110,7 @@ fun BrushDock(
             viewModel.updateBrushSlot(slotIndex = index, opacity = opacity)
         },
         onOpenColorStudio = { viewModel.openColorStudio() },
+        onOpenBrushStudio = { index -> viewModel.openBrushStudio(index) },
         onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
         isVertical = isVertical,
         modifier = modifier
@@ -127,6 +132,7 @@ fun BrushDock(
     onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
     onUpdateSlotOpacity: (Int, Float) -> Unit = { _, _ -> },
     onOpenColorStudio: () -> Unit = {},
+    onOpenBrushStudio: (Int) -> Unit = {},
     onToggleAutoShape: () -> Unit,
     isVertical: Boolean = false,
     modifier: Modifier = Modifier
@@ -185,6 +191,10 @@ fun BrushDock(
                         expandedSlotIndex = null
                         onOpenColorStudio()
                     },
+                    onOpenBrushStudio = {
+                        expandedSlotIndex = null
+                        onOpenBrushStudio(index)
+                    },
                     onToggleAutoShape = onToggleAutoShape
                 )
             }
@@ -225,12 +235,24 @@ private fun RenderBrushSlotPhysicalIcon(
             inkColor = tintColor,
             modifier = modifier
         )
+        StrokeBrushType.TECHNICAL_INK -> PhysicalTechnicalInkIcon(
+            inkColor = tintColor,
+            modifier = modifier
+        )
         StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
+            markerColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.CHISEL_MARKER -> PhysicalChiselMarkerIcon(
             markerColor = tintColor,
             modifier = modifier
         )
         StrokeBrushType.PAINT_BRUSH -> PhysicalBrushIcon(
             paintColor = tintColor,
+            modifier = modifier
+        )
+        StrokeBrushType.WATERCOLOR -> PhysicalWatercolorIcon(
+            pigmentColor = tintColor,
             modifier = modifier
         )
         StrokeBrushType.AIRBRUSH -> PhysicalAirbrushIcon(
@@ -329,6 +351,7 @@ internal fun BrushSlotDropdownMenu(
     onUpdateWidth: (Float) -> Unit,
     onUpdateOpacity: (Float) -> Unit,
     onOpenColorStudio: () -> Unit,
+    onOpenBrushStudio: () -> Unit = {},
     onToggleAutoShape: () -> Unit
 ) {
     val activeInkTint = if (slot.isRainbow) Color(0xFFEC4899) else parsedColor
@@ -343,8 +366,8 @@ internal fun BrushSlotDropdownMenu(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier
-            .width(184.dp)
-            .heightIn(max = 520.dp)
+            .width(188.dp)
+            .heightIn(max = 560.dp)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
             .testTag("dock_brush_slot_dropdown")
     ) {
@@ -380,8 +403,11 @@ internal fun BrushSlotDropdownMenu(
                     val alpha = (if (isHighlighter) minOf(slot.opacity, 0.45f) else slot.opacity).coerceIn(0.08f, 1f)
                     val previewWidth = when (slot.brushType) {
                         StrokeBrushType.HIGHLIGHTER -> (slot.strokeWidth * 1.4f).coerceIn(10f, 24f)
+                        StrokeBrushType.CHISEL_MARKER -> (slot.strokeWidth * 1.15f).coerceIn(4f, 22f)
+                        StrokeBrushType.TECHNICAL_INK -> (slot.strokeWidth * 0.75f).coerceIn(2f, 12f)
                         StrokeBrushType.FINE_MARKER -> (slot.strokeWidth * 0.85f).coerceIn(3f, 16f)
                         StrokeBrushType.PAINT_BRUSH -> (slot.strokeWidth * 1.25f).coerceIn(6f, 24f)
+                        StrokeBrushType.WATERCOLOR -> (slot.strokeWidth * 1.35f).coerceIn(6f, 26f)
                         StrokeBrushType.AIRBRUSH -> (slot.strokeWidth * 1.6f).coerceIn(8f, 26f)
                         StrokeBrushType.PENCIL -> (slot.strokeWidth * 0.75f).coerceIn(2f, 12f)
                         StrokeBrushType.FOUNTAIN_PEN -> slot.strokeWidth.coerceIn(2f, 20f)
@@ -403,10 +429,11 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 2. Icon-Only 2x3 Brush Type Grid (6 Sketchbook brushes, zero words)
+            // 2. Icon-Only 3x3 Brush Type Grid (9 Sketchbook brushes, zero words)
             val brushGridRows = listOf(
-                listOf(StrokeBrushType.PENCIL, StrokeBrushType.FOUNTAIN_PEN, StrokeBrushType.FINE_MARKER),
-                listOf(StrokeBrushType.PAINT_BRUSH, StrokeBrushType.AIRBRUSH, StrokeBrushType.HIGHLIGHTER)
+                listOf(StrokeBrushType.PENCIL, StrokeBrushType.FOUNTAIN_PEN, StrokeBrushType.TECHNICAL_INK),
+                listOf(StrokeBrushType.FINE_MARKER, StrokeBrushType.CHISEL_MARKER, StrokeBrushType.HIGHLIGHTER),
+                listOf(StrokeBrushType.PAINT_BRUSH, StrokeBrushType.WATERCOLOR, StrokeBrushType.AIRBRUSH)
             )
             Column(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -557,24 +584,47 @@ internal fun BrushSlotDropdownMenu(
                     }
                 }
 
-                // Icon-only Color Studio Wheel Trigger
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                        .clickable(role = Role.Button, onClick = onOpenColorStudio)
-                        .semantics { contentDescription = "Abrir rueda de color HSB" }
-                        .testTag("dock_open_color_studio")
+                // Icon-only Color Studio Wheel + Parametric Brush Studio Row
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Palette,
-                        contentDescription = null,
-                        tint = activeInkTint,
-                        modifier = Modifier.size(18.dp)
-                    )
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .clickable(role = Role.Button, onClick = onOpenColorStudio)
+                            .semantics { contentDescription = "Abrir rueda de color HSB" }
+                            .testTag("dock_open_color_studio")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Palette,
+                            contentDescription = null,
+                            tint = activeInkTint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .clickable(role = Role.Button, onClick = onOpenBrushStudio)
+                            .semantics { contentDescription = "Ajustes paramétricos del pincel" }
+                            .testTag("dock_open_brush_studio")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -635,14 +685,14 @@ internal fun BrushSlotDropdownMenu(
                     .pointerInput(slot.id, onUpdateWidth) {
                         detectTapGestures { offset ->
                             val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
-                            onUpdateWidth(2f + frac * 22f)
+                            onUpdateWidth(1f + frac * 63f)
                         }
                     }
                     .pointerInput(slot.id, onUpdateWidth) {
                         detectHorizontalDragGestures { change, _ ->
                             change.consume()
                             val frac = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
-                            onUpdateWidth(2f + frac * 22f)
+                            onUpdateWidth(1f + frac * 63f)
                         }
                     }
                     .semantics {
@@ -657,7 +707,7 @@ internal fun BrushSlotDropdownMenu(
                 ) {
                     val w = size.width
                     val cy = size.height / 2f
-                    val frac = ((slot.strokeWidth.coerceIn(2f, 24f) - 2f) / 22f).coerceIn(0f, 1f)
+                    val frac = ((slot.strokeWidth.coerceIn(1f, 64f) - 1f) / 63f).coerceIn(0f, 1f)
                     val leftR = 1.8.dp.toPx()
                     val rightR = 6.2.dp.toPx()
 
