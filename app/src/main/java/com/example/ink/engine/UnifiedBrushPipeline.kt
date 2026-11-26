@@ -78,6 +78,20 @@ object UnifiedBrushPipeline {
         fillPaintCache.evictAll()
     }
 
+    fun configureMemoryBudget(budget: MemoryBudgetProfile) {
+        nodeCache.resize(budget.nodeCacheBytes.coerceAtLeast(512 * 1024))
+        fillPathCache.resize(budget.fillPathCacheBytes.coerceAtLeast(256 * 1024))
+    }
+
+    fun trimMemory(severe: Boolean = false) {
+        if (severe) {
+            clearNodeCache()
+        } else {
+            nodeCache.trimToSize(nodeCache.maxSize() / 2)
+            fillPathCache.trimToSize(fillPathCache.maxSize() / 2)
+        }
+    }
+
     private fun cachedFillPath(shape: ShapeItem, geometryKey: String): Path {
         val key = "FILL:$geometryKey"
         fillPathCache.get(key)?.let { return it.path }

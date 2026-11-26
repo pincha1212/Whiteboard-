@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
-import com.example.model.LaserPoint
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
 import com.example.model.StrokeStyle
@@ -93,6 +92,34 @@ private fun gridAxisCount(start: Float, end: Float, step: Float): Int {
     return ceil((end - start) / step).toInt().coerceAtLeast(0)
 }
 
+private data class GridPointCacheKey(
+    val startXBits: Int,
+    val startYBits: Int,
+    val stepBits: Int,
+    val screenWBits: Int,
+    val screenHBits: Int
+)
+
+private data class GridLineCacheKey(
+    val startXBits: Int,
+    val startYBits: Int,
+    val stepBits: Int,
+    val screenWBits: Int,
+    val screenHBits: Int,
+    val includeVertical: Boolean,
+    val includeHorizontal: Boolean
+)
+
+private val gridCacheLock = Any()
+
+private val gridPointLruCache = object : LinkedHashMap<GridPointCacheKey, FloatArray>(5, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<GridPointCacheKey, FloatArray>?): Boolean = size > 4
+}
+
+private val gridLineLruCache = object : LinkedHashMap<GridLineCacheKey, FloatArray>(5, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<GridLineCacheKey, FloatArray>?): Boolean = size > 4
+}
+
 /** Builds the same x-major/y-minor point order used by the original grid loops. */
 internal fun buildGridPointPositions(
     startX: Float,
@@ -101,6 +128,17 @@ internal fun buildGridPointPositions(
     screenW: Float,
     screenH: Float
 ): FloatArray {
+    val key = GridPointCacheKey(
+        startXBits = startX.toBits(),
+        startYBits = startY.toBits(),
+        stepBits = step.toBits(),
+        screenWBits = screenW.toBits(),
+        screenHBits = screenH.toBits()
+    )
+    synchronized(gridCacheLock) {
+        gridPointLruCache[key]?.let { return it }
+    }
+
     val columns = gridAxisCount(startX, screenW, step)
     val rows = gridAxisCount(startY, screenH, step)
     if (columns == 0 || rows == 0) return FloatArray(0)
@@ -113,6 +151,9 @@ internal fun buildGridPointPositions(
             points[offset++] = x
             points[offset++] = startY + row * step
         }
+    }
+    synchronized(gridCacheLock) {
+        gridPointLruCache[key] = points
     }
     return points
 }
@@ -127,6 +168,19 @@ internal fun buildGridLineSegments(
     includeVertical: Boolean,
     includeHorizontal: Boolean
 ): FloatArray {
+    val key = GridLineCacheKey(
+        startXBits = startX.toBits(),
+        startYBits = startY.toBits(),
+        stepBits = step.toBits(),
+        screenWBits = screenW.toBits(),
+        screenHBits = screenH.toBits(),
+        includeVertical = includeVertical,
+        includeHorizontal = includeHorizontal
+    )
+    synchronized(gridCacheLock) {
+        gridLineLruCache[key]?.let { return it }
+    }
+
     val verticalCount = if (includeVertical) gridAxisCount(startX, screenW, step) else 0
     val horizontalCount = if (includeHorizontal) gridAxisCount(startY, screenH, step) else 0
     if (verticalCount == 0 && horizontalCount == 0) return FloatArray(0)
@@ -146,6 +200,9 @@ internal fun buildGridLineSegments(
         segments[offset++] = y
         segments[offset++] = screenW
         segments[offset++] = y
+    }
+    synchronized(gridCacheLock) {
+        gridLineLruCache[key] = segments
     }
     return segments
 }
@@ -307,6 +364,8 @@ private fun DrawScope.drawHandleCircle(center: Offset) {
     drawCircle(color = Color(0xFF2563EB), radius = 4f, center = center)
 }
 
+private val rotationArrowPath = ThreadLocal.withInitial { Path() }
+
 private fun DrawScope.drawRotationHandleCircle(center: Offset) {
     val radius = 21f
     drawCircle(color = Color(0xFF2563EB).copy(alpha = 0.16f), radius = radius + 6f, center = center)
@@ -330,7 +389,8 @@ private fun DrawScope.drawRotationHandleCircle(center: Offset) {
         center.x + arcR * cos(tipRad),
         center.y + arcR * sin(tipRad)
     )
-    val arrowPath = Path().apply {
+    val arrowPath = rotationArrowPath.get()!!.apply {
+        reset()
         moveTo(tip.x + 2f, tip.y + 1f)
         lineTo(tip.x - 6f, tip.y - 3f)
         lineTo(tip.x - 1f, tip.y - 8f)
@@ -375,16 +435,4 @@ fun DrawScope.drawStrokeSelectionHandles(
     drawHandleCircle(Offset(minX + w, minY))
     drawHandleCircle(Offset(minX, minY + h))
     drawHandleCircle(Offset(minX + w, minY + h))
-}
-
-fun DrawScope.drawLaserTrail(trail: List<LaserPoint>) {
-    if (trail.isEmpty()) return
-    val now = System.currentTimeMillis()
-    for (p in trail) {
-        val age = now - p.timestamp
-        if (age < 1500) {
-            val alpha = (1.0f - (age / 1500f)).coerceIn(0f, 1f)
-            drawCircle(color = Color(0xFFFF1744).copy(alpha = alpha), radius = 10f * alpha, center = Offset(p.x, p.y))
-        }
-    }
 }

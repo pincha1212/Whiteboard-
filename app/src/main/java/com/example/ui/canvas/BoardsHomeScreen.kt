@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,16 +24,10 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Draw
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -64,15 +59,16 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ink.engine.MemoryBudgetProfile
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
 import com.example.model.WhiteboardBoard
+import com.example.ui.theme.StudioIcons
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -83,12 +79,12 @@ import kotlin.math.min
 fun BoardsHomeScreen(
     boards: List<WhiteboardBoard>,
     currentBoardId: String,
+    memoryBudget: MemoryBudgetProfile = MemoryBudgetProfile.standard(),
     onOpenBoard: (String) -> Unit,
     onCreateBoard: (title: String, gridType: CanvasGridType, colorTheme: CanvasColorTheme) -> Unit,
     onRenameBoard: (boardId: String, newTitle: String) -> Unit,
     onDuplicateBoard: (String) -> Unit,
     onDeleteBoard: (String) -> Unit,
-    onSwitchToNotes: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -130,14 +126,13 @@ fun BoardsHomeScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Top Bar (Modern Minimal, matching Notes & Whiteboard)
             Surface(
                 color = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface,
                 shadowElevation = 1.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
+                Column(modifier = Modifier.statusBarsPadding()) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -145,58 +140,28 @@ fun BoardsHomeScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (onSwitchToNotes != null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                    .padding(3.dp)
-                            ) {
-                                HomeWorkspaceSegment(
-                                    icon = Icons.Default.Draw,
-                                    label = "Pizarras",
-                                    isSelected = true,
-                                    onClick = {},
-                                    testTag = "btn_home_tab_boards"
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                HomeWorkspaceSegment(
-                                    icon = Icons.Default.Description,
-                                    label = "Notas",
-                                    isSelected = false,
-                                    onClick = onSwitchToNotes,
-                                    testTag = "btn_home_tab_notes"
-                                )
-                            }
-                        } else {
-                            Text(
-                                text = "Mis Pizarras",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        Text(
+                            text = "Mis Pizarras",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
 
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
-                            ) {
-                                Text(
-                                    text = "${boards.size} ${if (boards.size == 1) "pizarra" else "pizarras"}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = "${boards.size} ${if (boards.size == 1) "pizarra" else "pizarras"}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 
-                    // Search Bar
                     if (boards.isNotEmpty()) {
                         OutlinedTextField(
                             value = searchQuery,
@@ -216,7 +181,7 @@ fun BoardsHomeScreen(
                                         Icon(
                                             imageVector = Icons.Default.Close,
                                             contentDescription = "Limpiar búsqueda",
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -243,7 +208,7 @@ fun BoardsHomeScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            imageVector = Icons.Default.Dashboard,
+                            imageVector = StudioIcons.Dashboard,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(48.dp)
@@ -347,7 +312,7 @@ fun BoardsHomeScreen(
             title = { Text("Eliminar pizarra", fontWeight = FontWeight.SemiBold) },
             text = {
                 Text(
-                    text = "¿Seguro que deseas eliminar \"${target.title}\"? Se perderán sus trazos, formas, notas y snapshots.",
+                    text = "¿Seguro que deseas eliminar \"${target.title}\"? Se perderán sus trazos, formas y textos.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -377,6 +342,7 @@ fun BoardsHomeScreen(
     if (boardToExport != null) {
         ExportBoardModal(
             board = boardToExport!!,
+            memoryBudget = memoryBudget,
             onDismiss = { boardToExport = null }
         )
     }
@@ -413,7 +379,6 @@ private fun BoardSummaryCard(
             .testTag("board_card_${board.id}")
     ) {
         Column {
-            // Live miniature canvas preview
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -424,7 +389,7 @@ private fun BoardSummaryCard(
             ) {
                 BoardCardMiniPreview(board = board, modifier = Modifier.fillMaxSize())
 
-                if (board.strokes.isEmpty() && board.shapes.isEmpty() && board.stickyNotes.isEmpty()) {
+                if (board.strokes.isEmpty() && board.shapes.isEmpty() && board.textItems.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -437,32 +402,12 @@ private fun BoardSummaryCard(
                         )
                     }
                 }
-
-                if (board.snapshots.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(6.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = "${board.snapshots.size} snap",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
             }
 
-            // Metadata + Menu
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 10.dp),
+                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -477,7 +422,7 @@ private fun BoardSummaryCard(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "${board.strokes.size}T · ${board.shapes.size}F · ${board.stickyNotes.size}N",
+                        text = "${board.strokes.size}T · ${board.shapes.size}F · ${board.textItems.size}Txt",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
@@ -493,13 +438,13 @@ private fun BoardSummaryCard(
                 Box {
                     IconButton(
                         onClick = { showCardMenu = true },
-                        modifier = Modifier.size(34.dp).testTag("btn_board_menu_${board.id}")
+                        modifier = Modifier.size(48.dp).testTag("btn_board_menu_${board.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "Opciones de pizarra",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -511,7 +456,7 @@ private fun BoardSummaryCard(
                     ) {
                         DropdownMenuItem(
                             text = { Text("Abrir") },
-                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            leadingIcon = { Icon(StudioIcons.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showCardMenu = false
                                 onOpen()
@@ -527,7 +472,7 @@ private fun BoardSummaryCard(
                         )
                         DropdownMenuItem(
                             text = { Text("Duplicar") },
-                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            leadingIcon = { Icon(StudioIcons.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showCardMenu = false
                                 onDuplicate()
@@ -535,7 +480,7 @@ private fun BoardSummaryCard(
                         )
                         DropdownMenuItem(
                             text = { Text("Exportar") },
-                            leadingIcon = { Icon(Icons.Default.IosShare, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            leadingIcon = { Icon(StudioIcons.IosShare, contentDescription = null, modifier = Modifier.size(18.dp)) },
                             onClick = {
                                 showCardMenu = false
                                 onExport()
@@ -568,7 +513,6 @@ private fun BoardCardMiniPreview(
         val bg = parseColor(board.colorTheme.hex, Color.White)
         drawRect(color = bg)
 
-        // Subtle grid hint
         if (board.gridType != CanvasGridType.BLANK) {
             val gridColor = if (board.colorTheme.isDark) Color.White.copy(alpha = 0.08f) else Color.Black.copy(alpha = 0.05f)
             val step = 18f
@@ -584,7 +528,6 @@ private fun BoardCardMiniPreview(
             }
         }
 
-        // Compute bounds of content
         var minX = Float.MAX_VALUE
         var maxX = -Float.MAX_VALUE
         var minY = Float.MAX_VALUE
@@ -607,12 +550,14 @@ private fun BoardCardMiniPreview(
             minY = min(minY, sh.y)
             maxY = max(maxY, sh.y + sh.height)
         }
-        board.stickyNotes.forEach { n ->
+        board.textItems.forEach { t ->
             hasContent = true
-            minX = min(minX, n.x)
-            maxX = max(maxX, n.x + n.width)
-            minY = min(minY, n.y)
-            maxY = max(maxY, n.y + n.height)
+            val tw = max(t.width, 120f)
+            val th = max(t.height, 44f)
+            minX = min(minX, t.x)
+            maxX = max(maxX, t.x + tw)
+            minY = min(minY, t.y)
+            maxY = max(maxY, t.y + th)
         }
 
         if (!hasContent || minX == Float.MAX_VALUE) return@Canvas
@@ -630,16 +575,16 @@ private fun BoardCardMiniPreview(
         board.shapes.forEach { shape ->
             drawShapeVector(shape = shape, panX = offsetX, panY = offsetY, scale = scale, isSelected = false, isDarkBoard = board.colorTheme.isDark)
         }
-        board.stickyNotes.forEach { note ->
-            val nx = note.x * scale + offsetX
-            val ny = note.y * scale + offsetY
-            val nw = (note.width * scale).coerceAtLeast(6f)
-            val nh = (note.height * scale).coerceAtLeast(6f)
+        board.textItems.forEach { t ->
+            val tx = t.x * scale + offsetX
+            val ty = t.y * scale + offsetY
+            val tw = (max(t.width, 120f) * scale).coerceAtLeast(8f)
+            val th = (max(t.height, 44f) * scale).coerceAtLeast(4f)
             drawRoundRect(
-                color = parseColor(note.colorHex, Color(0xFFFFF275)),
-                topLeft = Offset(nx, ny),
-                size = Size(nw, nh),
-                cornerRadius = CornerRadius(4f, 4f)
+                color = parseColor(t.colorHex, Color(0xFF0F172A)).copy(alpha = 0.28f),
+                topLeft = Offset(tx, ty),
+                size = Size(tw, th),
+                cornerRadius = CornerRadius(3f, 3f)
             )
         }
     }
@@ -677,7 +622,7 @@ private fun CreateBoardDialog(
                             val selected = t == selectedTheme
                             Box(
                                 modifier = Modifier
-                                    .size(28.dp)
+                                    .size(32.dp)
                                     .clip(CircleShape)
                                     .background(parseColor(t.hex))
                                     .border(
@@ -706,7 +651,7 @@ private fun CreateBoardDialog(
                                         shape = RoundedCornerShape(8.dp)
                                     )
                                     .clickable { selectedGrid = g }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
                                 Text(
                                     text = g.title,
@@ -736,41 +681,4 @@ private fun CreateBoardDialog(
             }
         }
     )
-}
-
-@Composable
-private fun HomeWorkspaceSegment(
-    icon: ImageVector,
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    testTag: String
-) {
-    val bgColor = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
-    val fgColor = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(bgColor)
-            .clickable(enabled = !isSelected, onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag(testTag)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = fgColor,
-            modifier = Modifier.size(14.dp)
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-            color = fgColor,
-            maxLines = 1
-        )
-    }
 }

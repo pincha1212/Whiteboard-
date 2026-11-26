@@ -17,12 +17,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Flip
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Loop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
@@ -47,6 +44,7 @@ import com.example.model.PerspectiveGuideState
 import com.example.model.PerspectiveMode
 import com.example.ui.theme.GuideAmber
 import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioIcons
 import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -184,12 +182,11 @@ fun InteractiveEllipseGuideView(
                 style = StudioMonoTextStyle,
                 color = Color(0xFFF2F2F5)
             )
-            Icon(
-                imageVector = if (guide.isCircleLocked) Icons.Default.Lock else Icons.Default.LockOpen,
-                contentDescription = "Bloquear círculo 1:1",
-                tint = if (guide.isCircleLocked) GuideAmber else Color(0xFF9A9AA3),
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(16.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
                     .clickable {
                         onUpdate(
                             guide.copy(
@@ -198,17 +195,32 @@ fun InteractiveEllipseGuideView(
                             )
                         )
                     }
+                    .padding(6.dp)
                     .testTag("ellipse_circle_lock_btn")
-            )
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Cerrar guía de elipse",
-                tint = Color(0xFFF2F2F5),
+            ) {
+                Icon(
+                    imageVector = if (guide.isCircleLocked) StudioIcons.Lock else StudioIcons.LockOpen,
+                    contentDescription = "Bloquear círculo 1:1",
+                    tint = if (guide.isCircleLocked) GuideAmber else Color(0xFF9A9AA3),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(16.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
                     .clickable(onClick = onClose)
+                    .padding(6.dp)
                     .testTag("ellipse_close_btn")
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar guía de elipse",
+                    tint = Color(0xFFF2F2F5),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }
@@ -276,37 +288,58 @@ fun InteractiveFrenchCurveView(
                 style = StudioMonoTextStyle,
                 color = Color(0xFFF2F2F5)
             )
-            Icon(
-                imageVector = Icons.Default.Loop,
-                contentDescription = "Cambiar plantilla",
-                tint = GuideCyan,
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(16.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
                     .clickable {
                         val entries = com.example.model.FrenchCurveProfile.entries
                         val next = entries[(guide.profile.ordinal + 1) % entries.size]
                         onUpdate(guide.copy(profile = next))
                     }
+                    .padding(6.dp)
                     .testTag("french_curve_cycle_btn")
-            )
-            Icon(
-                imageVector = Icons.Default.Flip,
-                contentDescription = "Voltear horizontalmente",
-                tint = if (guide.isFlippedX) GuideAmber else Color(0xFF9A9AA3),
+            ) {
+                Icon(
+                    imageVector = StudioIcons.Loop,
+                    contentDescription = "Cambiar plantilla",
+                    tint = GuideCyan,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(16.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
                     .clickable { onUpdate(guide.copy(isFlippedX = !guide.isFlippedX)) }
+                    .padding(6.dp)
                     .testTag("french_curve_flip_btn")
-            )
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Cerrar curva francesa",
-                tint = Color(0xFFF2F2F5),
+            ) {
+                Icon(
+                    imageVector = StudioIcons.Flip,
+                    contentDescription = "Voltear horizontalmente",
+                    tint = if (guide.isFlippedX) GuideAmber else Color(0xFF9A9AA3),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            Box(
+                contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(16.dp)
+                    .minimumInteractiveComponentSize()
+                    .clip(CircleShape)
                     .clickable(onClick = onClose)
+                    .padding(6.dp)
                     .testTag("french_curve_close_btn")
-            )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Cerrar curva francesa",
+                    tint = Color(0xFFF2F2F5),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

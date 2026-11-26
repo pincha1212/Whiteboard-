@@ -27,17 +27,39 @@ class RasterTileSidecarStore(
         val boardDirs = dir.listFiles()?.filter { it.isDirectory }.orEmpty()
         for (boardDir in boardDirs) {
             val boardId = decodeSegment(boardDir.name) ?: continue
-            val layerDirs = boardDir.listFiles()?.filter { it.isDirectory }.orEmpty()
-            for (layerDir in layerDirs) {
-                val layerId = decodeSegment(layerDir.name) ?: continue
-                val tileFiles = layerDir.listFiles()?.filter {
-                    it.isFile && it.extension.equals("png", ignoreCase = true)
-                }.orEmpty()
-                for (tileFile in tileFiles) {
-                    val coord = parseTileCoord(tileFile.nameWithoutExtension) ?: continue
-                    val decoded = decodeMutableTile(tileFile) ?: continue
-                    rasterStore.putDecodedTile(boardId, layerId, coord.first, coord.second, decoded)
-                }
+            loadBoardDirInto(boardId, boardDir, rasterStore)
+        }
+    }
+
+    /**
+     * Loads raster PNG tiles for a single [boardId] into [rasterStore].
+     * Used on 1 GB RAM devices for lazy per-board loading.
+     */
+    fun loadBoardInto(boardId: String, rasterStore: MutableRasterTileStore) {
+        val dir = rootDir ?: return
+        if (!dir.exists() || !dir.isDirectory) return
+        val boardDir = File(dir, encodeSegment(boardId))
+        rasterStore.markBoardLoaded(boardId)
+        if (!boardDir.exists() || !boardDir.isDirectory) return
+        loadBoardDirInto(boardId, boardDir, rasterStore)
+    }
+
+    private fun loadBoardDirInto(
+        boardId: String,
+        boardDir: File,
+        rasterStore: MutableRasterTileStore
+    ) {
+        rasterStore.markBoardLoaded(boardId)
+        val layerDirs = boardDir.listFiles()?.filter { it.isDirectory }.orEmpty()
+        for (layerDir in layerDirs) {
+            val layerId = decodeSegment(layerDir.name) ?: continue
+            val tileFiles = layerDir.listFiles()?.filter {
+                it.isFile && it.extension.equals("png", ignoreCase = true)
+            }.orEmpty()
+            for (tileFile in tileFiles) {
+                val coord = parseTileCoord(tileFile.nameWithoutExtension) ?: continue
+                val decoded = decodeMutableTile(tileFile) ?: continue
+                rasterStore.putDecodedTile(boardId, layerId, coord.first, coord.second, decoded)
             }
         }
     }
@@ -53,8 +75,11 @@ class RasterTileSidecarStore(
         for (board in boards) {
             val encodedBoard = encodeSegment(board.id)
             activeBoardDirNames.add(encodedBoard)
-            val boardDir = File(dir, encodedBoard)
+            // If this board's raster tiles are currently unloaded/evicted to save RAM,
+            // keep its existing on-disk PNG sidecar untouched.
+            if (!rasterStore.isBoardLoaded(board.id)) continue
 
+            val boardDir = File(dir, encodedBoard)
             val layerIds = board.layers.map { it.id }.ifEmpty { listOf(DEFAULT_LAYER_ID) }
             val activeLayerDirNames = HashSet<String>(layerIds.size)
             var boardHasAnyRasterTiles = false

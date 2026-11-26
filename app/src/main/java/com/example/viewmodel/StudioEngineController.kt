@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import com.example.ink.engine.FloodFillResult
+import com.example.ink.engine.MemoryBudgetProfile
 import com.example.ink.engine.MutableRasterTileStore
 import com.example.ink.engine.PaintTileRasterCache
 import com.example.ink.engine.PigmentMixEngine
@@ -18,17 +19,27 @@ import com.example.model.WhiteboardBoard
 import kotlin.math.roundToInt
 
 /**
- * Coordinates v3.2.0 pixel-level raster operations ([PigmentMixEngine], [ScanlineFloodFillEngine],
- * Reference Layer boundary sampling, and atomic multi-step undo patch merging) on top of
- * [MutableRasterTileStore] and [PaintTileRasterCache].
+ * Coordinates pixel-level raster operations ([PigmentMixEngine], [ScanlineFloodFillEngine],
+ * Reference Layer boundary sampling, and atomic multi-step undo patch merging) using the
+ * single shared [PaintTileRasterCache] so only one raster cache exists in RAM.
  */
 class StudioEngineController(
-    private val rasterStore: MutableRasterTileStore
+    private val rasterStore: MutableRasterTileStore,
+    private val paintTileCache: PaintTileRasterCache = PaintTileRasterCache(rasterStore),
+    private val memoryBudget: MemoryBudgetProfile = MemoryBudgetProfile.standard()
 ) {
-    private val bakingCache = PaintTileRasterCache(rasterStore)
+    private val mergePaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     fun resetCache() {
-        bakingCache.clear()
+        paintTileCache.clear()
+    }
+
+    fun onTrimMemory(severe: Boolean) {
+        if (severe) {
+            paintTileCache.clearAndReleasePool()
+        } else {
+            paintTileCache.trimToFraction(0.5f)
+        }
     }
 
     fun executeSmudgeStroke(
@@ -40,8 +51,9 @@ class StudioEngineController(
         handDrawnFactor: Float = 0.24f
     ): TileRasterUndoPatch? {
         if (!layer.isVisible || layer.isLocked || points.size < 2) return null
+        val sampledToRelease = mutableListOf<Bitmap>()
         val sampler: (Int, Int) -> Bitmap? = { tx, ty ->
-            bakingCache.bakeSingleLayerTile(
+            paintTileCache.bakeSingleLayerTile(
                 boardId = board.id,
                 layer = layer,
                 strokes = board.strokes,
@@ -50,18 +62,24 @@ class StudioEngineController(
                 ty = ty,
                 isDarkBoard = board.colorTheme.isDark,
                 handDrawnFactor = handDrawnFactor
-            )
+            )?.also { sampledToRelease.add(it) }
         }
-        return PigmentMixEngine.applySmudgeStroke(
-            boardId = board.id,
-            layerId = layer.id,
-            points = points,
-            brushRadiusWorld = brushRadiusWorld,
-            strength = strength,
-            isAlphaLocked = layer.isAlphaLocked,
-            rasterStore = rasterStore,
-            layerSampler = sampler
-        )
+        return try {
+            PigmentMixEngine.applySmudgeStroke(
+                boardId = board.id,
+                layerId = layer.id,
+                points = points,
+                brushRadiusWorld = brushRadiusWorld,
+                strength = strength,
+                isAlphaLocked = layer.isAlphaLocked,
+                rasterStore = rasterStore,
+                layerSampler = sampler
+            )
+        } finally {
+            for (bmp in sampledToRelease) {
+                paintTileCache.releaseTemporaryTile(bmp)
+            }
+        }
     }
 
     fun executeSoftEraserSegment(
@@ -104,10 +122,11 @@ class StudioEngineController(
         val layers = board.layers.ifEmpty { listOf(targetLayer) }
         val refLayers = layers.filter { it.isVisible && it.isReference }
         val boundaryLayers = if (refLayers.isNotEmpty()) refLayers else listOf(targetLayer)
+        val tempTiles = mutableListOf<Bitmap>()
 
         val boundarySampler: (Int, Int) -> Bitmap? = { tx, ty ->
             if (boundaryLayers.size == 1) {
-                bakingCache.bakeSingleLayerTile(
+                paintTileCache.bakeSingleLayerTile(
                     boardId = board.id,
                     layer = boundaryLayers.first(),
                     strokes = board.strokes,
@@ -116,13 +135,12 @@ class StudioEngineController(
                     ty = ty,
                     isDarkBoard = board.colorTheme.isDark,
                     handDrawnFactor = handDrawnFactor
-                )
+                )?.also { tempTiles.add(it) }
             } else {
                 var merged: Bitmap? = null
                 var mergeCanvas: Canvas? = null
-                val paint = Paint(Paint.ANTI_ALIAS_FLAG)
                 for (bLayer in boundaryLayers) {
-                    val bmp = bakingCache.bakeSingleLayerTile(
+                    val bmp = paintTileCache.bakeSingleLayerTile(
                         boardId = board.id,
                         layer = bLayer,
                         strokes = board.strokes,
@@ -133,10 +151,12 @@ class StudioEngineController(
                         handDrawnFactor = handDrawnFactor
                     ) ?: continue
                     if (merged == null) {
-                        merged = bmp.copy(Bitmap.Config.ARGB_8888, true)
-                        mergeCanvas = merged?.let { Canvas(it) }
+                        merged = bmp
+                        mergeCanvas = Canvas(bmp)
+                        tempTiles.add(bmp)
                     } else {
-                        mergeCanvas?.drawBitmap(bmp, 0f, 0f, paint)
+                        mergeCanvas?.drawBitmap(bmp, 0f, 0f, mergePaint)
+                        paintTileCache.releaseTemporaryTile(bmp)
                     }
                 }
                 merged
@@ -144,7 +164,7 @@ class StudioEngineController(
         }
 
         val targetSampler: (Int, Int) -> Bitmap? = { tx, ty ->
-            bakingCache.bakeSingleLayerTile(
+            paintTileCache.bakeSingleLayerTile(
                 boardId = board.id,
                 layer = targetLayer,
                 strokes = board.strokes,
@@ -153,29 +173,35 @@ class StudioEngineController(
                 ty = ty,
                 isDarkBoard = board.colorTheme.isDark,
                 handDrawnFactor = handDrawnFactor
-            )
+            )?.also { tempTiles.add(it) }
         }
 
         val sx = seedWorldX.roundToInt()
         val sy = seedWorldY.roundToInt()
-        val regionHalf = 960
+        val regionHalf = if (memoryBudget.isLowRamProfile) 640 else 960
         val regionWorld = Rect(sx - regionHalf, sy - regionHalf, sx + regionHalf, sy + regionHalf)
 
-        return ScanlineFloodFillEngine.floodFill(
-            boardId = board.id,
-            targetLayerId = targetLayer.id,
-            seedWorldX = sx,
-            seedWorldY = sy,
-            fillColorInt = fillColorInt,
-            fillOpacity = fillOpacity,
-            tolerance = tolerance,
-            gapClosingPx = 1,
-            isAlphaLocked = targetLayer.isAlphaLocked,
-            regionWorld = regionWorld,
-            rasterStore = rasterStore,
-            boundaryTileSampler = boundarySampler,
-            targetExistingTileSampler = targetSampler
-        )
+        return try {
+            ScanlineFloodFillEngine.floodFill(
+                boardId = board.id,
+                targetLayerId = targetLayer.id,
+                seedWorldX = sx,
+                seedWorldY = sy,
+                fillColorInt = fillColorInt,
+                fillOpacity = fillOpacity,
+                tolerance = tolerance,
+                gapClosingPx = 1,
+                isAlphaLocked = targetLayer.isAlphaLocked,
+                regionWorld = regionWorld,
+                rasterStore = rasterStore,
+                boundaryTileSampler = boundarySampler,
+                targetExistingTileSampler = targetSampler
+            )
+        } finally {
+            for (bmp in tempTiles) {
+                paintTileCache.releaseTemporaryTile(bmp)
+            }
+        }
     }
 
     /**

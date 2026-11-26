@@ -69,7 +69,7 @@ class StudioPipelineV31Test {
         vm.updateBrushSlotStudioSettings(0, custom)
         assertEquals(custom, vm.brushSlots[0].studioSettings)
 
-        vm.updateDoublePuckBrush(newWidth = 220f, newOpacity = 0.01f)
+        vm.updateActiveBrushQuickSettings(newWidth = 220f, newOpacity = 0.01f)
         assertEquals(160f, vm.uiState.value.penWidth, 0.001f)
         assertEquals(0.05f, vm.uiState.value.penOpacity, 0.001f)
         assertEquals(160f, vm.brushSlots[0].strokeWidth, 0.001f)

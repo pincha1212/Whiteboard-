@@ -42,8 +42,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import com.example.ink.StickyNoteGeometry
-import com.example.ink.StickyNoteResizeHandle
+import com.example.ink.BoxResizeHandle
+import com.example.ink.BoxTransformGeometry
 import com.example.ink.ViewportTransform
 import com.example.model.TextItem
 import kotlin.math.PI
@@ -53,15 +53,15 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private val TextCornerResizeHandles = listOf(
-    StickyNoteResizeHandle.TOP_LEFT,
-    StickyNoteResizeHandle.TOP_RIGHT,
-    StickyNoteResizeHandle.BOTTOM_RIGHT,
-    StickyNoteResizeHandle.BOTTOM_LEFT
+    BoxResizeHandle.TOP_LEFT,
+    BoxResizeHandle.TOP_RIGHT,
+    BoxResizeHandle.BOTTOM_RIGHT,
+    BoxResizeHandle.BOTTOM_LEFT
 )
 
 /**
  * Screen-space selection frame, 4 corner vertex resize handles, and 1 top rotation handle for
- * the currently selected floating [TextItem], matching shape & sticky-note transform ergonomics.
+ * the currently selected floating [TextItem], matching shape transform ergonomics.
  */
 @Composable
 fun TextItemSelectionOverlay(
@@ -70,7 +70,7 @@ fun TextItemSelectionOverlay(
     cameraState: State<ViewportTransform>,
     onBeginTransform: () -> Unit,
     onEndTransform: () -> Unit,
-    onResizeHandle: (StickyNoteResizeHandle, Float, Float) -> Unit,
+    onResizeHandle: (BoxResizeHandle, Float, Float) -> Unit,
     onRotate: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -143,18 +143,16 @@ fun TextItemSelectionOverlay(
                         val cam = cameraState.value
                         val safeScale = cam.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
                         val relX = when (handle) {
-                            StickyNoteResizeHandle.TOP_LEFT,
-                            StickyNoteResizeHandle.BOTTOM_LEFT -> -item.width * 0.5f
-                            StickyNoteResizeHandle.TOP_RIGHT,
-                            StickyNoteResizeHandle.BOTTOM_RIGHT -> item.width * 0.5f
-                            else -> 0f
+                            BoxResizeHandle.TOP_LEFT,
+                            BoxResizeHandle.BOTTOM_LEFT -> -item.width * 0.5f
+                            BoxResizeHandle.TOP_RIGHT,
+                            BoxResizeHandle.BOTTOM_RIGHT -> item.width * 0.5f
                         }
                         val relY = when (handle) {
-                            StickyNoteResizeHandle.TOP_LEFT,
-                            StickyNoteResizeHandle.TOP_RIGHT -> -itemH * 0.5f
-                            StickyNoteResizeHandle.BOTTOM_LEFT,
-                            StickyNoteResizeHandle.BOTTOM_RIGHT -> itemH * 0.5f
-                            else -> 0f
+                            BoxResizeHandle.TOP_LEFT,
+                            BoxResizeHandle.TOP_RIGHT -> -itemH * 0.5f
+                            BoxResizeHandle.BOTTOM_LEFT,
+                            BoxResizeHandle.BOTTOM_RIGHT -> itemH * 0.5f
                         }
                         val cxWorld = item.x + item.width * 0.5f
                         val cyWorld = item.y + itemH * 0.5f
@@ -303,7 +301,7 @@ fun TextItemSelectionOverlay(
                             val safeScale = cam.scale.coerceAtLeast(ViewportTransform.MIN_SCALE)
                             val centerScreenX = (item.x + item.width * 0.5f) * safeScale + cam.panX
                             val centerScreenY = (item.y + itemH * 0.5f) * safeScale + cam.panY
-                            val degrees = StickyNoteGeometry.calculateRotationDegrees(
+                            val degrees = BoxTransformGeometry.calculateRotationDegrees(
                                 centerX = centerScreenX,
                                 centerY = centerScreenY,
                                 pointerX = curScreenX,

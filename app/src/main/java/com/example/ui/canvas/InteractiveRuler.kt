@@ -13,11 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
@@ -38,6 +36,7 @@ import com.example.ink.ViewportTransform
 import com.example.model.RulerState
 import com.example.ui.theme.GuideAmber
 import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioIcons
 import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -156,16 +155,17 @@ fun InteractiveRulerView(
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
-                    .size(22.dp)
+                    .minimumInteractiveComponentSize()
                     .clip(CircleShape)
                     .clickable(onClick = onToggleAngleLock)
+                    .padding(4.dp)
                     .testTag("ruler_lock_angle_btn")
             ) {
                 Icon(
-                    imageVector = if (rulerState.isAngleLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                    imageVector = if (rulerState.isAngleLocked) StudioIcons.Lock else StudioIcons.LockOpen,
                     contentDescription = if (rulerState.isAngleLocked) "Desbloquear ángulo" else "Bloquear ángulo",
                     tint = if (rulerState.isAngleLocked) GuideAmber else Color(0xFF9A9AA3),
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }

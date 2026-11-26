@@ -2,17 +2,17 @@ package com.example.ink.engine
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.os.Build
 import com.example.model.LayerBlendMode
 import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
+import java.util.Arrays
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.Deflater
 import java.util.zip.Inflater
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 data class RasterTileCoord(
@@ -39,13 +39,35 @@ data class TileRasterUndoPatch(
 
 /**
  * Sparse mutable 512x512 world-space ARGB_8888 raster tile store keyed by (boardId, layerId, tx, ty).
- * Only tiles touched by raster tools (Smudge, Flood Fill, Soft Eraser on raster ink, Layer Merge)
- * are allocated in memory. Supports lossless compressed undo/redo patches and sidecar serialization.
+ * Uses chunked 16-row Deflate/Inflate compression (zero ~3 MB full-tile allocation bursts),
+ * optional [TileBitmapPool] reuse, and inactive-board eviction for strict 1 GB RAM devices.
  */
-class MutableRasterTileStore {
+class MutableRasterTileStore(
+    private val bitmapPool: TileBitmapPool? = null
+) {
 
     private val tiles = ConcurrentHashMap<RasterTileKey, Bitmap>()
     private val layerRevisions = ConcurrentHashMap<Pair<String, String>, Long>()
+    private val loadedBoards = HashSet<String>()
+
+    @Synchronized
+    fun markBoardLoaded(boardId: String) {
+        loadedBoards.add(boardId)
+    }
+
+    @Synchronized
+    fun isBoardLoaded(boardId: String): Boolean = loadedBoards.contains(boardId)
+
+    @Synchronized
+    fun retainedBitmapBytes(): Long {
+        var total = 0L
+        for (bmp in tiles.values) {
+            if (!bmp.isRecycled) {
+                total += bmp.allocationByteCount.toLong()
+            }
+        }
+        return total
+    }
 
     @Synchronized
     fun getTile(boardId: String, layerId: String, tx: Int, ty: Int): Bitmap? {
@@ -95,12 +117,13 @@ class MutableRasterTileStore {
 
     @Synchronized
     fun getOrCreateTile(boardId: String, layerId: String, tx: Int, ty: Int): Bitmap {
+        loadedBoards.add(boardId)
         val key = RasterTileKey(boardId, layerId, tx, ty)
         val existing = tiles[key]
         if (existing != null && !existing.isRecycled) {
             return existing
         }
-        val created = Bitmap.createBitmap(
+        val created = bitmapPool?.acquireClean() ?: Bitmap.createBitmap(
             PaintTileRasterCache.TILE_PIXEL_SIZE,
             PaintTileRasterCache.TILE_PIXEL_SIZE,
             Bitmap.Config.ARGB_8888
@@ -111,10 +134,11 @@ class MutableRasterTileStore {
 
     @Synchronized
     fun putDecodedTile(boardId: String, layerId: String, tx: Int, ty: Int, bitmap: Bitmap) {
+        loadedBoards.add(boardId)
         val key = RasterTileKey(boardId, layerId, tx, ty)
         val old = tiles.put(key, bitmap)
-        if (old != null && old !== bitmap && !old.isRecycled) {
-            old.recycle()
+        if (old != null && old !== bitmap) {
+            releaseBitmap(old)
         }
         bumpLayerRevision(boardId, layerId)
     }
@@ -138,12 +162,13 @@ class MutableRasterTileStore {
 
     @Synchronized
     fun applyPatch(patch: TileRasterUndoPatch, applyAfter: Boolean) {
+        loadedBoards.add(patch.boardId)
         val targetMap = if (applyAfter) patch.afterTiles else patch.beforeTiles
         for ((coord, bytes) in targetMap) {
             val key = RasterTileKey(patch.boardId, patch.layerId, coord.tx, coord.ty)
             if (bytes == null) {
                 val removed = tiles.remove(key)
-                if (removed != null && !removed.isRecycled) removed.recycle()
+                if (removed != null) releaseBitmap(removed)
             } else {
                 val bmp = getOrCreateTile(patch.boardId, patch.layerId, coord.tx, coord.ty)
                 decompressIntoBitmap(bytes, bmp)
@@ -154,6 +179,7 @@ class MutableRasterTileStore {
 
     @Synchronized
     fun duplicateLayerTiles(boardId: String, sourceLayerId: String, targetLayerId: String) {
+        loadedBoards.add(boardId)
         val entries = tiles.entries.filter { it.key.boardId == boardId && it.key.layerId == sourceLayerId }
         for ((key, srcBmp) in entries) {
             if (srcBmp.isRecycled) continue
@@ -173,6 +199,7 @@ class MutableRasterTileStore {
         topBlendMode: LayerBlendMode,
         bottomLayerId: String
     ) {
+        loadedBoards.add(boardId)
         val topEntries = tiles.entries.filter { it.key.boardId == boardId && it.key.layerId == topLayerId }
         if (topEntries.isEmpty()) return
 
@@ -195,7 +222,7 @@ class MutableRasterTileStore {
                 canvas.setBitmap(null)
             }
             tiles.remove(key)
-            if (!topBmp.isRecycled) topBmp.recycle()
+            releaseBitmap(topBmp)
         }
         bumpLayerRevision(boardId, bottomLayerId)
         bumpLayerRevision(boardId, topLayerId)
@@ -207,7 +234,7 @@ class MutableRasterTileStore {
         while (iter.hasNext()) {
             val entry = iter.next()
             if (entry.key.boardId == boardId && entry.key.layerId == layerId) {
-                if (!entry.value.isRecycled) entry.value.recycle()
+                releaseBitmap(entry.value)
                 iter.remove()
             }
         }
@@ -220,72 +247,148 @@ class MutableRasterTileStore {
         while (iter.hasNext()) {
             val entry = iter.next()
             if (entry.key.boardId == boardId) {
-                if (!entry.value.isRecycled) entry.value.recycle()
+                releaseBitmap(entry.value)
                 iter.remove()
             }
         }
         layerRevisions.keys.removeAll { it.first == boardId }
+        loadedBoards.remove(boardId)
+    }
+
+    /**
+     * Evicts all in-memory mutable bitmaps belonging to boards other than [activeBoardId]
+     * without erasing their on-disk sidecar files.
+     */
+    @Synchronized
+    fun evictInactiveBoardTiles(activeBoardId: String) {
+        val iter = tiles.entries.iterator()
+        while (iter.hasNext()) {
+            val entry = iter.next()
+            if (entry.key.boardId != activeBoardId) {
+                releaseBitmap(entry.value)
+                iter.remove()
+            }
+        }
+        loadedBoards.removeAll { it != activeBoardId }
     }
 
     @Synchronized
     fun clearAll() {
         for (bmp in tiles.values) {
-            if (!bmp.isRecycled) bmp.recycle()
+            releaseBitmap(bmp)
         }
         tiles.clear()
         layerRevisions.clear()
+        loadedBoards.clear()
+    }
+
+    private fun releaseBitmap(bmp: Bitmap) {
+        if (bmp.isRecycled) return
+        if (bitmapPool != null) {
+            bitmapPool.release(bmp)
+        } else {
+            bmp.recycle()
+        }
     }
 
     companion object {
+        private const val CHUNK_ROWS = 16
+        private const val STD_TILE_W = PaintTileRasterCache.TILE_PIXEL_SIZE
+        private const val STD_INT_LEN = STD_TILE_W * CHUNK_ROWS
+        private const val STD_BYTE_LEN = STD_INT_LEN * 4
+
+        private val intChunkThreadLocal = ThreadLocal.withInitial { IntArray(STD_INT_LEN) }
+        private val byteChunkThreadLocal = ThreadLocal.withInitial { ByteArray(STD_BYTE_LEN) }
+        private val deflateBufThreadLocal = ThreadLocal.withInitial { ByteArray(8192) }
+
         fun compressBitmap(bitmap: Bitmap): ByteArray {
             val w = bitmap.width
             val h = bitmap.height
-            val pixels = IntArray(w * h)
-            bitmap.getPixels(pixels, 0, w, 0, 0, w, h)
-            val raw = ByteBuffer.allocate(pixels.size * 4)
-            raw.asIntBuffer().put(pixels)
-            val input = raw.array()
+            val intScratch = if (w <= STD_TILE_W) intChunkThreadLocal.get()!! else IntArray(w * CHUNK_ROWS)
+            val byteScratch = if (w <= STD_TILE_W) byteChunkThreadLocal.get()!! else ByteArray(w * CHUNK_ROWS * 4)
+            val outBuf = deflateBufThreadLocal.get()!!
 
             val deflater = Deflater(Deflater.BEST_SPEED)
-            deflater.setInput(input)
-            deflater.finish()
-            val out = ByteArrayOutputStream(input.size / 4)
-            val buf = ByteArray(8192)
-            while (!deflater.finished()) {
-                val count = deflater.deflate(buf)
-                if (count > 0) out.write(buf, 0, count) else break
+            val out = ByteArrayOutputStream(8192)
+            try {
+                var y = 0
+                while (y < h) {
+                    val rows = min(CHUNK_ROWS, h - y)
+                    bitmap.getPixels(intScratch, 0, w, 0, y, w, rows)
+                    val pxCount = w * rows
+                    var bi = 0
+                    for (i in 0 until pxCount) {
+                        val px = intScratch[i]
+                        byteScratch[bi++] = (px ushr 24).toByte()
+                        byteScratch[bi++] = (px ushr 16).toByte()
+                        byteScratch[bi++] = (px ushr 8).toByte()
+                        byteScratch[bi++] = px.toByte()
+                    }
+                    deflater.setInput(byteScratch, 0, pxCount * 4)
+                    while (!deflater.needsInput()) {
+                        val count = deflater.deflate(outBuf)
+                        if (count > 0) out.write(outBuf, 0, count) else break
+                    }
+                    y += rows
+                }
+                deflater.finish()
+                while (!deflater.finished()) {
+                    val count = deflater.deflate(outBuf)
+                    if (count > 0) out.write(outBuf, 0, count) else break
+                }
+            } finally {
+                deflater.end()
             }
-            deflater.end()
             return out.toByteArray()
         }
 
         fun decompressIntoBitmap(compressed: ByteArray, target: Bitmap) {
             val w = target.width
             val h = target.height
-            val expectedBytes = w * h * 4
-            val out = ByteArray(expectedBytes)
+            val intScratch = if (w <= STD_TILE_W) intChunkThreadLocal.get()!! else IntArray(w * CHUNK_ROWS)
+            val byteScratch = if (w <= STD_TILE_W) byteChunkThreadLocal.get()!! else ByteArray(w * CHUNK_ROWS * 4)
+
             val inflater = Inflater()
             inflater.setInput(compressed)
-            var offset = 0
-            while (!inflater.finished() && offset < expectedBytes) {
-                val read = inflater.inflate(out, offset, expectedBytes - offset)
-                if (read == 0) break
-                offset += read
+            try {
+                var y = 0
+                while (y < h && !inflater.finished()) {
+                    val rows = min(CHUNK_ROWS, h - y)
+                    val needBytes = w * rows * 4
+                    var filled = 0
+                    while (filled < needBytes && !inflater.finished()) {
+                        val read = inflater.inflate(byteScratch, filled, needBytes - filled)
+                        if (read == 0) break
+                        filled += read
+                    }
+                    if (filled < needBytes) {
+                        Arrays.fill(byteScratch, filled, needBytes, 0.toByte())
+                    }
+                    val pxCount = w * rows
+                    var bi = 0
+                    for (i in 0 until pxCount) {
+                        val b0 = byteScratch[bi++].toInt() and 0xFF
+                        val b1 = byteScratch[bi++].toInt() and 0xFF
+                        val b2 = byteScratch[bi++].toInt() and 0xFF
+                        val b3 = byteScratch[bi++].toInt() and 0xFF
+                        intScratch[i] = (b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3
+                    }
+                    target.setPixels(intScratch, 0, w, 0, y, w, rows)
+                    y += rows
+                }
+            } finally {
+                inflater.end()
             }
-            inflater.end()
-            val pixels = IntArray(w * h)
-            ByteBuffer.wrap(out).asIntBuffer().get(pixels)
-            target.setPixels(pixels, 0, w, 0, 0, w, h)
         }
 
         fun isBitmapTransparent(bitmap: Bitmap): Boolean {
             val w = bitmap.width
             val h = bitmap.height
-            val row = IntArray(w)
+            val row = if (w <= STD_TILE_W) intChunkThreadLocal.get()!! else IntArray(w)
             for (y in 0 until h step 4) {
                 bitmap.getPixels(row, 0, w, 0, y, w, 1)
-                for (px in row) {
-                    if ((px ushr 24) != 0) return false
+                for (x in 0 until w) {
+                    if ((row[x] ushr 24) != 0) return false
                 }
             }
             return true

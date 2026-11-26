@@ -24,11 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Opacity
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -62,14 +58,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.model.BrushSlot
 import com.example.model.StrokeBrushType
 import com.example.model.ToolType
+import com.example.ui.theme.StudioIcons
 import com.example.viewmodel.WhiteboardViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Dock de pinceles conectado al [WhiteboardViewModel] que observa directamente
- * la lista de 3 [BrushSlot] configurables, mostrando solo el color del pincel
- * y desplegando el menú vertical iconográfico Sketchbook al mantener presionado.
+ * Dock de 3 pinceles configurables conectado al [WhiteboardViewModel].
+ * Tocar un slot inactivo lo activa; volver a tocar el activo o mantener presionado abre sus ajustes.
  */
 @Composable
 fun BrushDock(
@@ -78,38 +74,34 @@ fun BrushDock(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val hasPendingPlacement = uiState.pendingStickyNoteColor != null
-    val isBrushToolActive = !hasPendingPlacement && (
-        uiState.currentTool == ToolType.PENCIL ||
-            uiState.currentTool == ToolType.PEN ||
-            uiState.currentTool == ToolType.TECHNICAL_INK ||
-            uiState.currentTool == ToolType.FINE_MARKER ||
-            uiState.currentTool == ToolType.CHISEL_MARKER ||
-            uiState.currentTool == ToolType.PAINT_BRUSH ||
-            uiState.currentTool == ToolType.WATERCOLOR ||
-            uiState.currentTool == ToolType.AIRBRUSH ||
-            uiState.currentTool == ToolType.HIGHLIGHTER
-        )
+    val isBrushToolActive = uiState.currentTool == ToolType.PENCIL ||
+        uiState.currentTool == ToolType.PEN ||
+        uiState.currentTool == ToolType.TECHNICAL_INK ||
+        uiState.currentTool == ToolType.FINE_MARKER ||
+        uiState.currentTool == ToolType.CHISEL_MARKER ||
+        uiState.currentTool == ToolType.PAINT_BRUSH ||
+        uiState.currentTool == ToolType.WATERCOLOR ||
+        uiState.currentTool == ToolType.AIRBRUSH ||
+        uiState.currentTool == ToolType.HIGHLIGHTER
 
     BrushDock(
         brushSlots = viewModel.brushSlots,
         activeBrushSlotIndex = uiState.activeBrushSlotIndex,
         isBrushToolActive = isBrushToolActive,
+        isBrushPopoverOpen = uiState.isBrushPopoverOpen,
         autoShapeRecognition = uiState.autoShapeRecognition,
         onSelectBrushSlot = { index -> viewModel.selectBrushSlot(index) },
-        onUpdateBrushSlot = { index, brushType, hex, width, isRainbow ->
+        onDismissBrushPopover = { viewModel.dismissBrushPopover() },
+        onUpdateBrushSlot = { index, brushType, width ->
             viewModel.updateBrushSlot(
                 slotIndex = index,
                 brushType = brushType,
-                colorHex = hex,
-                strokeWidth = width,
-                isRainbow = isRainbow
+                strokeWidth = width
             )
         },
         onUpdateSlotOpacity = { index, opacity ->
             viewModel.updateBrushSlot(slotIndex = index, opacity = opacity)
         },
-        onOpenColorStudio = { viewModel.openColorStudio() },
         onOpenBrushStudio = { index -> viewModel.openBrushStudio(index) },
         onToggleAutoShape = { viewModel.toggleAutoShapeRecognition() },
         isVertical = isVertical,
@@ -118,32 +110,33 @@ fun BrushDock(
 }
 
 /**
- * Componente visual que renderiza los tres [BrushSlot] en el dock mostrando únicamente
- * la representación coloreada de cada pincel y abriendo al mantener presionado el menú
- * vertical iconográfico de tipo, color, grosor y opacidad.
+ * Renderiza los 3 slots de pincel y su popover de ajustes de punta, grosor, opacidad,
+ * auto-formas y acceso al Estudio de Pincel.
  */
 @Composable
 fun BrushDock(
     brushSlots: List<BrushSlot>,
     activeBrushSlotIndex: Int,
     isBrushToolActive: Boolean,
+    isBrushPopoverOpen: Boolean = false,
     autoShapeRecognition: Boolean,
     onSelectBrushSlot: (Int) -> Unit,
-    onUpdateBrushSlot: (Int, StrokeBrushType?, String?, Float?, Boolean?) -> Unit,
+    onDismissBrushPopover: () -> Unit = {},
+    onUpdateBrushSlot: (Int, StrokeBrushType?, Float?) -> Unit,
     onUpdateSlotOpacity: (Int, Float) -> Unit = { _, _ -> },
-    onOpenColorStudio: () -> Unit = {},
     onOpenBrushStudio: (Int) -> Unit = {},
     onToggleAutoShape: () -> Unit,
     isVertical: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    var expandedSlotIndex by remember { mutableStateOf<Int?>(null) }
+    var longPressedSlotIndex by remember { mutableStateOf<Int?>(null) }
     val haptic = LocalHapticFeedback.current
     val fallbackInk = MaterialTheme.colorScheme.onSurface
 
     val slotItems: @Composable () -> Unit = {
         brushSlots.take(3).forEachIndexed { index, slot ->
             val isSlotSelected = isBrushToolActive && activeBrushSlotIndex == index
+            val isMenuExpanded = (isSlotSelected && isBrushPopoverOpen) || longPressedSlotIndex == index
             val slotColor = remember(slot.colorHex, fallbackInk) {
                 parseDockColorSafe(slot.colorHex, fallbackInk)
             }
@@ -153,46 +146,50 @@ fun BrushDock(
             Box {
                 BrushSlotButton(
                     isSelected = isSlotSelected,
-                    description = "$slotLabel ${index + 1}. Mantén presionado para abrir ajustes",
-                    onClick = { onSelectBrushSlot(index) },
+                    description = "$slotLabel ${index + 1}. Toca de nuevo o mantén presionado para ajustes",
+                    onClick = {
+                        longPressedSlotIndex = null
+                        onSelectBrushSlot(index)
+                    },
                     onLongClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSelectBrushSlot(index)
-                        expandedSlotIndex = index
+                        if (!isSlotSelected) {
+                            onSelectBrushSlot(index)
+                            longPressedSlotIndex = index
+                        } else if (!isBrushPopoverOpen) {
+                            onSelectBrushSlot(index)
+                        }
                     },
                     testTag = "dock_brush_slot_$index"
                 ) {
                     RenderBrushSlotPhysicalIcon(
                         brushType = slot.brushType,
                         tintColor = iconTintColor,
-                        modifier = Modifier.size(width = 26.dp, height = 38.dp)
+                        modifier = Modifier.size(width = 24.dp, height = 36.dp)
                     )
                 }
 
                 BrushSlotDropdownMenu(
-                    expanded = expandedSlotIndex == index,
-                    onDismiss = { expandedSlotIndex = null },
+                    expanded = isMenuExpanded,
+                    onDismiss = {
+                        longPressedSlotIndex = null
+                        onDismissBrushPopover()
+                    },
                     slot = slot,
                     parsedColor = slotColor,
                     autoShapeRecognition = autoShapeRecognition,
                     onChangeBrushType = { newType ->
-                        onUpdateBrushSlot(index, newType, null, null, null)
-                    },
-                    onUpdateColor = { hex, isRainbow ->
-                        onUpdateBrushSlot(index, null, hex, null, isRainbow)
+                        onUpdateBrushSlot(index, newType, null)
                     },
                     onUpdateWidth = { width ->
-                        onUpdateBrushSlot(index, null, null, width, null)
+                        onUpdateBrushSlot(index, null, width)
                     },
                     onUpdateOpacity = { opacity ->
                         onUpdateSlotOpacity(index, opacity)
                     },
-                    onOpenColorStudio = {
-                        expandedSlotIndex = null
-                        onOpenColorStudio()
-                    },
                     onOpenBrushStudio = {
-                        expandedSlotIndex = null
+                        longPressedSlotIndex = null
+                        onDismissBrushPopover()
                         onOpenBrushStudio(index)
                     },
                     onToggleAutoShape = onToggleAutoShape
@@ -227,42 +224,15 @@ private fun RenderBrushSlotPhysicalIcon(
     modifier: Modifier = Modifier
 ) {
     when (brushType) {
-        StrokeBrushType.PENCIL -> PhysicalPencilIcon(
-            graphiteColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(
-            inkColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.TECHNICAL_INK -> PhysicalTechnicalInkIcon(
-            inkColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(
-            markerColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.CHISEL_MARKER -> PhysicalChiselMarkerIcon(
-            markerColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.PAINT_BRUSH -> PhysicalBrushIcon(
-            paintColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.WATERCOLOR -> PhysicalWatercolorIcon(
-            pigmentColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.AIRBRUSH -> PhysicalAirbrushIcon(
-            sprayColor = tintColor,
-            modifier = modifier
-        )
-        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(
-            highlighterColor = tintColor,
-            modifier = modifier
-        )
+        StrokeBrushType.PENCIL -> PhysicalPencilIcon(graphiteColor = tintColor, modifier = modifier)
+        StrokeBrushType.FOUNTAIN_PEN -> PhysicalFountainPenIcon(inkColor = tintColor, modifier = modifier)
+        StrokeBrushType.TECHNICAL_INK -> PhysicalTechnicalInkIcon(inkColor = tintColor, modifier = modifier)
+        StrokeBrushType.FINE_MARKER -> PhysicalMarkerIcon(markerColor = tintColor, modifier = modifier)
+        StrokeBrushType.CHISEL_MARKER -> PhysicalChiselMarkerIcon(markerColor = tintColor, modifier = modifier)
+        StrokeBrushType.PAINT_BRUSH -> PhysicalBrushIcon(paintColor = tintColor, modifier = modifier)
+        StrokeBrushType.WATERCOLOR -> PhysicalWatercolorIcon(pigmentColor = tintColor, modifier = modifier)
+        StrokeBrushType.AIRBRUSH -> PhysicalAirbrushIcon(sprayColor = tintColor, modifier = modifier)
+        StrokeBrushType.HIGHLIGHTER -> PhysicalHighlighterIcon(highlighterColor = tintColor, modifier = modifier)
     }
 }
 
@@ -285,7 +255,7 @@ private fun BrushSlotButton(
     Box(
         contentAlignment = Alignment.BottomCenter,
         modifier = Modifier
-            .defaultMinSize(minWidth = 42.dp, minHeight = 48.dp)
+            .defaultMinSize(minWidth = 44.dp, minHeight = 48.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(
                 if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
@@ -321,7 +291,6 @@ private fun BrushSlotButton(
                     .background(MaterialTheme.colorScheme.primary)
             )
         }
-        // Corner triangle indicator signaling long-press opens the settings selector
         Canvas(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -347,10 +316,8 @@ internal fun BrushSlotDropdownMenu(
     parsedColor: Color,
     autoShapeRecognition: Boolean,
     onChangeBrushType: (StrokeBrushType) -> Unit,
-    onUpdateColor: (String, isRainbow: Boolean) -> Unit,
     onUpdateWidth: (Float) -> Unit,
     onUpdateOpacity: (Float) -> Unit,
-    onOpenColorStudio: () -> Unit,
     onOpenBrushStudio: () -> Unit = {},
     onToggleAutoShape: () -> Unit
 ) {
@@ -366,8 +333,8 @@ internal fun BrushSlotDropdownMenu(
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         modifier = Modifier
-            .width(188.dp)
-            .heightIn(max = 560.dp)
+            .width(192.dp)
+            .heightIn(max = 520.dp)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
             .testTag("dock_brush_slot_dropdown")
     ) {
@@ -378,7 +345,7 @@ internal fun BrushSlotDropdownMenu(
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
-            // 1. Live Stroke Wave Preview (no labels)
+            // 1. Live Stroke Wave Preview
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -429,7 +396,7 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 2. Icon-Only 3x3 Brush Type Grid (9 Sketchbook brushes, zero words)
+            // 2. 3x3 Brush Type Grid (9 Sketchbook brushes)
             val brushGridRows = listOf(
                 listOf(StrokeBrushType.PENCIL, StrokeBrushType.FOUNTAIN_PEN, StrokeBrushType.TECHNICAL_INK),
                 listOf(StrokeBrushType.FINE_MARKER, StrokeBrushType.CHISEL_MARKER, StrokeBrushType.HIGHLIGHTER),
@@ -481,156 +448,7 @@ internal fun BrushSlotDropdownMenu(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
 
-            // 3. 3x3 Color Swatch Matrix + Color Studio Wheel Launcher (zero words)
-            Column(
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                val colorGridRows = listOf(
-                    DockPenColorPalette.subList(0, 3),
-                    DockPenColorPalette.subList(3, 6),
-                    DockPenColorPalette.subList(6, 8)
-                )
-                colorGridRows.forEachIndexed { rowIdx, rowColors ->
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        rowColors.forEach { option ->
-                            val swatchColor = remember(option.hex) { parseDockColorSafe(option.hex, Color.Black) }
-                            val isColorSelected = slot.colorHex.equals(option.hex, ignoreCase = true) && !slot.isRainbow
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isColorSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                        else Color.Transparent
-                                    )
-                                    .clickable(role = Role.Button) { onUpdateColor(option.hex, false) }
-                                    .semantics {
-                                        contentDescription = option.label
-                                        selected = isColorSelected
-                                    }
-                                    .testTag("dock_color_${option.label}")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(swatchColor)
-                                        .border(
-                                            width = if (isColorSelected) 2.2.dp else 1.dp,
-                                            color = if (isColorSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                            shape = CircleShape
-                                        )
-                                ) {
-                                    if (isColorSelected) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(if (option.hex.equals("#FACC15", true)) Color(0xFF0F172A) else Color.White)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        if (rowIdx == 2) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(36.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (slot.isRainbow) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                                        else Color.Transparent
-                                    )
-                                    .clickable(role = Role.Button) { onUpdateColor(slot.colorHex, true) }
-                                    .semantics {
-                                        contentDescription = "Tinta arcoíris"
-                                        selected = slot.isRainbow
-                                    }
-                                    .testTag("dock_color_Arcoiris")
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Brush.sweepGradient(DockRainbowColors))
-                                        .border(
-                                            width = if (slot.isRainbow) 2.2.dp else 1.dp,
-                                            color = if (slot.isRainbow) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                            shape = CircleShape
-                                        )
-                                ) {
-                                    if (slot.isRainbow) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(7.dp)
-                                                .clip(CircleShape)
-                                                .background(Color.White)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Icon-only Color Studio Wheel + Parametric Brush Studio Row
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                            .clickable(role = Role.Button, onClick = onOpenColorStudio)
-                            .semantics { contentDescription = "Abrir rueda de color HSB" }
-                            .testTag("dock_open_color_studio")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Palette,
-                            contentDescription = null,
-                            tint = activeInkTint,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                            .clickable(role = Role.Button, onClick = onOpenBrushStudio)
-                            .semantics { contentDescription = "Ajustes paramétricos del pincel" }
-                            .testTag("dock_open_brush_studio")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Tune,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
-
-            // 4. Visual Proportional Stroke Width Dots (zero text)
+            // 3. Visual Proportional Stroke Width Dots
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -675,7 +493,7 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 5. Custom Tapered Thickness Scrubber Bar
+            // 4. Tapered Thickness Scrubber Bar
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -748,7 +566,7 @@ internal fun BrushSlotDropdownMenu(
                 }
             }
 
-            // 6. Icon-Only Opacity Scrubber Bar
+            // 5. Opacity Scrubber Bar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -757,7 +575,7 @@ internal fun BrushSlotDropdownMenu(
                     .padding(horizontal = 6.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Opacity,
+                    imageVector = StudioIcons.Opacity,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(15.dp)
@@ -811,61 +629,86 @@ internal fun BrushSlotDropdownMenu(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.7f))
 
-            // 7. Icon-Only Auto-Shape Recognition Toggle
+            // 6. Auto-Shape Recognition + Parametric Brush Studio Row
             Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(
-                        if (autoShapeRecognition) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
-                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                    )
-                    .border(
-                        width = if (autoShapeRecognition) 1.4.dp else 1.dp,
-                        color = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                    .clickable(role = Role.Switch, onClick = onToggleAutoShape)
-                    .semantics {
-                        contentDescription = if (autoShapeRecognition) {
-                            "Formas automáticas activadas"
-                        } else {
-                            "Formas automáticas desactivadas"
-                        }
-                        selected = autoShapeRecognition
-                    }
-                    .testTag("dock_menu_toggle_auto_shape")
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(
-                    imageVector = Icons.Default.AutoFixHigh,
-                    contentDescription = null,
-                    tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(19.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                PhysicalShapesIcon(
-                    tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-                if (autoShapeRecognition) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(12.dp)
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            if (autoShapeRecognition) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.75f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                         )
+                        .border(
+                            width = if (autoShapeRecognition) 1.4.dp else 1.dp,
+                            color = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .clickable(role = Role.Switch, onClick = onToggleAutoShape)
+                        .semantics {
+                            contentDescription = if (autoShapeRecognition) {
+                                "Formas automáticas activadas"
+                            } else {
+                                "Formas automáticas desactivadas"
+                            }
+                            selected = autoShapeRecognition
+                        }
+                        .testTag("dock_menu_toggle_auto_shape")
+                ) {
+                    Icon(
+                        imageVector = StudioIcons.AutoFixHigh,
+                        contentDescription = null,
+                        tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    PhysicalShapesIcon(
+                        tint = if (autoShapeRecognition) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    if (autoShapeRecognition) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(15.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(10.dp)
+                            )
+                        }
                     }
+                }
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .width(48.dp)
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                        .clickable(role = Role.Button, onClick = onOpenBrushStudio)
+                        .semantics { contentDescription = "Estudio de pincel paramétrico" }
+                        .testTag("dock_open_brush_studio")
+                ) {
+                    Icon(
+                        imageVector = StudioIcons.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

@@ -19,12 +19,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -33,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +45,7 @@ import com.example.model.BrushStudioSettings
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.WhiteboardStroke
+import com.example.ui.theme.StudioIcons
 import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -72,6 +70,14 @@ fun BrushStudioSheet(
         settings
     ) {
         renderBrushStudioPreviewBitmap(slot)
+    }
+
+    DisposableEffect(previewBitmap) {
+        onDispose {
+            if (!previewBitmap.isRecycled) {
+                previewBitmap.recycle()
+            }
+        }
     }
 
     ModalBottomSheet(
@@ -99,7 +105,7 @@ fun BrushStudioSheet(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Tune,
+                        imageVector = StudioIcons.Tune,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -121,7 +127,7 @@ fun BrushStudioSheet(
                     modifier = Modifier.testTag("brush_studio_reset_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.RestartAlt,
+                        imageVector = StudioIcons.RestartAlt,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )

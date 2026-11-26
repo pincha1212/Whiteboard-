@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -20,33 +21,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.RotateLeft
-import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AspectRatio
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.FlipToBack
-import androidx.compose.material.icons.filled.FlipToFront
-import androidx.compose.material.icons.filled.FormatBold
-import androidx.compose.material.icons.filled.FormatColorFill
-import androidx.compose.material.icons.filled.FormatSize
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,10 +48,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
-import com.example.model.StickyNote
-import com.example.model.StrokeStyle
 import com.example.model.TextItem
 import com.example.model.WhiteboardStroke
+import com.example.ui.theme.StudioIcons
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -93,25 +74,17 @@ private val SelectionFillColors = listOf(
     "#F1F5F9" to "Gris claro"
 )
 
-private val SelectionNoteColors = listOf(
-    "#FFF275" to "Amarillo",
-    "#86E3CE" to "Cian",
-    "#A1F0A6" to "Menta",
-    "#FF9AA2" to "Rosa",
-    "#D5AAFF" to "Lavanda",
-    "#FFB347" to "Naranja",
-    "#2D3139" to "Pizarra"
-)
-
 /**
- * Modern Minimal Dock-style Precision Editor for selected shapes, lines, strokes, and sticky notes.
- * Mirrors the WhiteboardPenDock visual language and provides 1-tap controls plus a detailed 3-dots inspector menu.
+ * Floating selection inspector dock with strict zero-duplication layout:
+ * - Multi-selection: [Color] [Escala -/+] [Rotar -15/+15] [Duplicar] [Eliminar] [Selección (N)] [Check]
+ * - Shape: [Color dot] [Grosor -/+] [Escala -/+] [Eliminar] [Status pill] [⋮: Color/Rotación/Relleno/Orden/Duplicar] [Check]
+ * - Stroke: [Color dot] [Grosor -/+] [A forma] [Eliminar] [⋮: Color/Escala/Rotar/Duplicar] [Check]
+ * - Text: [Color dot] [Tamaño -/+] [Negrita] [Fondo] [Eliminar] [Check] (rotation/corner handles live on canvas)
  */
 @Composable
 fun SelectionEditDock(
     selectedShape: ShapeItem?,
     selectedStroke: WhiteboardStroke?,
-    selectedNote: StickyNote?,
     selectedText: TextItem? = null,
     totalSelectedCount: Int = 1,
     onDeleteAll: () -> Unit = {},
@@ -123,7 +96,6 @@ fun SelectionEditDock(
     onUpdateShapeFillColor: (String) -> Unit,
     onToggleShapeFilled: () -> Unit,
     onUpdateShapeWidth: (Float) -> Unit,
-    onUpdateShapeStyle: (StrokeStyle) -> Unit,
     onScaleShape: (Float) -> Unit,
     onRotateShape: (Float) -> Unit,
     onResetShapeRotation: () -> Unit,
@@ -133,16 +105,11 @@ fun SelectionEditDock(
     onDeleteShape: () -> Unit,
     onUpdateStrokeColor: (String) -> Unit,
     onUpdateStrokeWidth: (Float) -> Unit,
-    onUpdateStrokeStyle: (StrokeStyle) -> Unit,
     onScaleStroke: (Float) -> Unit,
     onRotateStroke: (Float) -> Unit = {},
     onConvertStrokeToShape: () -> Unit,
     onDuplicateStroke: () -> Unit,
     onDeleteStroke: () -> Unit,
-    onUpdateNoteColor: (String) -> Unit,
-    onToggleNotePin: () -> Unit,
-    onToggleNoteAspectRatioLock: () -> Unit = {},
-    onDeleteNote: () -> Unit,
     onUpdateTextColor: (String) -> Unit = {},
     onToggleTextBackground: () -> Unit = {},
     onToggleTextBold: () -> Unit = {},
@@ -151,15 +118,14 @@ fun SelectionEditDock(
     onDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (selectedShape == null && selectedStroke == null && selectedNote == null && selectedText == null && totalSelectedCount <= 0) return
+    if (selectedShape == null && selectedStroke == null && selectedText == null && totalSelectedCount <= 0) return
 
-    var showMoreMenu by remember(selectedShape?.id, selectedStroke?.id, selectedNote?.id, selectedText?.id, totalSelectedCount) {
+    var showMoreMenu by remember(selectedShape?.id, selectedStroke?.id, selectedText?.id, totalSelectedCount) {
         mutableStateOf(false)
     }
 
     val strokeColors = SelectionStrokeColors
     val fillColors = SelectionFillColors
-    val noteColors = SelectionNoteColors
 
     Column(
         modifier = modifier
@@ -181,34 +147,41 @@ fun SelectionEditDock(
             when {
                 totalSelectedCount > 1 -> {
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f, fill = false)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
+                                        .defaultMinSize(minWidth = 40.dp, minHeight = 48.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
                                         .clickable { showMoreMenu = !showMoreMenu }
                                         .testTag("edit_dock_multi_color_btn"),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.FormatColorFill,
-                                        contentDescription = "Color de la selección",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(17.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = StudioIcons.FormatColorFill,
+                                            contentDescription = "Color de la selección",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
                                 }
 
                                 DropdownMenu(
@@ -242,33 +215,33 @@ fun SelectionEditDock(
                             }
 
                             DockMiniIconButton(
-                                icon = Icons.Default.ZoomOut,
+                                icon = StudioIcons.ZoomOut,
                                 contentDescription = "Reducir selección",
                                 onClick = { onScaleAll(0.86f) },
                                 testTag = "edit_dock_multi_scale_down"
                             )
                             DockMiniIconButton(
-                                icon = Icons.Default.ZoomIn,
+                                icon = StudioIcons.ZoomIn,
                                 contentDescription = "Aumentar selección",
                                 onClick = { onScaleAll(1.16f) },
                                 testTag = "edit_dock_multi_scale_up"
                             )
 
                             DockMiniIconButton(
-                                icon = Icons.AutoMirrored.Filled.RotateLeft,
+                                icon = StudioIcons.RotateLeft,
                                 contentDescription = "Rotar selección -15°",
                                 onClick = { onRotateAll(-15f) },
                                 testTag = "edit_dock_multi_rotate_left"
                             )
                             DockMiniIconButton(
-                                icon = Icons.AutoMirrored.Filled.RotateRight,
+                                icon = StudioIcons.RotateRight,
                                 contentDescription = "Rotar selección +15°",
                                 onClick = { onRotateAll(15f) },
                                 testTag = "edit_dock_multi_rotate_right"
                             )
 
                             DockMiniIconButton(
-                                icon = Icons.Default.ContentCopy,
+                                icon = StudioIcons.ContentCopy,
                                 contentDescription = "Duplicar seleccionados",
                                 onClick = onDuplicateAll,
                                 testTag = "edit_dock_multi_duplicate"
@@ -310,24 +283,14 @@ fun SelectionEditDock(
                             }
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone)
-                                .testTag("edit_dock_multi_done"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar selección",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        DockDoneButton(
+                            contentDescription = "Terminar selección",
+                            onClick = onDone,
+                            testTag = "edit_dock_multi_done"
+                        )
                     }
                 }
+
                 selectedShape != null -> {
                     val currentColor = parseColor(selectedShape.strokeColorHex)
                     val currentWidth = selectedShape.strokeWidth
@@ -342,63 +305,48 @@ fun SelectionEditDock(
                     }
 
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f, fill = false)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 1. Color dot button (opens full menu for palette)
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                    .clickable { showMoreMenu = true }
-                                    .testTag("edit_dock_color_btn"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
-                                        .background(currentColor)
-                                        .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                )
-                            }
+                            ColorDotTrigger(
+                                color = currentColor,
+                                contentDescription = "Color y propiedades de figura",
+                                onClick = { showMoreMenu = true },
+                                testTag = "edit_dock_color_btn"
+                            )
 
-
-                            // 3. Quick Thickness Stepper (- / px / +)
                             QuickStepperPill(
-                                icon = Icons.Default.LineWeight,
+                                icon = StudioIcons.LineWeight,
                                 label = "${currentWidth.roundToInt()}px",
+                                decrementDesc = "Reducir grosor",
+                                incrementDesc = "Aumentar grosor",
                                 onDecrement = { onUpdateShapeWidth((currentWidth - 2f).coerceAtLeast(1f)) },
                                 onIncrement = { onUpdateShapeWidth((currentWidth + 2f).coerceAtMost(28f)) },
                                 decTestTag = "edit_dock_width_minus",
                                 incTestTag = "edit_dock_width_plus"
                             )
 
-                            // 3. Quick Size Scale (- / +)
                             DockMiniIconButton(
-                                icon = Icons.Default.ZoomOut,
+                                icon = StudioIcons.ZoomOut,
                                 contentDescription = "Reducir tamaño",
                                 onClick = { onScaleShape(0.86f) },
                                 testTag = "edit_dock_scale_down"
                             )
                             DockMiniIconButton(
-                                icon = Icons.Default.ZoomIn,
+                                icon = StudioIcons.ZoomIn,
                                 contentDescription = "Aumentar tamaño",
                                 onClick = { onScaleShape(1.16f) },
                                 testTag = "edit_dock_scale_up"
                             )
 
-                            // 4. Delete quick button
                             DockMiniIconButton(
                                 icon = Icons.Default.Delete,
                                 contentDescription = "Eliminar figura",
@@ -408,7 +356,6 @@ fun SelectionEditDock(
                                 testTag = "edit_dock_delete"
                             )
 
-                            // Divider
                             Box(
                                 modifier = Modifier
                                     .width(1.dp)
@@ -416,10 +363,10 @@ fun SelectionEditDock(
                                     .background(MaterialTheme.colorScheme.outlineVariant)
                             )
 
-                            // 5. Status pill next to 3-dots
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
+                                    .defaultMinSize(minHeight = 40.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant)
                                     .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
@@ -438,32 +385,17 @@ fun SelectionEditDock(
                             }
                         }
 
-                        // 6. 3-Dots Detailed Inspector Dropdown
+                        // Overflow menu: Color, Rotación, Relleno, Orden de apilado y Duplicar (sin repetir grosor, escala ni eliminar)
                         Box {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { showMoreMenu = !showMoreMenu }
-                                    .testTag("edit_dock_more_btn"),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Editar propiedades",
-                                    tint = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            DockMiniIconButton(
+                                icon = Icons.Default.MoreVert,
+                                contentDescription = "Más propiedades de figura",
+                                tint = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                bgColor = if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                borderColor = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                onClick = { showMoreMenu = !showMoreMenu },
+                                testTag = "edit_dock_more_btn"
+                            )
 
                             DropdownMenu(
                                 expanded = showMoreMenu,
@@ -472,25 +404,20 @@ fun SelectionEditDock(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
-                                    .width(316.dp)
-                                    .heightIn(max = 480.dp)
+                                    .width(304.dp)
+                                    .heightIn(max = 440.dp)
                                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
                                     .testTag("edit_dock_dropdown")
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                                ) {
+                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
                                     Text(
-                                        text = "EDITAR ${selectedShape.shapeType.displayName.uppercase()}",
+                                        text = "PROPIEDADES · ${selectedShape.shapeType.displayName.uppercase()}",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.primary
                                     )
 
                                     Spacer(modifier = Modifier.height(8.dp))
-
-                                    // Stroke Colors
                                     Text("Color de línea", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Spacer(modifier = Modifier.height(6.dp))
                                     ColorSwatchGrid(
@@ -499,75 +426,29 @@ fun SelectionEditDock(
                                         onSelect = onUpdateShapeColor
                                     )
 
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    // Precise Width Slider + Presets
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Grosor", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text("${selectedShape.strokeWidth.roundToInt()} px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-                                    }
-                                    Slider(
-                                        value = selectedShape.strokeWidth.coerceIn(1f, 28f),
-                                        onValueChange = onUpdateShapeWidth,
-                                        valueRange = 1f..28f,
-                                        colors = SliderDefaults.colors(
-                                            thumbColor = MaterialTheme.colorScheme.primary,
-                                            activeTrackColor = MaterialTheme.colorScheme.primary
-                                        ),
-                                        modifier = Modifier.height(28.dp)
-                                    )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                                        listOf(2f, 4f, 8f, 14f, 22f).forEach { w ->
-                                            val isSel = kotlin.math.abs(selectedShape.strokeWidth - w) < 1f
-                                            ChoiceChipBox(
-                                                label = "${w.toInt()}px",
-                                                isSelected = isSel,
-                                                onClick = { onUpdateShapeWidth(w) },
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    // Size & Rotation Controls
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text("Tamaño ($sizeText)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                            ChoiceChipBox(label = "-15%", isSelected = false, onClick = { onScaleShape(0.85f) })
-                                            ChoiceChipBox(label = "+15%", isSelected = false, onClick = { onScaleShape(1.15f) })
-                                        }
-                                    }
-
                                     if (selectedShape.shapeType != ShapeType.LINE) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                         Spacer(modifier = Modifier.height(8.dp))
+
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Text("Rotación (${selectedShape.rotation.roundToInt()}°)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
                                                 DockMiniIconButton(
-                                                    icon = Icons.AutoMirrored.Filled.RotateLeft,
+                                                    icon = StudioIcons.RotateLeft,
                                                     contentDescription = "Rotar -15°",
                                                     onClick = { onRotateShape(-15f) }
                                                 )
                                                 ChoiceChipBox(label = "0°", isSelected = selectedShape.rotation == 0f, onClick = onResetShapeRotation)
                                                 DockMiniIconButton(
-                                                    icon = Icons.AutoMirrored.Filled.RotateRight,
+                                                    icon = StudioIcons.RotateRight,
                                                     contentDescription = "Rotar +15°",
                                                     onClick = { onRotateShape(15f) }
                                                 )
@@ -576,16 +457,15 @@ fun SelectionEditDock(
 
                                         Spacer(modifier = Modifier.height(10.dp))
                                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Spacer(modifier = Modifier.height(8.dp))
 
-                                        // Fill Toggle & Colors
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
+                                                Icon(StudioIcons.FormatColorFill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
                                                 Text("Relleno", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             }
@@ -609,48 +489,30 @@ fun SelectionEditDock(
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                     Spacer(modifier = Modifier.height(8.dp))
 
-                                    // Layer & Object Actions
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("Orden y copia", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                             DockMiniIconButton(
-                                                icon = Icons.Default.FlipToFront,
+                                                icon = StudioIcons.FlipToFront,
                                                 contentDescription = "Traer al frente",
                                                 onClick = onBringShapeToFront
                                             )
                                             DockMiniIconButton(
-                                                icon = Icons.Default.FlipToBack,
+                                                icon = StudioIcons.FlipToBack,
                                                 contentDescription = "Enviar atrás",
                                                 onClick = onSendShapeToBack
                                             )
                                             DockMiniIconButton(
-                                                icon = Icons.Default.ContentCopy,
-                                                contentDescription = "Duplicar",
+                                                icon = StudioIcons.ContentCopy,
+                                                contentDescription = "Duplicar figura",
                                                 onClick = {
                                                     onDuplicateShape()
                                                     showMoreMenu = false
                                                 }
-                                            )
-                                        }
-
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(MaterialTheme.colorScheme.errorContainer)
-                                                .clickable {
-                                                    showMoreMenu = false
-                                                    onDeleteShape()
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 6.dp)
-                                        ) {
-                                            Text(
-                                                text = "Eliminar",
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = MaterialTheme.colorScheme.onErrorContainer
                                             )
                                         }
                                     }
@@ -658,64 +520,40 @@ fun SelectionEditDock(
                             }
                         }
 
-                        // 7. Done Button
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone)
-                                .testTag("edit_dock_done"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar edición",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        DockDoneButton(
+                            contentDescription = "Terminar edición",
+                            onClick = onDone,
+                            testTag = "edit_dock_done"
+                        )
                     }
                 }
 
                 selectedStroke != null -> {
                     val currentColor = parseColor(selectedStroke.colorHex)
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f, fill = false)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                    .clickable { showMoreMenu = true },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(16.dp)
-                                        .clip(CircleShape)
-                                        .background(currentColor)
-                                        .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                )
-                            }
-
-                            
-                            
+                            ColorDotTrigger(
+                                color = currentColor,
+                                contentDescription = "Color del trazo",
+                                onClick = { showMoreMenu = true },
+                                testTag = "edit_stroke_color_btn"
+                            )
 
                             QuickStepperPill(
-                                icon = Icons.Default.LineWeight,
+                                icon = StudioIcons.LineWeight,
                                 label = "${selectedStroke.width.roundToInt()}px",
+                                decrementDesc = "Reducir grosor",
+                                incrementDesc = "Aumentar grosor",
                                 onDecrement = { onUpdateStrokeWidth((selectedStroke.width - 2f).coerceAtLeast(1f)) },
                                 onIncrement = { onUpdateStrokeWidth((selectedStroke.width + 2f).coerceAtMost(28f)) },
                                 decTestTag = "edit_stroke_width_minus",
@@ -723,21 +561,11 @@ fun SelectionEditDock(
                             )
 
                             DockMiniIconButton(
-                                icon = Icons.Default.ZoomOut,
-                                contentDescription = "Reducir trazo",
-                                onClick = { onScaleStroke(0.86f) }
-                            )
-                            DockMiniIconButton(
-                                icon = Icons.Default.ZoomIn,
-                                contentDescription = "Agrandar trazo",
-                                onClick = { onScaleStroke(1.16f) }
-                            )
-
-                            DockMiniIconButton(
-                                icon = Icons.Default.AutoAwesome,
+                                icon = StudioIcons.AutoAwesome,
                                 contentDescription = "Convertir a forma",
                                 tint = MaterialTheme.colorScheme.primary,
-                                onClick = onConvertStrokeToShape
+                                onClick = onConvertStrokeToShape,
+                                testTag = "edit_stroke_to_shape"
                             )
 
                             DockMiniIconButton(
@@ -745,30 +573,22 @@ fun SelectionEditDock(
                                 contentDescription = "Eliminar trazo",
                                 tint = MaterialTheme.colorScheme.error,
                                 bgColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                                onClick = onDeleteStroke
+                                onClick = onDeleteStroke,
+                                testTag = "edit_stroke_delete"
                             )
                         }
 
+                        // Overflow menu: Color, Escala (-/+), Rotar (-15°/+15°), Duplicar (sin repetir grosor ni A forma)
                         Box {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer
-                                        else MaterialTheme.colorScheme.surfaceVariant
-                                    )
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                    .clickable { showMoreMenu = !showMoreMenu },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.MoreVert,
-                                    contentDescription = "Más opciones de trazo",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
+                            DockMiniIconButton(
+                                icon = Icons.Default.MoreVert,
+                                contentDescription = "Más opciones de trazo",
+                                tint = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                bgColor = if (showMoreMenu) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                borderColor = if (showMoreMenu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                onClick = { showMoreMenu = !showMoreMenu },
+                                testTag = "edit_stroke_more_btn"
+                            )
 
                             DropdownMenu(
                                 expanded = showMoreMenu,
@@ -777,184 +597,88 @@ fun SelectionEditDock(
                                 containerColor = MaterialTheme.colorScheme.surface,
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier
-                                    .width(316.dp)
-                                    .heightIn(max = 480.dp)
+                                    .width(304.dp)
+                                    .heightIn(max = 360.dp)
                                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                                ) {
-                                    Text("EDITAR TRAZO LIBRE", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)) {
+                                    Text(
+                                        text = "PROPIEDADES DEL TRAZO",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
                                     Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Color del trazo", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     ColorSwatchGrid(
                                         colors = strokeColors,
                                         selectedHex = selectedStroke.colorHex,
                                         onSelect = onUpdateStrokeColor
                                     )
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text("Grosor", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Text("${selectedStroke.width.roundToInt()} px", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
-                                    }
-                                    Slider(
-                                        value = selectedStroke.width.coerceIn(1f, 28f),
-                                        onValueChange = onUpdateStrokeWidth,
-                                        valueRange = 1f..28f,
-                                        modifier = Modifier.height(28.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
                                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                                    Spacer(modifier = Modifier.height(10.dp))
+                                    Spacer(modifier = Modifier.height(8.dp))
+
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        DockMiniIconButton(
-                                            icon = Icons.AutoMirrored.Filled.RotateLeft,
-                                            contentDescription = "Rotar -15°",
-                                            onClick = { onRotateStroke(-15f) },
-                                            testTag = "edit_stroke_rotate_left"
-                                        )
-                                        DockMiniIconButton(
-                                            icon = Icons.AutoMirrored.Filled.RotateRight,
-                                            contentDescription = "Rotar +15°",
-                                            onClick = { onRotateStroke(15f) },
-                                            testTag = "edit_stroke_rotate_right"
-                                        )
-                                        DockMiniIconButton(
-                                            icon = Icons.Default.ContentCopy,
-                                            contentDescription = "Duplicar",
-                                            onClick = {
-                                                onDuplicateStroke()
-                                                showMoreMenu = false
-                                            }
-                                        )
-                                        Spacer(modifier = Modifier.weight(1f))
-                                        ChoiceChipBox(
-                                            label = "A forma",
-                                            isSelected = false,
-                                            onClick = {
-                                                onConvertStrokeToShape()
-                                                showMoreMenu = false
-                                            }
-                                        )
+                                        Text("Escala", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            DockMiniIconButton(
+                                                icon = StudioIcons.ZoomOut,
+                                                contentDescription = "Reducir trazo",
+                                                onClick = { onScaleStroke(0.86f) }
+                                            )
+                                            DockMiniIconButton(
+                                                icon = StudioIcons.ZoomIn,
+                                                contentDescription = "Agrandar trazo",
+                                                onClick = { onScaleStroke(1.16f) }
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Rotar y duplicar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            DockMiniIconButton(
+                                                icon = StudioIcons.RotateLeft,
+                                                contentDescription = "Rotar -15°",
+                                                onClick = { onRotateStroke(-15f) },
+                                                testTag = "edit_stroke_rotate_left"
+                                            )
+                                            DockMiniIconButton(
+                                                icon = StudioIcons.RotateRight,
+                                                contentDescription = "Rotar +15°",
+                                                onClick = { onRotateStroke(15f) },
+                                                testTag = "edit_stroke_rotate_right"
+                                            )
+                                            DockMiniIconButton(
+                                                icon = StudioIcons.ContentCopy,
+                                                contentDescription = "Duplicar trazo",
+                                                onClick = {
+                                                    onDuplicateStroke()
+                                                    showMoreMenu = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-
-                selectedNote != null -> {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .weight(1f, fill = false)
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            noteColors.forEach { (hex, label) ->
-                                val c = parseColor(hex)
-                                val isSel = selectedNote.colorHex.equals(hex, ignoreCase = true)
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(CircleShape)
-                                        .background(c)
-                                        .border(
-                                            width = if (isSel) 2.5.dp else 1.dp,
-                                            color = if (isSel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                                            shape = CircleShape
-                                        )
-                                        .clickable { onUpdateNoteColor(hex) }
-                                        .testTag("edit_note_color_$label")
-                                )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(24.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant)
-                            )
-
-                            DockMiniIconButton(
-                                icon = Icons.Default.AspectRatio,
-                                contentDescription = if (selectedNote.isAspectRatioLocked) {
-                                    "Proporción cuadrada 1:1 activada (toca para libre)"
-                                } else {
-                                    "Redimensionamiento libre (toca para proporción cuadrada 1:1)"
-                                },
-                                tint = if (selectedNote.isAspectRatioLocked) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                bgColor = if (selectedNote.isAspectRatioLocked) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceVariant
-                                },
-                                onClick = onToggleNoteAspectRatioLock,
-                                testTag = "note_aspect_lock_button"
-                            )
-
-                            DockMiniIconButton(
-                                icon = Icons.Default.PushPin,
-                                contentDescription = "Fijar nota",
-                                tint = if (selectedNote.isPinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                bgColor = if (selectedNote.isPinned) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                onClick = onToggleNotePin
-                            )
-
-                            DockMiniIconButton(
-                                icon = Icons.Default.Delete,
-                                contentDescription = "Eliminar nota",
-                                tint = MaterialTheme.colorScheme.error,
-                                bgColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
-                                onClick = onDeleteNote
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone)
-                                .testTag("edit_note_done"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar edición de nota",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        DockDoneButton(
+                            contentDescription = "Terminar edición de trazo",
+                            onClick = onDone,
+                            testTag = "edit_stroke_done"
+                        )
                     }
                 }
 
@@ -962,36 +686,24 @@ fun SelectionEditDock(
                     val hasCardBg = selectedText.backgroundColorHex != "TRANSPARENT"
                     val currentTextColor = parseColor(selectedText.colorHex)
                     Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f, fill = false)
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Box {
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-                                        .clickable { showMoreMenu = !showMoreMenu }
-                                        .testTag("edit_text_color_btn"),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(16.dp)
-                                            .clip(CircleShape)
-                                            .background(currentTextColor)
-                                            .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                                    )
-                                }
+                                ColorDotTrigger(
+                                    color = currentTextColor,
+                                    contentDescription = "Color del texto",
+                                    onClick = { showMoreMenu = !showMoreMenu },
+                                    testTag = "edit_text_color_btn"
+                                )
 
                                 DropdownMenu(
                                     expanded = showMoreMenu,
@@ -1023,17 +735,10 @@ fun SelectionEditDock(
                             }
 
                             QuickStepperPill(
-                                icon = Icons.AutoMirrored.Filled.RotateLeft,
-                                label = "${selectedText.rotation.roundToInt()}°",
-                                onDecrement = { onRotateAll(-5f) },
-                                onIncrement = { onRotateAll(5f) },
-                                decTestTag = "edit_text_rotate_minus",
-                                incTestTag = "edit_text_rotate_plus"
-                            )
-
-                            QuickStepperPill(
-                                icon = Icons.Default.FormatSize,
+                                icon = StudioIcons.FormatSize,
                                 label = "${selectedText.fontSize.roundToInt()}",
+                                decrementDesc = "Reducir tamaño de texto",
+                                incrementDesc = "Aumentar tamaño de texto",
                                 onDecrement = { onUpdateTextFontSize((selectedText.fontSize - 4f).coerceAtLeast(20f)) },
                                 onIncrement = { onUpdateTextFontSize((selectedText.fontSize + 4f).coerceAtMost(72f)) },
                                 decTestTag = "edit_text_size_minus",
@@ -1041,7 +746,7 @@ fun SelectionEditDock(
                             )
 
                             DockMiniIconButton(
-                                icon = Icons.Default.FormatBold,
+                                icon = StudioIcons.FormatBold,
                                 contentDescription = "Negrita",
                                 tint = if (selectedText.isBold) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 bgColor = if (selectedText.isBold) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
@@ -1050,7 +755,7 @@ fun SelectionEditDock(
                             )
 
                             DockMiniIconButton(
-                                icon = Icons.Default.Layers,
+                                icon = StudioIcons.Layers,
                                 contentDescription = if (hasCardBg) "Quitar fondo de tarjeta" else "Mostrar fondo de tarjeta",
                                 tint = if (hasCardBg) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 bgColor = if (hasCardBg) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
@@ -1068,22 +773,11 @@ fun SelectionEditDock(
                             )
                         }
 
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .clickable(onClick = onDone)
-                                .testTag("edit_text_done"),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Check,
-                                contentDescription = "Terminar edición de texto",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        DockDoneButton(
+                            contentDescription = "Terminar edición de texto",
+                            onClick = onDone,
+                            testTag = "edit_text_done"
+                        )
                     }
                 }
             }
@@ -1092,9 +786,76 @@ fun SelectionEditDock(
 }
 
 @Composable
+private fun ColorDotTrigger(
+    color: Color,
+    contentDescription: String,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Box(
+        modifier = Modifier
+            .defaultMinSize(minWidth = 40.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(color)
+                    .border(1.5.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DockDoneButton(
+    contentDescription: String,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Box(
+        modifier = Modifier
+            .defaultMinSize(minWidth = 40.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .testTag(testTag),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = contentDescription,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun QuickStepperPill(
     icon: ImageVector,
     label: String,
+    decrementDesc: String,
+    incrementDesc: String,
     onDecrement: () -> Unit,
     onIncrement: () -> Unit,
     decTestTag: String,
@@ -1103,20 +864,22 @@ private fun QuickStepperPill(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .padding(vertical = 4.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
-            .padding(horizontal = 3.dp, vertical = 2.dp)
+            .padding(horizontal = 3.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(28.dp)
+                .defaultMinSize(minWidth = 36.dp, minHeight = 40.dp)
                 .clip(RoundedCornerShape(7.dp))
                 .clickable(onClick = onDecrement)
                 .testTag(decTestTag),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Remove, contentDescription = "Reducir grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            Icon(StudioIcons.Remove, contentDescription = decrementDesc, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1128,13 +891,13 @@ private fun QuickStepperPill(
         }
         Box(
             modifier = Modifier
-                .size(28.dp)
+                .defaultMinSize(minWidth = 36.dp, minHeight = 40.dp)
                 .clip(RoundedCornerShape(7.dp))
                 .clickable(onClick = onIncrement)
                 .testTag(incTestTag),
             contentAlignment = Alignment.Center
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Aumentar grosor", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Add, contentDescription = incrementDesc, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -1145,19 +908,27 @@ private fun DockMiniIconButton(
     contentDescription: String,
     tint: Color = MaterialTheme.colorScheme.onSurface,
     bgColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    borderColor: Color = MaterialTheme.colorScheme.outlineVariant,
     onClick: () -> Unit,
     testTag: String? = null
 ) {
     val mod = Modifier
-        .size(34.dp)
+        .defaultMinSize(minWidth = 40.dp, minHeight = 48.dp)
         .clip(RoundedCornerShape(10.dp))
-        .background(bgColor)
-        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
         .clickable(onClick = onClick)
         .let { if (testTag != null) it.testTag(testTag) else it }
 
     Box(modifier = mod, contentAlignment = Alignment.Center) {
-        Icon(imageVector = icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(16.dp))
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(bgColor)
+                .border(1.dp, borderColor, RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(imageVector = icon, contentDescription = contentDescription, tint = tint, modifier = Modifier.size(16.dp))
+        }
     }
 }
 
@@ -1170,6 +941,7 @@ private fun ChoiceChipBox(
 ) {
     Box(
         modifier = modifier
+            .defaultMinSize(minHeight = 36.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
             .border(
@@ -1178,7 +950,7 @@ private fun ChoiceChipBox(
                 shape = RoundedCornerShape(8.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -1206,7 +978,7 @@ private fun ColorSwatchGrid(
             val isSelected = selectedHex.equals(hex, ignoreCase = true)
             Box(
                 modifier = Modifier
-                    .size(24.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
                     .background(c)
                     .border(
@@ -1245,7 +1017,3 @@ private fun shortShapeLabel(type: ShapeType): String = when (type) {
     ShapeType.ARROW -> "Flecha"
     else -> type.displayName
 }
-
-
-
-

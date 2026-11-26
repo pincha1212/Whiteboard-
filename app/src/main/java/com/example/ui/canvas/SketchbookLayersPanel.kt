@@ -20,18 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.automirrored.filled.MergeType
-import androidx.compose.material.icons.filled.LockOpen
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -61,6 +52,7 @@ import com.example.model.LayerBlendMode
 import com.example.model.ShapeItem
 import com.example.model.WhiteboardStroke
 import com.example.ui.theme.GuideCyan
+import com.example.ui.theme.StudioIcons
 import com.example.ui.theme.StudioMonoTextStyle
 import kotlin.math.roundToInt
 
@@ -119,7 +111,7 @@ fun SketchbookLayersPanel(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Layers,
+                        imageVector = StudioIcons.Layers,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
@@ -131,37 +123,51 @@ fun SketchbookLayersPanel(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(32.dp)
+                            .minimumInteractiveComponentSize()
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer)
                             .clickable(onClick = onAddLayer)
                             .testTag("layers_add_btn")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Nueva capa",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Nueva capa",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(32.dp)
+                            .minimumInteractiveComponentSize()
                             .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
                             .clickable(onClick = onDismiss)
                             .testTag("layers_close_btn")
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Cerrar capas",
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cerrar capas",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -367,13 +373,13 @@ fun SketchbookLayersPanel(
                             }
 
                             LayerMiniIcon(
-                                icon = if (layer.isVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                icon = if (layer.isVisible) StudioIcons.Visibility else StudioIcons.VisibilityOff,
                                 description = if (layer.isVisible) "Ocultar capa" else "Mostrar capa",
                                 tint = if (layer.isVisible) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline,
                                 onClick = { onToggleVisibility(layer.id) }
                             )
                             LayerMiniIcon(
-                                icon = if (layer.isLocked) Icons.Default.Lock else Icons.Default.LockOpen,
+                                icon = if (layer.isLocked) StudioIcons.Lock else StudioIcons.LockOpen,
                                 description = if (layer.isLocked) "Desbloquear capa" else "Bloquear capa",
                                 tint = if (layer.isLocked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                                 onClick = { onToggleLock(layer.id) }
@@ -387,27 +393,27 @@ fun SketchbookLayersPanel(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 LayerMiniIcon(
-                                    icon = Icons.Default.ArrowUpward,
+                                    icon = StudioIcons.ArrowUpward,
                                     description = "Subir capa",
                                     enabled = layerIdx < layers.lastIndex,
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     onClick = { onMoveUp(layer.id) }
                                 )
                                 LayerMiniIcon(
-                                    icon = Icons.Default.ArrowDownward,
+                                    icon = StudioIcons.ArrowDownward,
                                     description = "Bajar capa",
                                     enabled = layerIdx > 0,
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     onClick = { onMoveDown(layer.id) }
                                 )
                                 LayerMiniIcon(
-                                    icon = Icons.Default.ContentCopy,
+                                    icon = StudioIcons.ContentCopy,
                                     description = "Duplicar capa",
                                     tint = MaterialTheme.colorScheme.onSurface,
                                     onClick = { onDuplicateLayer(layer.id) }
                                 )
                                 LayerMiniIcon(
-                                    icon = Icons.AutoMirrored.Filled.MergeType,
+                                    icon = StudioIcons.MergeType,
                                     description = "Combinar hacia abajo",
                                     enabled = layerIdx > 0,
                                     tint = MaterialTheme.colorScheme.primary,
@@ -440,7 +446,7 @@ private fun LayerMiniIcon(
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
-            .size(30.dp)
+            .minimumInteractiveComponentSize()
             .clip(RoundedCornerShape(8.dp))
             .clickable(enabled = enabled, onClick = onClick)
     ) {

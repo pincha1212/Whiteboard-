@@ -17,14 +17,11 @@ enum class ToolType {
     SMUDGE,
     SOFT_ERASER,
     FLOOD_FILL,
-    LASER_POINTER,
     ERASER,
     PIXEL_ERASER,
     EYEDROPPER,
     SELECT_LASSO,
-    STICKY_NOTE,
-    TEXT,
-    STICKER
+    TEXT
 }
 
 enum class StrokeBrushType(
@@ -240,18 +237,11 @@ enum class ShapeType(val displayName: String, val category: String) {
 val ShapeType.isLineLike: Boolean
     get() = this == ShapeType.LINE || this == ShapeType.ARROW || this == ShapeType.DOUBLE_ARROW
 
-
 data class StrokePoint(
     val x: Float,
     val y: Float,
     val timestampMs: Long = 0L,
     val pressure: Float = 1.0f
-)
-
-data class LaserPoint(
-    val x: Float,
-    val y: Float,
-    val timestamp: Long = System.currentTimeMillis()
 )
 
 data class RulerState(
@@ -345,7 +335,6 @@ internal data class StrokeGeometryMetrics(
     val maxY: Float,
     val hasPoints: Boolean
 ) {
-    /** Broad-phase hit test; false means the exact segment-distance check can be skipped. */
     fun intersectsCircle(centerX: Float, centerY: Float, radius: Float): Boolean {
         if (!hasPoints) return false
         val safeRadius = radius.coerceAtLeast(0f)
@@ -371,10 +360,6 @@ data class WhiteboardStroke(
     val layerId: String = DEFAULT_LAYER_ID,
     val studioSettings: BrushStudioSettings = BrushStudioSettings.defaultFor(brushType)
 ) {
-    /**
-     * Lazily computed once per immutable stroke instance. New geometry must be created with copy(),
-     * which naturally receives a fresh summary instead of reusing stale bounds or hashes.
-     */
     internal val geometryMetrics: StrokeGeometryMetrics by lazy {
         var hash = 1
         var minX = Float.POSITIVE_INFINITY
@@ -398,42 +383,6 @@ data class WhiteboardStroke(
         )
     }
 }
-
-@Immutable
-data class StickyNote(
-    val id: String = UUID.randomUUID().toString(),
-    val text: String,
-    val x: Float,
-    val y: Float,
-    val width: Float = 220f,
-    val height: Float = 200f,
-    val colorHex: String = "#FFF275",
-    val rotation: Float = 0f,
-    val isPinned: Boolean = false,
-    val isVoiceNote: Boolean = false,
-    val voiceDurationSec: Int = 0,
-    val tags: List<String> = emptyList(),
-    val isLocked: Boolean = false,
-    val isAspectRatioLocked: Boolean = false,
-    val groupId: String? = null,
-    val parentId: String? = null,
-    val isHiddenByCollapse: Boolean = false,
-    // null means a legacy canvas note whose title was embedded in text.
-    val title: String? = null
-)
-
-data class ImageCardItem(
-    val id: String = UUID.randomUUID().toString(),
-    val imageUri: String,
-    val x: Float,
-    val y: Float,
-    val width: Float = 260f,
-    val height: Float = 200f,
-    val caption: String = "",
-    val tags: List<String> = emptyList(),
-    val rotation: Float = 0f,
-    val isPinned: Boolean = false
-)
 
 data class ShapeItem(
     val id: String = UUID.randomUUID().toString(),
@@ -462,7 +411,6 @@ data class ShapeItem(
     val isHiddenByCollapse: Boolean = false,
     val layerId: String = DEFAULT_LAYER_ID
 ) {
-    /** Relative vertex coordinates are unchanged by pan/move and are reused in render cache keys. */
     internal val relativeVerticesHash: Int by lazy {
         var hash = 1
         for (vertex in vertices) {
@@ -489,36 +437,7 @@ data class TextItem(
     val groupId: String? = null,
     val parentId: String? = null,
     val isHiddenByCollapse: Boolean = false,
-    /** Explicit resize height; 0 keeps the legacy content-driven height. */
     val height: Float = 0f
-)
-
-data class StickerItem(
-    val id: String = UUID.randomUUID().toString(),
-    val emoji: String,
-    val x: Float,
-    val y: Float,
-    val scale: Float = 1.3f
-)
-
-data class AuditLogEntry(
-    val id: String = UUID.randomUUID().toString(),
-    val timestamp: Long = System.currentTimeMillis(),
-    val actionName: String,
-    val details: String,
-    val category: String = "CANVAS"
-)
-
-data class BoardVersionSnapshot(
-    val versionId: String = UUID.randomUUID().toString(),
-    val boardId: String,
-    val versionName: String,
-    val description: String,
-    val timestamp: Long = System.currentTimeMillis(),
-    val strokeCount: Int,
-    val noteCount: Int,
-    val shapeCount: Int,
-    val serializedData: String
 )
 
 data class WhiteboardBoard(
@@ -529,13 +448,8 @@ data class WhiteboardBoard(
     val gridType: CanvasGridType = CanvasGridType.GRID,
     val colorTheme: CanvasColorTheme = CanvasColorTheme.WHITE,
     val strokes: List<WhiteboardStroke> = emptyList(),
-    val stickyNotes: List<StickyNote> = emptyList(),
     val shapes: List<ShapeItem> = emptyList(),
-    val imageCards: List<ImageCardItem> = emptyList(),
     val textItems: List<TextItem> = emptyList(),
-    val stickers: List<StickerItem> = emptyList(),
-    val auditLogs: List<AuditLogEntry> = emptyList(),
-    val snapshots: List<BoardVersionSnapshot> = emptyList(),
     val layers: List<DrawingLayer> = listOf(DrawingLayer()),
     val activeLayerId: String = DEFAULT_LAYER_ID
 )

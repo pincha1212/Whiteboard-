@@ -19,17 +19,18 @@ import kotlin.math.hypot
 import kotlin.math.roundToInt
 
 /**
- * Two-Level Chunked World-Space Raster Cache (v3.2.0):
+ * Single shared Two-Level Chunked World-Space Raster Cache (v4.0.0):
  * - Level A: Per-layer 512x512 ARGB_8888 cached tiles baking that layer's vector strokes/shapes
- *   and compositing any sparse mutable raster tiles from [MutableRasterTileStore] (honoring `isAlphaLocked`).
+ *   and compositing sparse mutable raster tiles from [MutableRasterTileStore].
  * - Level B: Composite visible-layer stack cached per tile (tx, ty) applying per-layer `opacity`
- *   and [LayerBlendMode] (`NORMAL`, `MULTIPLY`, `SCREEN`, `OVERLAY`) cleanly across API 24-36.
+ *   and [LayerBlendMode].
  *
- * Also exposes [bakeSingleLayerTile] so [PigmentMixEngine] and [ScanlineFloodFillEngine] can inspect
- * watertight vector/raster layer contents for accurate smudging and Reference Layer flood fill.
+ * Driven by [MemoryBudgetProfile] + [TileBitmapPool] so 1 GB RAM devices avoid OOM and GC churn.
  */
 class PaintTileRasterCache(
-    val mutableRasterStore: MutableRasterTileStore = MutableRasterTileStore()
+    val mutableRasterStore: MutableRasterTileStore = MutableRasterTileStore(),
+    private val budget: MemoryBudgetProfile = MemoryBudgetProfile.standard(),
+    val bitmapPool: TileBitmapPool = TileBitmapPool(budget.bitmapPoolMaxCount)
 ) {
 
     data class TileBucket(
@@ -56,29 +57,30 @@ class PaintTileRasterCache(
         val bitmap: Bitmap
     )
 
-    private val maxCacheBytes: Int =
-        calculateCacheBudgetBytes(Runtime.getRuntime().maxMemory())
-
-    // Level B: Final composited tiles (tx, ty)
-    private val compositeCache = object : LruCache<Long, CachedTile>((maxCacheBytes * 0.65f).toInt().coerceAtLeast(2 * 1024 * 1024)) {
+    // Level B: Final composited tiles (tx, ty) — 60% of budget
+    private val compositeCache = object : LruCache<Long, CachedTile>(
+        (budget.rasterCacheBytes * 0.60f).toInt().coerceAtLeast(2 * 1024 * 1024)
+    ) {
         override fun sizeOf(key: Long, value: CachedTile): Int = value.bitmap.byteCount.coerceAtLeast(1)
 
         override fun entryRemoved(evicted: Boolean, key: Long, oldValue: CachedTile, newValue: CachedTile?) {
             if (evicted && oldValue.bitmap !== newValue?.bitmap) {
                 reusableCompositeCanvas.setBitmap(null)
-                if (!oldValue.bitmap.isRecycled) oldValue.bitmap.recycle()
+                bitmapPool.release(oldValue.bitmap)
             }
         }
     }
 
-    // Level A: Per-layer baked vector+raster tiles keyed by "$boardId:$layerId:$tx:$ty"
-    private val layerTileCache = object : LruCache<String, CachedTile>((maxCacheBytes * 0.35f).toInt().coerceAtLeast(2 * 1024 * 1024)) {
+    // Level A: Per-layer baked vector+raster tiles — 40% of budget
+    private val layerTileCache = object : LruCache<String, CachedTile>(
+        (budget.rasterCacheBytes * 0.40f).toInt().coerceAtLeast(1536 * 1024)
+    ) {
         override fun sizeOf(key: String, value: CachedTile): Int = value.bitmap.byteCount.coerceAtLeast(1)
 
         override fun entryRemoved(evicted: Boolean, key: String, oldValue: CachedTile, newValue: CachedTile?) {
             if (evicted && oldValue.bitmap !== newValue?.bitmap) {
                 reusableLayerCanvas.setBitmap(null)
-                if (!oldValue.bitmap.isRecycled) oldValue.bitmap.recycle()
+                bitmapPool.release(oldValue.bitmap)
             }
         }
     }
@@ -87,24 +89,52 @@ class PaintTileRasterCache(
     private val tileDstRectF = RectF()
     private val reusableCompositeCanvas = Canvas()
     private val reusableLayerCanvas = Canvas()
+    private val reusableSampleCanvas = Canvas()
 
     private val rasterPaint = Paint().apply {
         isDither = false
+    }
+    private val normalBlitPaint = Paint()
+    private val layerBlendPaint = Paint()
+    private val alphaLockedOverlayPaint = Paint().apply {
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP)
     }
 
     fun clear() {
         reusableCompositeCanvas.setBitmap(null)
         reusableLayerCanvas.setBitmap(null)
+        reusableSampleCanvas.setBitmap(null)
         compositeCache.evictAll()
         layerTileCache.evictAll()
     }
 
-    /** Release half of the disposable raster cache when Android reports memory pressure. */
-    fun trimMemory() {
+    fun clearAndReleasePool() {
+        clear()
+        bitmapPool.clear()
+    }
+
+    /** Trim caches proportionally when Android reports memory pressure. */
+    fun trimToFraction(fraction: Float) {
         reusableCompositeCanvas.setBitmap(null)
         reusableLayerCanvas.setBitmap(null)
-        compositeCache.trimToSize(compositeCache.maxSize() / 2)
-        layerTileCache.trimToSize(layerTileCache.maxSize() / 2)
+        reusableSampleCanvas.setBitmap(null)
+        val clamped = fraction.coerceIn(0f, 1f)
+        if (clamped <= 0.01f) {
+            clearAndReleasePool()
+            return
+        }
+        compositeCache.trimToSize((compositeCache.maxSize() * clamped).toInt())
+        layerTileCache.trimToSize((layerTileCache.maxSize() * clamped).toInt())
+        if (clamped <= 0.25f) {
+            bitmapPool.clear()
+        }
+    }
+
+    /** Release half of the disposable raster cache when Android reports memory pressure. */
+    fun trimMemory() = trimToFraction(0.5f)
+
+    fun releaseTemporaryTile(bitmap: Bitmap?) {
+        bitmapPool.release(bitmap)
     }
 
     fun buildSpatialIndex(
@@ -362,20 +392,23 @@ class PaintTileRasterCache(
         val mutableTile = mutableRasterStore.getTile(boardId, layer.id, tx, ty)
         if (localStrokes.isEmpty() && localShapes.isEmpty() && mutableTile == null) return null
 
-        val bmp = Bitmap.createBitmap(TILE_PIXEL_SIZE, TILE_PIXEL_SIZE, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
-        renderLayerContentToTileCanvas(
-            canvas = c,
-            boardId = boardId,
-            layer = layer,
-            layerStrokes = localStrokes,
-            layerShapes = localShapes,
-            mutableTile = mutableTile,
-            tilePanX = -tileLeft,
-            tilePanY = -tileTop,
-            isDarkBoard = isDarkBoard,
-            handDrawnFactor = handDrawnFactor
-        )
+        val bmp = bitmapPool.acquireClean()
+        reusableSampleCanvas.setBitmap(bmp)
+        try {
+            renderLayerContentToTileCanvas(
+                canvas = reusableSampleCanvas,
+                layer = layer,
+                layerStrokes = localStrokes,
+                layerShapes = localShapes,
+                mutableTile = mutableTile,
+                tilePanX = -tileLeft,
+                tilePanY = -tileTop,
+                isDarkBoard = isDarkBoard,
+                handDrawnFactor = handDrawnFactor
+            )
+        } finally {
+            reusableSampleCanvas.setBitmap(null)
+        }
         return bmp
     }
 
@@ -410,18 +443,22 @@ class PaintTileRasterCache(
     ): Bitmap {
         val key = packTileKey(bucket.tx, bucket.ty)
         val existing = compositeCache.get(key)
-        if (existing != null && existing.boardId == bucket.boardId && existing.signature == bucket.signature) {
+        if (existing != null &&
+            existing.boardId == bucket.boardId &&
+            existing.signature == bucket.signature &&
+            !existing.bitmap.isRecycled
+        ) {
             return existing.bitmap
         }
 
         val bitmap: Bitmap
-        if (existing != null) {
+        if (existing != null && !existing.bitmap.isRecycled) {
             bitmap = existing.bitmap
             bitmap.eraseColor(Color.TRANSPARENT)
             existing.boardId = bucket.boardId
             existing.signature = bucket.signature
         } else {
-            bitmap = Bitmap.createBitmap(TILE_PIXEL_SIZE, TILE_PIXEL_SIZE, Bitmap.Config.ARGB_8888)
+            bitmap = bitmapPool.acquireClean()
             compositeCache.put(key, CachedTile(bucket.boardId, bucket.signature, bitmap))
         }
 
@@ -449,62 +486,48 @@ class PaintTileRasterCache(
             val mutableTile = mutableRasterStore.getTile(bucket.boardId, layer.id, bucket.tx, bucket.ty)
             if (layerStrokes.isEmpty() && layerShapes.isEmpty() && mutableTile == null) continue
 
-            // Fast path when single normal opaque layer doesn't need blend isolation
-            val needsLayerIsolation = layer.blendMode != LayerBlendMode.NORMAL ||
-                (layerOpacityAlpha < 253 && (layerStrokes.size + layerShapes.size + (if (mutableTile != null) 1 else 0) > 1))
+            val layerBmp = getOrBakeLayerTile(
+                boardId = bucket.boardId,
+                layer = layer,
+                tx = bucket.tx,
+                ty = bucket.ty,
+                layerStrokes = layerStrokes,
+                layerShapes = layerShapes,
+                mutableTile = mutableTile,
+                tilePanX = tilePanX,
+                tilePanY = tilePanY,
+                isDarkBoard = isDarkBoard,
+                handDrawnFactor = handDrawnFactor
+            )
 
             if (layer.blendMode == LayerBlendMode.NORMAL) {
-                val layerBmp = getOrBakeLayerTile(
-                    boardId = bucket.boardId,
-                    layer = layer,
-                    tx = bucket.tx,
-                    ty = bucket.ty,
-                    layerStrokes = layerStrokes,
-                    layerShapes = layerShapes,
-                    mutableTile = mutableTile,
-                    tilePanX = tilePanX,
-                    tilePanY = tilePanY,
-                    isDarkBoard = isDarkBoard,
-                    handDrawnFactor = handDrawnFactor
-                )
-                val blitPaint = Paint().apply { alpha = layerOpacityAlpha }
-                reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, blitPaint)
+                normalBlitPaint.alpha = layerOpacityAlpha
+                reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, normalBlitPaint)
             } else {
-                val layerBmp = getOrBakeLayerTile(
-                    boardId = bucket.boardId,
-                    layer = layer,
-                    tx = bucket.tx,
-                    ty = bucket.ty,
-                    layerStrokes = layerStrokes,
-                    layerShapes = layerShapes,
-                    mutableTile = mutableTile,
-                    tilePanX = tilePanX,
-                    tilePanY = tilePanY,
-                    isDarkBoard = isDarkBoard,
-                    handDrawnFactor = handDrawnFactor
-                )
-                val blendPaint = Paint().apply {
-                    alpha = layerOpacityAlpha
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        blendMode = layer.blendMode.toAndroidBlendMode()
-                    } else {
-                        layer.blendMode.toLegacyPorterDuff()?.let { xfermode = PorterDuffXfermode(it) }
+                layerBlendPaint.reset()
+                layerBlendPaint.alpha = layerOpacityAlpha
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    layerBlendPaint.blendMode = layer.blendMode.toAndroidBlendMode()
+                } else {
+                    layer.blendMode.toLegacyPorterDuff()?.let {
+                        layerBlendPaint.xfermode = PorterDuffXfermode(it)
                     }
                 }
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && layer.blendMode == LayerBlendMode.MULTIPLY) {
-                    val save = reusableCompositeCanvas.saveLayer(0f, 0f, TILE_WORLD_SIZE, TILE_WORLD_SIZE, blendPaint)
+                    val save = reusableCompositeCanvas.saveLayer(0f, 0f, TILE_WORLD_SIZE, TILE_WORLD_SIZE, layerBlendPaint)
                     try {
                         reusableCompositeCanvas.drawColor(Color.WHITE)
-                        reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, Paint().apply { alpha = layerOpacityAlpha })
+                        normalBlitPaint.alpha = layerOpacityAlpha
+                        reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, normalBlitPaint)
                     } finally {
                         reusableCompositeCanvas.restoreToCount(save)
                     }
                 } else {
-                    reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, blendPaint)
+                    reusableCompositeCanvas.drawBitmap(layerBmp, 0f, 0f, layerBlendPaint)
                 }
             }
         }
-
+        reusableCompositeCanvas.setBitmap(null)
         return bitmap
     }
 
@@ -548,24 +571,23 @@ class PaintTileRasterCache(
 
         val cacheKey = "$boardId:${layer.id}:$tx:$ty"
         val existing = layerTileCache.get(cacheKey)
-        if (existing != null && existing.signature == sig) {
+        if (existing != null && existing.signature == sig && !existing.bitmap.isRecycled) {
             return existing.bitmap
         }
 
         val bitmap: Bitmap
-        if (existing != null) {
+        if (existing != null && !existing.bitmap.isRecycled) {
             bitmap = existing.bitmap
             bitmap.eraseColor(Color.TRANSPARENT)
             existing.signature = sig
         } else {
-            bitmap = Bitmap.createBitmap(TILE_PIXEL_SIZE, TILE_PIXEL_SIZE, Bitmap.Config.ARGB_8888)
+            bitmap = bitmapPool.acquireClean()
             layerTileCache.put(cacheKey, CachedTile(boardId, sig, bitmap))
         }
 
         reusableLayerCanvas.setBitmap(bitmap)
         renderLayerContentToTileCanvas(
             canvas = reusableLayerCanvas,
-            boardId = boardId,
             layer = layer,
             layerStrokes = layerStrokes,
             layerShapes = layerShapes,
@@ -575,12 +597,12 @@ class PaintTileRasterCache(
             isDarkBoard = isDarkBoard,
             handDrawnFactor = handDrawnFactor
         )
+        reusableLayerCanvas.setBitmap(null)
         return bitmap
     }
 
     private fun renderLayerContentToTileCanvas(
         canvas: Canvas,
-        boardId: String,
         layer: DrawingLayer,
         layerStrokes: List<WhiteboardStroke>,
         layerShapes: List<ShapeItem>,
@@ -624,11 +646,7 @@ class PaintTileRasterCache(
             )
         }
         if (mutableTile != null && !mutableTile.isRecycled) {
-            val rasterOverlayPaint = if (layer.isAlphaLocked) {
-                Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_ATOP) }
-            } else {
-                null
-            }
+            val rasterOverlayPaint = if (layer.isAlphaLocked) alphaLockedOverlayPaint else null
             canvas.drawBitmap(mutableTile, 0f, 0f, rasterOverlayPaint)
         }
     }

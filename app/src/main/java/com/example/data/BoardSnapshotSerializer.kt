@@ -1,7 +1,5 @@
 package com.example.data
 
-import com.example.model.AuditLogEntry
-import com.example.model.BoardVersionSnapshot
 import com.example.model.BrushStudioSettings
 import com.example.model.CanvasColorTheme
 import com.example.model.CanvasGridType
@@ -11,8 +9,6 @@ import com.example.model.LayerBlendMode
 import com.example.model.LineCapStyle
 import com.example.model.ShapeItem
 import com.example.model.ShapeType
-import com.example.model.StickerItem
-import com.example.model.StickyNote
 import com.example.model.StrokeBrushType
 import com.example.model.StrokePoint
 import com.example.model.StrokeStyle
@@ -28,7 +24,7 @@ object BoardSnapshotSerializer {
 
     fun serializeBoardObject(board: WhiteboardBoard): JSONObject {
         val root = JSONObject()
-        root.put("schemaVersion", 1)
+        root.put("schemaVersion", 2)
         root.put("boardId", board.id)
         root.put("title", board.title)
         root.put("gridType", board.gridType.name)
@@ -129,30 +125,6 @@ object BoardSnapshotSerializer {
         }
         root.put("shapes", shapesArr)
 
-        val notesArr = JSONArray()
-        board.stickyNotes.forEach { n ->
-            val obj = JSONObject()
-            obj.put("id", n.id)
-            obj.put("text", n.text)
-            n.title?.let { obj.put("title", it) }
-            obj.put("x", n.x.toDouble())
-            obj.put("y", n.y.toDouble())
-            obj.put("width", n.width.toDouble())
-            obj.put("height", n.height.toDouble())
-            obj.put("colorHex", n.colorHex)
-            obj.put("rotation", n.rotation.toDouble())
-            obj.put("isPinned", n.isPinned)
-            obj.put("isVoiceNote", n.isVoiceNote)
-            obj.put("voiceDurationSec", n.voiceDurationSec)
-            obj.put("isLocked", n.isLocked)
-            obj.put("isAspectRatioLocked", n.isAspectRatioLocked)
-            n.groupId?.let { obj.put("groupId", it) }
-            n.parentId?.let { obj.put("parentId", it) }
-            obj.put("isHiddenByCollapse", n.isHiddenByCollapse)
-            notesArr.put(obj)
-        }
-        root.put("stickyNotes", notesArr)
-
         val textsArr = JSONArray()
         board.textItems.forEach { t ->
             textsArr.put(JSONObject().apply {
@@ -176,57 +148,22 @@ object BoardSnapshotSerializer {
         }
         root.put("textItems", textsArr)
 
-        val stickersArr = JSONArray()
-        board.stickers.forEach { st ->
-            stickersArr.put(JSONObject().apply {
-                put("id", st.id)
-                put("emoji", st.emoji)
-                put("x", st.x.toDouble())
-                put("y", st.y.toDouble())
-                put("scale", st.scale.toDouble())
-            })
-        }
-        root.put("stickers", stickersArr)
-
-        val auditLogsArr = JSONArray()
-        board.auditLogs.forEach { log ->
-            auditLogsArr.put(JSONObject().apply {
-                put("id", log.id)
-                put("timestamp", log.timestamp)
-                put("actionName", log.actionName)
-                put("details", log.details)
-                put("category", log.category)
-            })
-        }
-        root.put("auditLogs", auditLogsArr)
-
-        val snapshotsArr = JSONArray()
-        board.snapshots.forEach { snap ->
-            snapshotsArr.put(JSONObject().apply {
-                put("versionId", snap.versionId)
-                put("boardId", snap.boardId)
-                put("versionName", snap.versionName)
-                put("description", snap.description)
-                put("timestamp", snap.timestamp)
-                put("strokeCount", snap.strokeCount)
-                put("noteCount", snap.noteCount)
-                put("shapeCount", snap.shapeCount)
-                put("serializedData", snap.serializedData)
-            })
-        }
-        root.put("snapshots", snapshotsArr)
-
         return root
     }
 
+    /**
+     * Deserializes both v4.0.0 and legacy v3.x board JSON safely.
+     * Deprecated fields (stickyNotes, stickers, auditLogs, snapshots) from v3.x files are
+     * silently ignored without error while preserving layers, strokes, shapes, and basic texts.
+     */
     fun deserializeIntoBoard(json: String, currentBoard: WhiteboardBoard): WhiteboardBoard? {
         return try {
             val root = JSONObject(json)
             val gridName = root.optString("gridType", currentBoard.gridType.name)
-            val gridType = CanvasGridType.values().firstOrNull { it.name == gridName } ?: currentBoard.gridType
+            val gridType = CanvasGridType.entries.firstOrNull { it.name == gridName } ?: currentBoard.gridType
 
             val themeName = root.optString("colorTheme", currentBoard.colorTheme.name)
-            val colorTheme = CanvasColorTheme.values().firstOrNull { it.name == themeName } ?: currentBoard.colorTheme
+            val colorTheme = CanvasColorTheme.entries.firstOrNull { it.name == themeName } ?: currentBoard.colorTheme
 
             val layers = mutableListOf<DrawingLayer>()
             val layersArr = root.optJSONArray("layers")
@@ -279,13 +216,13 @@ object BoardSnapshotSerializer {
                         }
                     }
                     val styleName = obj.optString("strokeStyle", StrokeStyle.SOLID.name)
-                    val style = StrokeStyle.values().firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
+                    val style = StrokeStyle.entries.firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
                     val capName = obj.optString("capStyle", LineCapStyle.NONE.name)
-                    val capStyle = LineCapStyle.values().firstOrNull { it.name == capName } ?: LineCapStyle.NONE
+                    val capStyle = LineCapStyle.entries.firstOrNull { it.name == capName } ?: LineCapStyle.NONE
                     val isHL = obj.optBoolean("isHighlighter", false)
                     val defaultBrush = if (isHL) StrokeBrushType.HIGHLIGHTER else StrokeBrushType.FOUNTAIN_PEN
                     val brushName = obj.optString("brushType", defaultBrush.name)
-                    val brushType = StrokeBrushType.values().firstOrNull { it.name == brushName } ?: defaultBrush
+                    val brushType = StrokeBrushType.entries.firstOrNull { it.name == brushName } ?: defaultBrush
                     val opacity = obj.optDouble("opacity", brushType.defaultOpacity.toDouble()).toFloat().coerceIn(0.05f, 1.0f)
                     val studioObj = obj.optJSONObject("studioSettings")
                     val defaults = BrushStudioSettings.defaultFor(brushType)
@@ -329,13 +266,13 @@ object BoardSnapshotSerializer {
                 for (i in 0 until shapesArr.length()) {
                     val obj = shapesArr.getJSONObject(i)
                     val typeName = obj.optString("shapeType", ShapeType.RECTANGLE.name)
-                    val shapeType = ShapeType.values().firstOrNull { it.name == typeName } ?: ShapeType.RECTANGLE
+                    val shapeType = ShapeType.entries.firstOrNull { it.name == typeName } ?: ShapeType.RECTANGLE
                     val styleName = obj.optString("strokeStyle", StrokeStyle.SOLID.name)
-                    val style = StrokeStyle.values().firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
+                    val style = StrokeStyle.entries.firstOrNull { it.name == styleName } ?: StrokeStyle.SOLID
                     val capName = obj.optString("capStyle", LineCapStyle.NONE.name)
-                    val capStyle = LineCapStyle.values().firstOrNull { it.name == capName } ?: LineCapStyle.NONE
+                    val capStyle = LineCapStyle.entries.firstOrNull { it.name == capName } ?: LineCapStyle.NONE
                     val brushName = obj.optString("brushType", StrokeBrushType.FOUNTAIN_PEN.name)
-                    val brushType = StrokeBrushType.values().firstOrNull { it.name == brushName } ?: StrokeBrushType.FOUNTAIN_PEN
+                    val brushType = StrokeBrushType.entries.firstOrNull { it.name == brushName } ?: StrokeBrushType.FOUNTAIN_PEN
                     val verts = mutableListOf<StrokePoint>()
                     val vertsArr = obj.optJSONArray("vertices")
                     if (vertsArr != null) {
@@ -376,35 +313,6 @@ object BoardSnapshotSerializer {
                 }
             }
 
-            val notes = mutableListOf<StickyNote>()
-            val notesArr = root.optJSONArray("stickyNotes")
-            if (notesArr != null) {
-                for (i in 0 until notesArr.length()) {
-                    val obj = notesArr.getJSONObject(i)
-                    notes.add(
-                        StickyNote(
-                            id = obj.getString("id"),
-                            text = obj.optString("text", ""),
-                            title = if (obj.has("title")) obj.optString("title", "") else null,
-                            x = obj.getDouble("x").toFloat(),
-                            y = obj.getDouble("y").toFloat(),
-                            width = obj.optDouble("width", 220.0).toFloat(),
-                            height = obj.optDouble("height", 200.0).toFloat(),
-                            colorHex = obj.optString("colorHex", "#FFF275"),
-                            rotation = obj.optDouble("rotation", 0.0).toFloat(),
-                            isPinned = obj.optBoolean("isPinned", false),
-                            isVoiceNote = obj.optBoolean("isVoiceNote", false),
-                            voiceDurationSec = obj.optInt("voiceDurationSec", 0),
-                            isLocked = obj.optBoolean("isLocked", false),
-                            isAspectRatioLocked = obj.optBoolean("isAspectRatioLocked", false),
-                            groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
-                            parentId = obj.optString("parentId", "").takeIf { it.isNotEmpty() },
-                            isHiddenByCollapse = obj.optBoolean("isHiddenByCollapse", false)
-                        )
-                    )
-                }
-            }
-
             val texts = mutableListOf<TextItem>()
             val textsArr = root.optJSONArray("textItems")
             if (textsArr != null) {
@@ -433,74 +341,15 @@ object BoardSnapshotSerializer {
                 }
             }
 
-            val stickers = mutableListOf<StickerItem>()
-            val stickersArr = root.optJSONArray("stickers")
-            if (stickersArr != null) {
-                for (i in 0 until stickersArr.length()) {
-                    val obj = stickersArr.getJSONObject(i)
-                    stickers.add(
-                        StickerItem(
-                            id = obj.getString("id"),
-                            emoji = obj.optString("emoji", ""),
-                            x = obj.getDouble("x").toFloat(),
-                            y = obj.getDouble("y").toFloat(),
-                            scale = obj.optDouble("scale", 1.3).toFloat()
-                        )
-                    )
-                }
-            }
-
-            val auditLogs = mutableListOf<AuditLogEntry>()
-            val auditLogsArr = root.optJSONArray("auditLogs")
-            if (auditLogsArr != null) {
-                for (i in 0 until auditLogsArr.length()) {
-                    val obj = auditLogsArr.getJSONObject(i)
-                    auditLogs.add(
-                        AuditLogEntry(
-                            id = obj.getString("id"),
-                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
-                            actionName = obj.optString("actionName", "ACTION"),
-                            details = obj.optString("details", ""),
-                            category = obj.optString("category", "CANVAS")
-                        )
-                    )
-                }
-            }
-
-            val snapshots = mutableListOf<BoardVersionSnapshot>()
-            val snapshotsArr = root.optJSONArray("snapshots")
-            if (snapshotsArr != null) {
-                for (i in 0 until snapshotsArr.length()) {
-                    val obj = snapshotsArr.getJSONObject(i)
-                    snapshots.add(
-                        BoardVersionSnapshot(
-                            versionId = obj.getString("versionId"),
-                            boardId = obj.optString("boardId", currentBoard.id),
-                            versionName = obj.optString("versionName", "v1.0"),
-                            description = obj.optString("description", ""),
-                            timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
-                            strokeCount = obj.optInt("strokeCount", 0),
-                            noteCount = obj.optInt("noteCount", 0),
-                            shapeCount = obj.optInt("shapeCount", 0),
-                            serializedData = obj.optString("serializedData", "")
-                        )
-                    )
-                }
-            }
-
             currentBoard.copy(
                 updatedAt = System.currentTimeMillis(),
                 gridType = gridType,
                 colorTheme = colorTheme,
                 strokes = strokes,
                 shapes = shapes,
-                stickyNotes = notes,
                 textItems = texts,
-                stickers = stickers,
                 layers = resolvedLayers,
-                activeLayerId = resolvedActiveLayer,
-                auditLogs = if (auditLogs.isNotEmpty()) auditLogs else currentBoard.auditLogs,
-                snapshots = if (snapshots.isNotEmpty()) snapshots else currentBoard.snapshots
+                activeLayerId = resolvedActiveLayer
             )
         } catch (_: Exception) {
             null

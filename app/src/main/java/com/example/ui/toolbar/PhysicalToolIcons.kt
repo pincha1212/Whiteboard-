@@ -312,59 +312,6 @@ fun PhysicalBrushIcon(
     }
 }
 
-@Composable
-fun PhysicalLaserIcon(
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-
-        // Glowing red laser dot above tip
-        drawCircle(
-            color = Color(0xFFEF4444).copy(alpha = 0.28f),
-            radius = w * 0.15f,
-            center = Offset(cx, h * 0.14f)
-        )
-        drawCircle(
-            color = Color(0xFFEF4444),
-            radius = w * 0.075f,
-            center = Offset(cx, h * 0.14f)
-        )
-
-        // Silver pointer cap & body anchored to bottom
-        val nose = Path().apply {
-            moveTo(cx - w * 0.10f, h * 0.26f)
-            lineTo(cx + w * 0.10f, h * 0.26f)
-            lineTo(cx + w * 0.22f, h * 0.46f)
-            lineTo(cx - w * 0.22f, h * 0.46f)
-            close()
-        }
-        drawPath(nose, color = Color(0xFFCBD5E1))
-        drawPath(nose, color = Color(0xFF475569), style = Stroke(width = w * 0.04f, join = StrokeJoin.Round))
-
-        drawRoundRect(
-            color = Color(0xFFF1F5F9),
-            topLeft = Offset(cx - w * 0.22f, h * 0.46f),
-            size = Size(w * 0.44f, h * 0.58f),
-            cornerRadius = CornerRadius(w * 0.06f)
-        )
-        drawRoundRect(
-            color = Color(0xFF475569),
-            topLeft = Offset(cx - w * 0.22f, h * 0.46f),
-            size = Size(w * 0.44f, h * 0.58f),
-            cornerRadius = CornerRadius(w * 0.06f),
-            style = Stroke(width = w * 0.04f)
-        )
-        // Red button dot on barrel
-        drawCircle(
-            color = Color(0xFFDC2626),
-            radius = w * 0.07f,
-            center = Offset(cx, h * 0.64f)
-        )
-    }
-}
 
 @Composable
 fun PhysicalEraserIcon(
@@ -564,37 +511,6 @@ fun PhysicalShapesIcon(
     }
 }
 
-@Composable
-fun PhysicalStickyNoteIcon(
-    modifier: Modifier = Modifier
-) {
-    Canvas(modifier = modifier) {
-        val u = size.minDimension
-        val left = u * 0.16f
-        val top = u * 0.16f
-        val s = u * 0.68f
-        val fold = u * 0.18f
-
-        val body = Path().apply {
-            moveTo(left, top)
-            lineTo(left + s, top)
-            lineTo(left + s, top + s - fold)
-            lineTo(left + s - fold, top + s)
-            lineTo(left, top + s)
-            close()
-        }
-        drawPath(body, color = Color(0xFFFDE047))
-        drawPath(body, color = Color(0xFFCA8A04), style = Stroke(width = u * 0.045f, join = StrokeJoin.Round))
-
-        val corner = Path().apply {
-            moveTo(left + s - fold, top + s - fold)
-            lineTo(left + s, top + s - fold)
-            lineTo(left + s - fold, top + s)
-            close()
-        }
-        drawPath(corner, color = Color(0xFFFACC15))
-    }
-}
 
 @Composable
 fun PhysicalPenSquiggleIcon(

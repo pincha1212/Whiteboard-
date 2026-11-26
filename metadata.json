@@ -1,6 +1,6 @@
 {
   "name": "Whiteboard",
-  "description": "Pizarra infinita inspirada en Microsoft Whiteboard con herramientas de dibujo, notas adhesivas, formas, plantillas y auditoría de versiones.",
+  "description": "Estudio de dibujo Sketchbook optimizado para 1 GB RAM con pinceles paramétricos, mezcla de pigmento, guías de precisión, capas y texto básico.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
