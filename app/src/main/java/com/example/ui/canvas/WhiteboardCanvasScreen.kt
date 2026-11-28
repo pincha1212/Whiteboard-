@@ -1,6 +1,11 @@
 package com.example.ui.canvas
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.speech.SpeechRecognizer
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -10,6 +15,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
@@ -18,6 +24,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -39,6 +46,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -48,6 +57,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -71,16 +81,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.core.content.ContextCompat
 import com.example.ink.BoxResizeHandle
 import com.example.ink.GuidesGeometry
 import com.example.ink.PerspectiveAxisLock
 import com.example.ink.StrokeStabilizer
 import com.example.ink.ViewportTransform
+import com.example.ink.voice.LiveSpeechDictationController
 import com.example.model.BrushStudioSettings
 import com.example.model.DrawingLayer
 import com.example.model.GuideType
@@ -102,6 +115,7 @@ import com.example.ui.toolbar.WhiteboardPenDock
 import com.example.ui.toolbar.WhiteboardTopBar
 import com.example.viewmodel.WhiteboardUiState
 import com.example.viewmodel.WhiteboardViewModel
+import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -149,8 +163,89 @@ fun WhiteboardCanvasScreen(
     val textMeasuredHeights = remember { mutableStateMapOf<String, Float>() }
 
     val localActivePoints = remember { mutableStateListOf<StrokePoint>() }
+    val livePreviewFilter = remember { StrokeStabilizer.IncrementalLivePreviewFilter() }
     val localLassoPoints = remember { mutableStateListOf<StrokePoint>() }
     val lassoPath = remember { Path() }
+    val coroutineScope = rememberCoroutineScope()
+
+    val dictationController = remember(context, viewModel) {
+        LiveSpeechDictationController(
+            context = context,
+            scope = coroutineScope,
+            onTextStreamed = { targetId, streamedText ->
+                viewModel.streamDictatedTextToItem(targetId, streamedText)
+            },
+            onPhraseCommitted = { targetId, committedText ->
+                viewModel.commitDictationPhrase(targetId, committedText)
+            },
+            onRmsChanged = { rms ->
+                viewModel.updateDictationAudioLevel(rms)
+            },
+            onDictationStopped = { errorMessage ->
+                viewModel.stopVoiceDictationState(persist = true, statusMessage = errorMessage)
+            }
+        )
+    }
+
+    val beginDictationSession = remember(context, viewModel, dictationController) {
+        {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                viewModel.showDictationStatusMessage("El dictado por voz no está disponible en este dispositivo.")
+            } else {
+                val (targetId, seed) = viewModel.prepareDictationTarget()
+                viewModel.startVoiceDictationState(targetId)
+                dictationController.start(targetId = targetId, initialSeed = seed)
+            }
+        }
+    }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            beginDictationSession()
+        } else {
+            viewModel.showDictationStatusMessage("Permiso de micrófono necesario para dictar en vivo.")
+        }
+    }
+
+    val onToggleVoiceDictation = remember(context, viewModel, dictationController, beginDictationSession, audioPermissionLauncher) {
+        {
+            if (viewModel.uiState.value.isVoiceDictating) {
+                dictationController.stop()
+            } else {
+                val granted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    beginDictationSession()
+                } else {
+                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+        }
+    }
+
+    DisposableEffect(dictationController) {
+        onDispose {
+            dictationController.dispose()
+        }
+    }
+
+    LaunchedEffect(state.isVoiceDictating) {
+        if (!state.isVoiceDictating) {
+            // Ensure recognizer stops cleanly if target item was deleted or board closed
+            dictationController.dispose()
+        }
+    }
+
+    LaunchedEffect(state.dictationStatusMessage, state.isVoiceDictating) {
+        if (!state.isVoiceDictating && state.dictationStatusMessage != null) {
+            delay(3600L)
+            viewModel.clearDictationStatusMessage()
+        }
+    }
 
     val activePreviewBrush = viewModel.brushTypeForTool(state.currentTool)
     val activeSlotStudioSettings = viewModel.brushSlots.getOrNull(state.activeBrushSlotIndex)?.studioSettings
@@ -362,6 +457,206 @@ fun WhiteboardCanvasScreen(
                         }
                     }
             ) {
+                // Layer 1: Background & Grid Canvas (invalidates only on camera pan/zoom or board grid/theme changes)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val camera = cameraState.value
+                    drawCanvasBackgroundAndGrid(
+                        gridType = state.board.gridType,
+                        colorTheme = state.board.colorTheme,
+                        panX = camera.panX,
+                        panY = camera.panY,
+                        scale = camera.scale,
+                        screenW = size.width,
+                        screenH = size.height
+                    )
+                }
+
+                // Layer 2: Committed Board Tiles + Selected Vectors + Symmetry Guides (never invalidates during pointer MOVE!)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val camera = cameraState.value
+                    val rotStemPx = ShapeCanvasCoordinates.rotationStemScreenPx(density)
+                    val safeScale = if (camera.scale > 0.001f) camera.scale else 1.0f
+                    val visibleWorldLeft = -camera.panX / safeScale
+                    val visibleWorldTop = -camera.panY / safeScale
+                    val visibleWorldRight = (size.width - camera.panX) / safeScale
+                    val visibleWorldBottom = (size.height - camera.panY) / safeScale
+                    val usePaintRaster = paintSpatialIndex != null
+
+                    if (usePaintRaster) {
+                        drawIntoCanvas { composeCanvas ->
+                            paintTileCache.renderVisibleTiles(
+                                canvas = composeCanvas.nativeCanvas,
+                                spatialIndex = paintSpatialIndex!!,
+                                panX = camera.panX,
+                                panY = camera.panY,
+                                scale = camera.scale,
+                                screenW = size.width,
+                                screenH = size.height,
+                                isDarkBoard = isDarkBoard,
+                                handDrawnFactor = state.handDrawnFactor
+                            )
+                        }
+                        if (state.selectedStrokeId != null || selectedStrokeIdSet.isNotEmpty()) {
+                            state.board.strokes.forEach { stroke ->
+                                if (!visibleLayerIds.contains(stroke.layerId)) return@forEach
+                                val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
+                                if (!isSelected) return@forEach
+                                val bounds = stroke.geometryMetrics
+                                if (bounds.hasPoints) {
+                                    val pad = (stroke.width * 3.5f + 64f) / safeScale
+                                    if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
+                                        bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom
+                                    ) {
+                                        return@forEach
+                                    }
+                                }
+                                drawStrokeVector(
+                                    stroke = stroke,
+                                    panX = camera.panX,
+                                    panY = camera.panY,
+                                    scale = camera.scale,
+                                    isSelected = true,
+                                    isDarkBoard = isDarkBoard,
+                                    handDrawnFactor = state.handDrawnFactor
+                                )
+                            }
+                        }
+                    } else {
+                        state.board.strokes.forEach { stroke ->
+                            if (!visibleLayerIds.contains(stroke.layerId)) return@forEach
+                            val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
+                            val bounds = stroke.geometryMetrics
+                            if (bounds.hasPoints) {
+                                val pad = (stroke.width * 3.5f + 64f) / safeScale
+                                if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
+                                    bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom
+                                ) {
+                                    return@forEach
+                                }
+                            }
+                            drawStrokeVector(
+                                stroke = stroke,
+                                panX = camera.panX,
+                                panY = camera.panY,
+                                scale = camera.scale,
+                                isSelected = isSelected,
+                                isDarkBoard = isDarkBoard,
+                                handDrawnFactor = state.handDrawnFactor
+                            )
+                        }
+                    }
+
+                    val viewportCenterX = (visibleWorldLeft + visibleWorldRight) / 2f
+                    val viewportCenterY = (visibleWorldTop + visibleWorldBottom) / 2f
+                    val viewportRadius = hypot(
+                        (visibleWorldRight - visibleWorldLeft) / 2f,
+                        (visibleWorldBottom - visibleWorldTop) / 2f
+                    ) + 80f / safeScale
+
+                    if (usePaintRaster) {
+                        if (state.selectedShapeId != null || selectedShapeIdSet.isNotEmpty()) {
+                            cachedShapeBounds.forEach { cached ->
+                                val shape = cached.shape
+                                if (shape.isHiddenByCollapse || !visibleLayerIds.contains(shape.layerId)) return@forEach
+                                val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
+                                if (!isSelected) return@forEach
+                                if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
+                                    cached.radius + viewportRadius
+                                ) {
+                                    return@forEach
+                                }
+                                drawShapeVector(
+                                    shape = shape,
+                                    panX = camera.panX,
+                                    panY = camera.panY,
+                                    scale = camera.scale,
+                                    isSelected = true,
+                                    isDarkBoard = isDarkBoard,
+                                    rotStemPx = rotStemPx,
+                                    handDrawnFactor = state.handDrawnFactor
+                                )
+                            }
+                        }
+                    } else {
+                        cachedShapeBounds.forEach { cached ->
+                            if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
+                                cached.radius + viewportRadius
+                            ) {
+                                return@forEach
+                            }
+                            val shape = cached.shape
+                            if (shape.isHiddenByCollapse || !visibleLayerIds.contains(shape.layerId)) return@forEach
+                            val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
+                            drawShapeVector(
+                                shape = shape,
+                                panX = camera.panX,
+                                panY = camera.panY,
+                                scale = camera.scale,
+                                isSelected = isSelected,
+                                isDarkBoard = isDarkBoard,
+                                rotStemPx = rotStemPx,
+                                handDrawnFactor = state.handDrawnFactor
+                            )
+                        }
+                    }
+
+                    if (state.selectedStrokeId != null && state.selectedStrokeIds.size <= 1) {
+                        selectedStrokeForHandles?.let { selStroke ->
+                            if (visibleLayerIds.contains(selStroke.layerId)) {
+                                drawStrokeSelectionHandles(
+                                    stroke = selStroke,
+                                    panX = camera.panX,
+                                    panY = camera.panY,
+                                    scale = camera.scale,
+                                    rotStemPx = rotStemPx
+                                )
+                            }
+                        }
+                    }
+
+                    if (state.symmetryMode != SymmetryMode.NONE) {
+                        val guideColor = Color(0xFF0EA5E9)
+                        val symScreenX = state.symmetryCenterX * camera.scale + camera.panX
+                        val symScreenY = state.symmetryCenterY * camera.scale + camera.panY
+                        val dashEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                        if (state.symmetryMode == SymmetryMode.VERTICAL || state.symmetryMode == SymmetryMode.QUAD) {
+                            drawLine(
+                                color = guideColor.copy(alpha = 0.72f),
+                                start = Offset(symScreenX, 0f),
+                                end = Offset(symScreenX, size.height),
+                                strokeWidth = 2f,
+                                pathEffect = dashEffect
+                            )
+                        }
+                        if (state.symmetryMode == SymmetryMode.HORIZONTAL || state.symmetryMode == SymmetryMode.QUAD) {
+                            drawLine(
+                                color = guideColor.copy(alpha = 0.72f),
+                                start = Offset(0f, symScreenY),
+                                end = Offset(size.width, symScreenY),
+                                strokeWidth = 2f,
+                                pathEffect = dashEffect
+                            )
+                        }
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.9f),
+                            radius = 11f,
+                            center = Offset(symScreenX, symScreenY)
+                        )
+                        drawCircle(
+                            color = guideColor,
+                            radius = 11f,
+                            center = Offset(symScreenX, symScreenY),
+                            style = Stroke(width = 3f)
+                        )
+                        drawCircle(
+                            color = guideColor,
+                            radius = 4f,
+                            center = Offset(symScreenX, symScreenY)
+                        )
+                    }
+                }
+
+                // Layer 3: Lightweight Live Active Stroke + Lasso + Cursor Overlay + Touch Input
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
@@ -374,6 +669,7 @@ fun WhiteboardCanvasScreen(
                                 var activeHandleIndex = -1
                                 var hasTransformed = false
                                 localLassoPoints.clear()
+                                livePreviewFilter.reset()
                                 pixelEraserCursorWorld = null
 
                                 val curState = viewModel.uiState.value
@@ -862,99 +1158,19 @@ fun WhiteboardCanvasScreen(
                                 eyedropperPreviewState = null
                                 viewModel.resetStrokeDragAngle()
                                 localActivePoints.clear()
+                                livePreviewFilter.reset()
                                 localLassoPoints.clear()
                             }
                         }
                 ) {
                     val camera = cameraState.value
-                    val rotStemPx = ShapeCanvasCoordinates.rotationStemScreenPx(density)
-                    drawCanvasBackgroundAndGrid(
-                        gridType = state.board.gridType,
-                        colorTheme = state.board.colorTheme,
-                        panX = camera.panX,
-                        panY = camera.panY,
-                        scale = camera.scale,
-                        screenW = size.width,
-                        screenH = size.height
-                    )
-
-                    val safeScale = if (camera.scale > 0.001f) camera.scale else 1.0f
-                    val visibleWorldLeft = -camera.panX / safeScale
-                    val visibleWorldTop = -camera.panY / safeScale
-                    val visibleWorldRight = (size.width - camera.panX) / safeScale
-                    val visibleWorldBottom = (size.height - camera.panY) / safeScale
-                    val usePaintRaster = paintSpatialIndex != null
-
-                    if (usePaintRaster) {
-                        drawIntoCanvas { composeCanvas ->
-                            paintTileCache.renderVisibleTiles(
-                                canvas = composeCanvas.nativeCanvas,
-                                spatialIndex = paintSpatialIndex!!,
-                                panX = camera.panX,
-                                panY = camera.panY,
-                                scale = camera.scale,
-                                screenW = size.width,
-                                screenH = size.height,
-                                isDarkBoard = isDarkBoard,
-                                handDrawnFactor = state.handDrawnFactor
-                            )
-                        }
-                        if (state.selectedStrokeId != null || selectedStrokeIdSet.isNotEmpty()) {
-                            state.board.strokes.forEach { stroke ->
-                                if (!visibleLayerIds.contains(stroke.layerId)) return@forEach
-                                val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
-                                if (!isSelected) return@forEach
-                                val bounds = stroke.geometryMetrics
-                                if (bounds.hasPoints) {
-                                    val pad = (stroke.width * 3.5f + 64f) / safeScale
-                                    if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
-                                        bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom
-                                    ) {
-                                        return@forEach
-                                    }
-                                }
-                                drawStrokeVector(
-                                    stroke = stroke,
-                                    panX = camera.panX,
-                                    panY = camera.panY,
-                                    scale = camera.scale,
-                                    isSelected = true,
-                                    isDarkBoard = isDarkBoard,
-                                    handDrawnFactor = state.handDrawnFactor
-                                )
-                            }
-                        }
-                    } else {
-                        state.board.strokes.forEach { stroke ->
-                            if (!visibleLayerIds.contains(stroke.layerId)) return@forEach
-                            val isSelected = stroke.id == state.selectedStrokeId || selectedStrokeIdSet.contains(stroke.id)
-                            val bounds = stroke.geometryMetrics
-                            if (bounds.hasPoints) {
-                                val pad = (stroke.width * 3.5f + 64f) / safeScale
-                                if (bounds.maxX + pad < visibleWorldLeft || bounds.minX - pad > visibleWorldRight ||
-                                    bounds.maxY + pad < visibleWorldTop || bounds.minY - pad > visibleWorldBottom
-                                ) {
-                                    return@forEach
-                                }
-                            }
-                            drawStrokeVector(
-                                stroke = stroke,
-                                panX = camera.panX,
-                                panY = camera.panY,
-                                scale = camera.scale,
-                                isSelected = isSelected,
-                                isDarkBoard = isDarkBoard,
-                                handDrawnFactor = state.handDrawnFactor
-                            )
-                        }
-                    }
 
                     if (localActivePoints.size >= 2 && state.currentTool != ToolType.SMUDGE) {
                         val hasActiveShapeGuide = state.isRulerActive ||
                             state.guidesState.ellipse.isVisible ||
                             state.guidesState.frenchCurve.isVisible
                         val previewPoints = if (!hasActiveShapeGuide && state.predictionLevel > 0) {
-                            StrokeStabilizer.stabilizeLivePreview(localActivePoints.toList(), state.predictionLevel)
+                            livePreviewFilter.update(localActivePoints, state.predictionLevel)
                         } else {
                             localActivePoints
                         }
@@ -1048,115 +1264,6 @@ fun WhiteboardCanvasScreen(
                             style = Stroke(width = 2f)
                         )
                     }
-
-                    val viewportCenterX = (visibleWorldLeft + visibleWorldRight) / 2f
-                    val viewportCenterY = (visibleWorldTop + visibleWorldBottom) / 2f
-                    val viewportRadius = hypot(
-                        (visibleWorldRight - visibleWorldLeft) / 2f,
-                        (visibleWorldBottom - visibleWorldTop) / 2f
-                    ) + 80f / safeScale
-
-                    if (usePaintRaster) {
-                        if (state.selectedShapeId != null || selectedShapeIdSet.isNotEmpty()) {
-                            cachedShapeBounds.forEach { cached ->
-                                val shape = cached.shape
-                                if (shape.isHiddenByCollapse || !visibleLayerIds.contains(shape.layerId)) return@forEach
-                                val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
-                                if (!isSelected) return@forEach
-                                if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
-                                    cached.radius + viewportRadius
-                                ) {
-                                    return@forEach
-                                }
-                                drawShapeVector(
-                                    shape = shape,
-                                    panX = camera.panX,
-                                    panY = camera.panY,
-                                    scale = camera.scale,
-                                    isSelected = true,
-                                    isDarkBoard = isDarkBoard,
-                                    rotStemPx = rotStemPx,
-                                    handDrawnFactor = state.handDrawnFactor
-                                )
-                            }
-                        }
-                    } else {
-                        cachedShapeBounds.forEach { cached ->
-                            if (hypot(cached.centerX - viewportCenterX, cached.centerY - viewportCenterY) >
-                                cached.radius + viewportRadius
-                            ) {
-                                return@forEach
-                            }
-                            val shape = cached.shape
-                            if (shape.isHiddenByCollapse || !visibleLayerIds.contains(shape.layerId)) return@forEach
-                            val isSelected = shape.id == state.selectedShapeId || selectedShapeIdSet.contains(shape.id)
-                            drawShapeVector(
-                                shape = shape,
-                                panX = camera.panX,
-                                panY = camera.panY,
-                                scale = camera.scale,
-                                isSelected = isSelected,
-                                isDarkBoard = isDarkBoard,
-                                rotStemPx = rotStemPx,
-                                handDrawnFactor = state.handDrawnFactor
-                            )
-                        }
-                    }
-
-                    if (state.selectedStrokeId != null && state.selectedStrokeIds.size <= 1) {
-                        selectedStrokeForHandles?.let { selStroke ->
-                            if (visibleLayerIds.contains(selStroke.layerId)) {
-                                drawStrokeSelectionHandles(
-                                    stroke = selStroke,
-                                    panX = camera.panX,
-                                    panY = camera.panY,
-                                    scale = camera.scale,
-                                    rotStemPx = rotStemPx
-                                )
-                            }
-                        }
-                    }
-
-                    if (state.symmetryMode != SymmetryMode.NONE) {
-                        val guideColor = Color(0xFF0EA5E9)
-                        val symScreenX = state.symmetryCenterX * camera.scale + camera.panX
-                        val symScreenY = state.symmetryCenterY * camera.scale + camera.panY
-                        val dashEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
-                        if (state.symmetryMode == SymmetryMode.VERTICAL || state.symmetryMode == SymmetryMode.QUAD) {
-                            drawLine(
-                                color = guideColor.copy(alpha = 0.72f),
-                                start = Offset(symScreenX, 0f),
-                                end = Offset(symScreenX, size.height),
-                                strokeWidth = 2f,
-                                pathEffect = dashEffect
-                            )
-                        }
-                        if (state.symmetryMode == SymmetryMode.HORIZONTAL || state.symmetryMode == SymmetryMode.QUAD) {
-                            drawLine(
-                                color = guideColor.copy(alpha = 0.72f),
-                                start = Offset(0f, symScreenY),
-                                end = Offset(size.width, symScreenY),
-                                strokeWidth = 2f,
-                                pathEffect = dashEffect
-                            )
-                        }
-                        drawCircle(
-                            color = Color.White.copy(alpha = 0.9f),
-                            radius = 11f,
-                            center = Offset(symScreenX, symScreenY)
-                        )
-                        drawCircle(
-                            color = guideColor,
-                            radius = 11f,
-                            center = Offset(symScreenX, symScreenY),
-                            style = Stroke(width = 3f)
-                        )
-                        drawCircle(
-                            color = guideColor,
-                            radius = 4f,
-                            center = Offset(symScreenX, symScreenY)
-                        )
-                    }
                 }
 
                 RotationHudOverlay(
@@ -1201,6 +1308,7 @@ fun WhiteboardCanvasScreen(
                         }
                     } else {
                         val isSelected = state.selectedTextId == tItem.id || state.selectedTextIds.contains(tItem.id)
+                        val isActivelyDictatingHere = state.isVoiceDictating && state.dictatingTextItemId == tItem.id
                         val isTransparentBg = tItem.backgroundColorHex == "TRANSPARENT"
                         val cardBg = if (isTransparentBg) {
                             Color.Transparent
@@ -1209,13 +1317,14 @@ fun WhiteboardCanvasScreen(
                                 ?: if (isDarkBoard) Color(0xFF1E293B) else Color.White
                         }
                         val cardBorderColor = when {
+                            isActivelyDictatingHere -> Color(0xFFDC2626)
                             isSelected -> Color(0xFF2563EB)
                             isTransparentBg -> Color.Transparent
                             isDarkBoard -> Color(0xFF334155)
                             else -> Color(0xFFCBD5E1)
                         }
                         val cardBorderWidth = when {
-                            isSelected -> 2.dp
+                            isActivelyDictatingHere || isSelected -> 2.dp
                             isTransparentBg -> 0.dp
                             else -> 1.dp
                         }
@@ -1269,7 +1378,7 @@ fun WhiteboardCanvasScreen(
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = cardBg,
-                                shadowElevation = if (isTransparentBg) 0.dp else if (isSelected) 4.dp else 1.5.dp,
+                                shadowElevation = if (isTransparentBg) 0.dp else if (isSelected || isActivelyDictatingHere) 4.dp else 1.5.dp,
                                 modifier = Modifier
                                     .width(widthDp)
                                     .then(if (tItem.height > 0f) Modifier.heightIn(min = minHeightDp) else Modifier)
@@ -1282,26 +1391,54 @@ fun WhiteboardCanvasScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                 ) {
-                                    BasicTextField(
-                                        value = tItem.text,
-                                        onValueChange = {
-                                            if (!isSelected) viewModel.selectTextItem(tItem.id)
-                                            viewModel.updateTextItem(tItem.id, it)
-                                        },
-                                        enabled = !isPanOnlyMode,
-                                        readOnly = isPanOnlyMode,
-                                        textStyle = TextStyle(
-                                            color = tColor,
-                                            fontSize = fontSizeSp,
-                                            lineHeight = (fontSizeSp.value * 1.24f).sp,
-                                            fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
-                                        ),
-                                        cursorBrush = SolidColor(tColor),
+                                    Box(
                                         modifier = Modifier
                                             .weight(1f)
                                             .padding(horizontal = 4.dp, vertical = 2.dp)
-                                            .testTag("editable_text_input_${tItem.id}")
-                                    )
+                                    ) {
+                                        if (isActivelyDictatingHere && tItem.text.isEmpty()) {
+                                            Text(
+                                                text = "Habla ahora…",
+                                                color = tColor.copy(alpha = 0.45f),
+                                                fontSize = fontSizeSp,
+                                                lineHeight = (fontSizeSp.value * 1.24f).sp,
+                                                fontWeight = FontWeight.Normal
+                                            )
+                                        }
+                                        BasicTextField(
+                                            value = tItem.text,
+                                            onValueChange = {
+                                                if (!isSelected) viewModel.selectTextItem(tItem.id)
+                                                viewModel.updateTextItem(tItem.id, it)
+                                            },
+                                            enabled = !isPanOnlyMode,
+                                            readOnly = isPanOnlyMode,
+                                            textStyle = TextStyle(
+                                                color = tColor,
+                                                fontSize = fontSizeSp,
+                                                lineHeight = (fontSizeSp.value * 1.24f).sp,
+                                                fontWeight = if (tItem.isBold) FontWeight.Bold else FontWeight.Medium
+                                            ),
+                                            cursorBrush = SolidColor(tColor),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("editable_text_input_${tItem.id}")
+                                        )
+                                    }
+                                    if (isActivelyDictatingHere) {
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Color(0xFFDC2626).copy(
+                                                        alpha = 0.45f + state.dictationRmsLevel * 0.55f
+                                                    )
+                                                )
+                                                .testTag("dictating_card_pulse_dot")
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1495,8 +1632,31 @@ fun WhiteboardCanvasScreen(
                 penColorHex = state.penColorHex,
                 isRainbowPen = state.isRainbowPen,
                 autoShapeRecognition = state.autoShapeRecognition,
-                floodFillTolerance = state.floodFillTolerance
+                floodFillTolerance = state.floodFillTolerance,
+                isVoiceDictating = state.isVoiceDictating,
+                onToggleVoiceDictation = onToggleVoiceDictation
             )
+
+            if (state.isVoiceDictating || state.dictationStatusMessage != null) {
+                LiveDictationStatusPill(
+                    isListening = state.isVoiceDictating,
+                    rmsLevel = state.dictationRmsLevel,
+                    statusMessage = state.dictationStatusMessage,
+                    onStopOrDismiss = {
+                        if (state.isVoiceDictating) {
+                            dictationController.stop()
+                        } else {
+                            viewModel.clearDictationStatusMessage()
+                        }
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .displayCutoutPadding()
+                        .padding(bottom = 86.dp, start = 16.dp, end = 16.dp)
+                        .zIndex(28f)
+                )
+            }
         }
 
         // Eyedropper floating sample loupe
@@ -1823,7 +1983,9 @@ private fun CanvasDockOverlay(
     penColorHex: String,
     isRainbowPen: Boolean,
     autoShapeRecognition: Boolean,
-    floodFillTolerance: Int
+    floodFillTolerance: Int,
+    isVoiceDictating: Boolean,
+    onToggleVoiceDictation: () -> Unit
 ) {
     val onSelectTool = remember(viewModel) {
         { tool: ToolType -> viewModel.setTool(tool) }
@@ -1926,6 +2088,8 @@ private fun CanvasDockOverlay(
                         viewModel.updateTextItemStyle(t.id, fontSize = size)
                     }
                 },
+                isVoiceDictating = isVoiceDictating,
+                onToggleVoiceDictation = onToggleVoiceDictation,
                 onDeleteText = {
                     selectedText?.let { viewModel.deleteTextItem(it.id) }
                 },
@@ -1969,9 +2133,79 @@ private fun CanvasDockOverlay(
                 onToggleAutoShape = onToggleAutoShape,
                 onChangeFloodFillTolerance = onChangeFloodFillTolerance,
                 onAddText = onAddText,
+                isVoiceDictating = isVoiceDictating,
+                onToggleVoiceDictation = onToggleVoiceDictation,
                 onEnterZenMode = onEnterZenMode,
                 modifier = dockModifier
             )
+        }
+    }
+}
+
+@Composable
+private fun LiveDictationStatusPill(
+    isListening: Boolean,
+    rmsLevel: Float,
+    statusMessage: String?,
+    onStopOrDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val containerColor = if (isListening) {
+        MaterialTheme.colorScheme.surface
+    } else {
+        MaterialTheme.colorScheme.errorContainer
+    }
+    val borderColor = if (isListening) {
+        Color(0xFFDC2626).copy(alpha = 0.55f)
+    } else {
+        MaterialTheme.colorScheme.error.copy(alpha = 0.55f)
+    }
+    val contentColor = if (isListening) {
+        MaterialTheme.colorScheme.onSurface
+    } else {
+        MaterialTheme.colorScheme.onErrorContainer
+    }
+
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = containerColor,
+        contentColor = contentColor,
+        shadowElevation = 6.dp,
+        modifier = modifier
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .border(1.25.dp, borderColor, RoundedCornerShape(999.dp))
+            .clickable(onClick = onStopOrDismiss)
+            .testTag("live_dictation_pill")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            if (isListening) {
+                Box(
+                    modifier = Modifier
+                        .size((8f + rmsLevel * 6f).dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFDC2626))
+                )
+            }
+            Text(
+                text = if (isListening) "Dictando en vivo… Toca para detener" else (statusMessage ?: ""),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (isListening) {
+                Icon(
+                    imageVector = StudioIcons.Stop,
+                    contentDescription = "Detener dictado",
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         }
     }
 }

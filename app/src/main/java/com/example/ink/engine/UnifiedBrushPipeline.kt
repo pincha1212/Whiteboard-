@@ -226,33 +226,47 @@ object UnifiedBrushPipeline {
             chiselAngleDeg = settings.chiselAngleDeg
         )
 
-        val timestampsMs = if (
-            stroke.points.size >= 2 &&
-            stroke.points.last().timestampMs > stroke.points.first().timestampMs
-        ) {
-            stroke.points.map { it.timestampMs }
+        val adaptiveStepPx = if (preserveInputPoints) {
+            (worldWidth * 0.35f).coerceIn(3.0f, 8.0f)
         } else {
-            null
-        }
-        val pressures = if (stroke.points.any { it.pressure != 1.0f }) {
-            stroke.points.map { it.pressure }
-        } else {
-            null
+            (worldWidth * 0.28f).coerceIn(2.2f, 6.0f)
         }
 
         val buildNodes = {
-            val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = false)
-            val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
-            PathHumanizer.humanizePath(
-                path = styledPath,
-                handDrawnFactor = effectiveHandDrawn,
-                stepPx = PathHumanizer.DEFAULT_STEP_PX,
-                seed = config.seed,
-                timestampsMs = timestampsMs,
-                // Keep open-stroke brush texture identical while drawing and after commit.
-                stableOpenContours = true,
-                pressures = pressures
-            )
+            if (stroke.capStyle == LineCapStyle.NONE) {
+                PathHumanizer.humanizeStrokePoints(
+                    points = stroke.points,
+                    handDrawnFactor = effectiveHandDrawn,
+                    stepPx = adaptiveStepPx,
+                    seed = config.seed,
+                    stableOpenContours = true
+                )
+            } else {
+                val timestampsMs = if (
+                    stroke.points.size >= 2 &&
+                    stroke.points.last().timestampMs > stroke.points.first().timestampMs
+                ) {
+                    stroke.points.map { it.timestampMs }
+                } else {
+                    null
+                }
+                val pressures = if (stroke.points.any { it.pressure != 1.0f }) {
+                    stroke.points.map { it.pressure }
+                } else {
+                    null
+                }
+                val rawPath = ShapeGenerator.fromStrokePoints(stroke.points, simplify = false)
+                val styledPath = ShapeGenerator.applyStrokeStyleAndCaps(rawPath, config.strokeStyle, config.strokeWidth, stroke.capStyle)
+                PathHumanizer.humanizePath(
+                    path = styledPath,
+                    handDrawnFactor = effectiveHandDrawn,
+                    stepPx = adaptiveStepPx,
+                    seed = config.seed,
+                    timestampsMs = timestampsMs,
+                    stableOpenContours = true,
+                    pressures = pressures
+                )
+            }
         }
         // The live preview changes on every pointer event. Caching every intermediate
         // geometry only churns the LRU and evicts useful committed strokes.
@@ -266,20 +280,94 @@ object UnifiedBrushPipeline {
         }
         if (nodes.isEmpty()) return
 
+        renderPreparedNodes(
+            canvas = canvas,
+            nodes = nodes,
+            engine = engine,
+            config = config,
+            panX = panX,
+            panY = panY,
+            scale = safeScale,
+            isSelected = isSelected,
+            strokeId = stroke.id
+        )
+    }
+
+    fun renderLiveStrokeNodes(
+        canvas: Canvas,
+        stroke: WhiteboardStroke,
+        nodes: List<BrushNode>,
+        panX: Float = 0f,
+        panY: Float = 0f,
+        scale: Float = 1f,
+        isDarkBoard: Boolean = false,
+        isOpaqueCanvasBackground: Boolean = true
+    ) {
+        if (nodes.isEmpty()) return
+        val safeScale = scale.coerceAtLeast(0.05f)
+        val worldWidth = stroke.width.coerceAtLeast(1.5f)
+        val effectiveBrushType = if (stroke.isHighlighter) StrokeBrushType.HIGHLIGHTER else stroke.brushType
+        val engine = BrushEngineRegistry.forBrushType(effectiveBrushType, stroke.strokeStyle)
+        val colorInt = safeParseColor(stroke.colorHex, Color.BLACK)
+        val settings = stroke.studioSettings
+        val config = BrushConfig(
+            color = colorInt,
+            strokeWidth = worldWidth,
+            alpha = stroke.opacity.coerceIn(0.05f, 1.0f),
+            handDrawnFactor = 0f,
+            isDarkBackground = isDarkBoard,
+            isOpaqueCanvasBackground = isOpaqueCanvasBackground,
+            isRainbow = stroke.isRainbow,
+            strokeStyle = stroke.strokeStyle,
+            animPhase = 0f,
+            seed = stroke.id.hashCode(),
+            flow = settings.flow,
+            spacing = settings.spacing,
+            hardness = settings.hardness,
+            grainStrength = settings.grainStrength,
+            taperStart = settings.taperStart,
+            taperEnd = settings.taperEnd,
+            velocitySensitivity = settings.velocitySensitivity,
+            chiselAngleDeg = settings.chiselAngleDeg
+        )
+        renderPreparedNodes(
+            canvas = canvas,
+            nodes = nodes,
+            engine = engine,
+            config = config,
+            panX = panX,
+            panY = panY,
+            scale = safeScale,
+            isSelected = false,
+            strokeId = stroke.id
+        )
+    }
+
+    private fun renderPreparedNodes(
+        canvas: Canvas,
+        nodes: List<BrushNode>,
+        engine: BrushEngine,
+        config: BrushConfig,
+        panX: Float,
+        panY: Float,
+        scale: Float,
+        isSelected: Boolean,
+        strokeId: String
+    ) {
         canvas.save()
         canvas.translate(panX, panY)
-        canvas.scale(safeScale, safeScale)
+        canvas.scale(scale, scale)
         try {
             if (isSelected) {
                 val haloConfig = BrushConfig(
                     color = Color.parseColor("#2563EB"),
-                    strokeWidth = worldWidth + 6f,
+                    strokeWidth = config.strokeWidth + 6f,
                     alpha = 0.32f,
                     handDrawnFactor = 0f,
-                    isDarkBackground = isDarkBoard,
-                    isOpaqueCanvasBackground = isOpaqueCanvasBackground,
+                    isDarkBackground = config.isDarkBackground,
+                    isOpaqueCanvasBackground = config.isOpaqueCanvasBackground,
                     strokeStyle = StrokeStyle.SOLID,
-                    seed = stroke.id.hashCode()
+                    seed = strokeId.hashCode()
                 )
                 FineMarkerBrush().render(canvas, nodes, haloConfig)
             }

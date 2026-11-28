@@ -153,6 +153,104 @@ object StrokeStabilizer {
     }
 
     /**
+     * Stateful O(1)-per-event live preview stabilizer matching [stabilizeLivePreview] without
+     * re-scanning and re-filtering points 0..N on every pointer MOVE event.
+     */
+    class IncrementalLivePreviewFilter {
+        private var activeLevel: Int = -1
+        private var baseTs: Long = 0L
+        private var firstX: Float = 0f
+        private var firstY: Float = 0f
+        private var filter: OneEuroFilter2D? = null
+        private val filteredInterior = ArrayList<StrokePoint>(128)
+        private val refinedInterior = ArrayList<StrokePoint>(128)
+
+        fun reset() {
+            activeLevel = -1
+            baseTs = 0L
+            filter = null
+            filteredInterior.clear()
+            refinedInterior.clear()
+        }
+
+        fun update(rawPoints: List<StrokePoint>, predictionLevel: Int): List<StrokePoint> {
+            val size = rawPoints.size
+            if (size <= 2 || predictionLevel <= 0) {
+                if (size <= 1) reset()
+                return rawPoints
+            }
+            val level = predictionLevel.coerceIn(1, 5)
+            val first = rawPoints[0]
+            val mustRebuild = level != activeLevel ||
+                filter == null ||
+                filteredInterior.isEmpty() ||
+                size <= filteredInterior.size ||
+                firstX != first.x ||
+                firstY != first.y
+
+            if (mustRebuild) {
+                activeLevel = level
+                firstX = first.x
+                firstY = first.y
+                baseTs = first.timestampMs
+                val minCutoff = (2.6f - level * 0.36f).coerceIn(0.55f, 2.5f)
+                val beta = (0.06f - level * 0.008f).coerceIn(0.012f, 0.06f)
+                filter = OneEuroFilter2D(minCutoff = minCutoff, beta = beta, dCutoff = 1.0f)
+                filteredInterior.clear()
+                refinedInterior.clear()
+                filteredInterior.add(first)
+                refinedInterior.add(first)
+            }
+
+            val euro = filter!!
+            val oldInteriorCount = filteredInterior.size
+            val targetInteriorCount = size - 1
+            for (i in oldInteriorCount until targetInteriorCount) {
+                val p = rawPoints[i]
+                val ts = if (p.timestampMs > baseTs) p.timestampMs else baseTs + i * 16L
+                val (fx, fy) = euro.filter(p.x, p.y, ts)
+                filteredInterior.add(StrokePoint(fx, fy, p.timestampMs, p.pressure))
+            }
+
+            val last = rawPoints[size - 1]
+            // Filtered list = filteredInterior + [last]
+            if (level <= 1 || size < 4) {
+                val out = ArrayList<StrokePoint>(size)
+                out.addAll(filteredInterior)
+                out.add(last)
+                return out
+            }
+
+            val blendFactor = (level * 0.16f).coerceIn(0.2f, 0.85f)
+            // Indices up to (oldInteriorCount - 2) already had fixed (p0, p1, p2) in filteredInterior.
+            val recomputeFrom = (oldInteriorCount - 1).coerceAtLeast(1)
+            while (refinedInterior.size > recomputeFrom) {
+                refinedInterior.removeAt(refinedInterior.lastIndex)
+            }
+            val lastInteriorIdx = filteredInterior.lastIndex
+            for (i in recomputeFrom..lastInteriorIdx) {
+                val p0 = filteredInterior[i - 1]
+                val p1 = filteredInterior[i]
+                val p2 = if (i + 1 <= lastInteriorIdx) filteredInterior[i + 1] else last
+                val avgX = (p0.x + 2f * p1.x + p2.x) * 0.25f
+                val avgY = (p0.y + 2f * p1.y + p2.y) * 0.25f
+                refinedInterior.add(
+                    StrokePoint(
+                        x = p1.x + (avgX - p1.x) * blendFactor,
+                        y = p1.y + (avgY - p1.y) * blendFactor,
+                        timestampMs = p1.timestampMs,
+                        pressure = p1.pressure
+                    )
+                )
+            }
+            val out = ArrayList<StrokePoint>(refinedInterior.size + 1)
+            out.addAll(refinedInterior)
+            out.add(last)
+            return out
+        }
+    }
+
+    /**
      * Full Sketchbook-style Predictive Stroke engine applied on commit (`predictionLevel` 0..5):
      * - Level 0: raw input points
      * - Level 1..2: One Euro Filter + C1 Catmull-Rom refinement

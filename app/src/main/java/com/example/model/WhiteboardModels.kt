@@ -382,6 +382,20 @@ data class WhiteboardStroke(
             hasPoints = points.isNotEmpty()
         )
     }
+
+    internal val renderSignature: Long by lazy {
+        var h = id.hashCode().toLong()
+        h = (h xor geometryMetrics.pointsHash.toLong()).let { it xor (it ushr 27) }
+        h = (h xor width.toBits().toLong()).let { it xor (it ushr 27) }
+        h = (h xor colorHex.hashCode().toLong()).let { it xor (it ushr 27) }
+        h = (h xor opacity.toBits().toLong()).let { it xor (it ushr 27) }
+        h = (h xor studioSettings.hashCode().toLong()).let { it xor (it ushr 27) }
+        val flags = ((brushType.ordinal shl 8) or
+            (capStyle.ordinal shl 4) or
+            (if (isHighlighter) 2 else 0) or
+            (if (isRainbow) 1 else 0)).toLong()
+        (h xor flags).let { it xor (it ushr 27) }
+    }
 }
 
 data class ShapeItem(

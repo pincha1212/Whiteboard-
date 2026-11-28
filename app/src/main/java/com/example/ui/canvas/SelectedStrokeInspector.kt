@@ -114,6 +114,8 @@ fun SelectionEditDock(
     onToggleTextBackground: () -> Unit = {},
     onToggleTextBold: () -> Unit = {},
     onUpdateTextFontSize: (Float) -> Unit = {},
+    isVoiceDictating: Boolean = false,
+    onToggleVoiceDictation: () -> Unit = {},
     onDeleteText: () -> Unit = {},
     onDone: () -> Unit,
     modifier: Modifier = Modifier
@@ -761,6 +763,15 @@ fun SelectionEditDock(
                                 bgColor = if (hasCardBg) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
                                 onClick = onToggleTextBackground,
                                 testTag = "edit_text_bg_toggle"
+                            )
+
+                            DockMiniIconButton(
+                                icon = if (isVoiceDictating) StudioIcons.Stop else StudioIcons.Mic,
+                                contentDescription = if (isVoiceDictating) "Detener dictado en vivo" else "Dictar en vivo",
+                                tint = if (isVoiceDictating) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.primary,
+                                bgColor = if (isVoiceDictating) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
+                                onClick = onToggleVoiceDictation,
+                                testTag = "edit_text_voice_dictate"
                             )
 
                             DockMiniIconButton(

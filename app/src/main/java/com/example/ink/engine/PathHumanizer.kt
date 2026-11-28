@@ -2,6 +2,7 @@ package com.example.ink.engine
 
 import android.graphics.Path
 import android.graphics.PathMeasure
+import com.example.model.StrokePoint
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -102,6 +103,175 @@ class PathHumanizer(
             val flat = ArrayList<BrushNode>(totalSize)
             contours.forEach { flat.addAll(it) }
             return flat
+        }
+
+        /**
+         * Fast pure-Kotlin polyline sampler for open freehand [StrokePoint] lists (zero Path / PathMeasure JNI calls).
+         */
+        fun humanizeStrokePoints(
+            points: List<StrokePoint>,
+            handDrawnFactor: Float = 0f,
+            stepPx: Float = DEFAULT_STEP_PX,
+            seed: Int = 1337,
+            stableOpenContours: Boolean = true
+        ): List<BrushNode> {
+            val ptCount = points.size
+            if (ptCount == 0) return emptyList()
+            if (ptCount == 1) {
+                val p = points[0]
+                val pr = p.pressure.coerceIn(0.15f, 1.25f)
+                return listOf(
+                    BrushNode(p.x, p.y, 0f, 0.35f, 0.5f, 0, false, pr),
+                    BrushNode(p.x + 0.5f, p.y + 0.5f, 0.7853982f, 0.35f, 0.5f, 0, false, pr)
+                )
+            }
+
+            val cumLen = FloatArray(ptCount)
+            var totalLen = 0f
+            for (i in 1 until ptCount) {
+                val prev = points[i - 1]
+                val cur = points[i]
+                totalLen += hypot(cur.x - prev.x, cur.y - prev.y)
+                cumLen[i] = totalLen
+            }
+
+            if (totalLen <= 0.1f) {
+                val p = points[0]
+                val pr = p.pressure.coerceIn(0.15f, 1.25f)
+                return listOf(
+                    BrushNode(p.x, p.y, 0f, 0.35f, 0.5f, 0, false, pr),
+                    BrushNode(p.x + 0.5f, p.y + 0.5f, 0.7853982f, 0.35f, 0.5f, 0, false, pr)
+                )
+            }
+
+            val safeStep = stepPx.coerceIn(1f, 32f)
+            val endIndex = ceil((totalLen / safeStep).toDouble()).toInt().coerceAtLeast(2)
+            val clampedFactor = handDrawnFactor.coerceIn(0f, 1f)
+            val useOrganic = clampedFactor > 0.001f
+
+            val phaseA = if (useOrganic) ((seed * 1103515245 + 12345) and 0xFFFF) / 65535f * (2f * PI.toFloat()) else 0f
+            val phaseB = if (useOrganic) (((seed * 214013 + 2531011) ushr 8) and 0xFFFF) / 65535f * (2f * PI.toFloat()) else 0f
+            val phaseC = if (useOrganic) (((seed * 1664525 + 1013904223) ushr 12) and 0xFFFF) / 65535f * (2f * PI.toFloat()) else 0f
+            val maxNormalAmp = clampedFactor * 3.8f
+            val maxTangentAmp = clampedFactor * 1.1f
+
+            val firstTs = points[0].timestampMs
+            val lastTs = points[ptCount - 1].timestampMs
+            val hasTimestamps = lastTs > firstTs
+            val avgDtMs = if (hasTimestamps) {
+                (lastTs - firstTs).coerceAtLeast(1L).toFloat() / (ptCount - 1).coerceAtLeast(1)
+            } else {
+                0f
+            }
+
+            val rawX = FloatArray(endIndex + 1)
+            val rawY = FloatArray(endIndex + 1)
+            val baseAngles = FloatArray(endIndex + 1)
+            val progresses = FloatArray(endIndex + 1)
+            val nodePressures = FloatArray(endIndex + 1)
+            val nodeSegmentIdx = IntArray(endIndex + 1)
+
+            var segIdx = 0
+            for (i in 0..endIndex) {
+                val dist = if (i == endIndex) totalLen else (i * safeStep).coerceAtMost(totalLen)
+                while (segIdx < ptCount - 2 && cumLen[segIdx + 1] < dist) {
+                    segIdx++
+                }
+                nodeSegmentIdx[i] = segIdx
+
+                val segStart = cumLen[segIdx]
+                val segEnd = cumLen[segIdx + 1]
+                val segLen = (segEnd - segStart)
+                val t = if (segLen > 1e-4f) ((dist - segStart) / segLen).coerceIn(0f, 1f) else 0f
+
+                val a = points[segIdx]
+                val b = points[segIdx + 1]
+                val px = a.x + (b.x - a.x) * t
+                val py = a.y + (b.y - a.y) * t
+                nodePressures[i] = (a.pressure + (b.pressure - a.pressure) * t).coerceIn(0.15f, 1.25f)
+
+                val progress = if (stableOpenContours) {
+                    0.5f
+                } else {
+                    val startEnv = (dist / 48f).coerceIn(0f, 1f)
+                    val endEnv = ((totalLen - dist) / 48f).coerceIn(0f, 1f)
+                    0.5f * min(startEnv, endEnv)
+                }
+                progresses[i] = progress
+
+                val dx = b.x - a.x
+                val dy = b.y - a.y
+                val dLen = hypot(dx, dy).coerceAtLeast(0.0001f)
+                val tx = dx / dLen
+                val ty = dy / dLen
+                baseAngles[i] = atan2(ty, tx)
+
+                if (useOrganic) {
+                    val nx = -ty
+                    val ny = tx
+                    val endpointEnvelope = if (stableOpenContours) 1f else sin(progress * PI.toFloat()).coerceIn(0f, 1f)
+                    val normalWave = (
+                        0.54f * sin(dist * 0.042f + phaseA) +
+                            0.31f * cos(dist * 0.105f + phaseB) +
+                            0.15f * sin(dist * 0.225f - phaseC)
+                        ) * endpointEnvelope
+                    val tangentWave = (
+                        0.62f * cos(dist * 0.036f + phaseB) +
+                            0.38f * sin(dist * 0.088f + phaseA)
+                        ) * endpointEnvelope
+                    rawX[i] = px + nx * (normalWave * maxNormalAmp) + tx * (tangentWave * maxTangentAmp)
+                    rawY[i] = py + ny * (normalWave * maxNormalAmp) + ty * (tangentWave * maxTangentAmp)
+                } else {
+                    rawX[i] = px
+                    rawY[i] = py
+                }
+            }
+
+            val nodes = ArrayList<BrushNode>(endIndex + 1)
+            for (i in 0..endIndex) {
+                val prevIdx = (i - 1).coerceAtLeast(0)
+                val nextIdx = (i + 1).coerceAtMost(endIndex)
+                val dx = rawX[nextIdx] - rawX[prevIdx]
+                val dy = rawY[nextIdx] - rawY[prevIdx]
+                val dLen = hypot(dx, dy)
+                val angle = if (dLen > 0.001f) atan2(dy, dx) else baseAngles[i]
+
+                val v1x = rawX[i] - rawX[prevIdx]
+                val v1y = rawY[i] - rawY[prevIdx]
+                val v2x = rawX[nextIdx] - rawX[i]
+                val v2y = rawY[nextIdx] - rawY[i]
+                val l1 = hypot(v1x, v1y).coerceAtLeast(0.001f)
+                val l2 = hypot(v2x, v2y).coerceAtLeast(0.001f)
+                val cosTheta = ((v1x / l1) * (v2x / l2) + (v1y / l1) * (v2y / l2)).coerceIn(-1f, 1f)
+                val straightness = ((cosTheta + 1f) * 0.5f).coerceIn(0f, 1f)
+                val syntheticVelocity = (0.18f + 0.55f * (0.45f + 0.55f * straightness)).coerceIn(0.05f, 1f)
+
+                val velocity = if (hasTimestamps) {
+                    val sIdx = nodeSegmentIdx[i].coerceIn(0, ptCount - 2)
+                    val dt = (points[sIdx + 1].timestampMs - points[sIdx].timestampMs).coerceAtLeast(1L).toFloat()
+                    val speedRatio = (avgDtMs / dt).coerceIn(0.2f, 2.5f)
+                    val pxPerMsFactor = (dLen / dt).coerceIn(0f, 3.5f) / 3.5f
+                    val measured = 0.55f * pxPerMsFactor + 0.45f * (speedRatio / 2.5f)
+                    (0.65f * measured + 0.35f * syntheticVelocity).coerceIn(0.05f, 1f)
+                } else {
+                    val endFactor = if (i == 0 || i == endIndex) 0.72f else 1f
+                    (syntheticVelocity * endFactor).coerceIn(0.05f, 1f)
+                }
+
+                nodes.add(
+                    BrushNode(
+                        x = rawX[i],
+                        y = rawY[i],
+                        angle = angle,
+                        velocity = velocity,
+                        progress = progresses[i],
+                        contourIndex = 0,
+                        isClosed = false,
+                        pressure = nodePressures[i]
+                    )
+                )
+            }
+            return nodes
         }
 
         fun humanizePathContours(

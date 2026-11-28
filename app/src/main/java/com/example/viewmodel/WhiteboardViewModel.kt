@@ -98,7 +98,11 @@ data class WhiteboardUiState(
     val brushStudioSlotIndex: Int? = null,
     val guidesState: GuidesOverlayState = GuidesOverlayState(),
     val predictionLevel: Int = 2,
-    val floodFillTolerance: Int = 36
+    val floodFillTolerance: Int = 36,
+    val isVoiceDictating: Boolean = false,
+    val dictatingTextItemId: String? = null,
+    val dictationRmsLevel: Float = 0f,
+    val dictationStatusMessage: String? = null
 )
 
 class WhiteboardViewModel(
@@ -2806,7 +2810,11 @@ class WhiteboardViewModel(
                 selectedTextId = null,
                 selectedStrokeIds = emptySet(),
                 selectedShapeIds = emptySet(),
-                selectedTextIds = emptySet()
+                selectedTextIds = emptySet(),
+                isVoiceDictating = false,
+                dictatingTextItemId = null,
+                dictationRmsLevel = 0f,
+                dictationStatusMessage = null
             )
         }
         store.flushToDisk()
@@ -3042,14 +3050,162 @@ class WhiteboardViewModel(
         commitBoardMutationToStore(_uiState.value.board, persist = true)
     }
 
+    fun prepareDictationTarget(): Pair<String, String> {
+        val currentState = _uiState.value
+        val existingSelected = currentState.selectedTextId?.let { selId ->
+            currentState.board.textItems.firstOrNull { it.id == selId && !it.isLocked && !it.isHiddenByCollapse }
+        }
+        if (existingSelected != null) {
+            saveUndoSnapshot()
+            val seed = if (existingSelected.text.trim() == "Texto") "" else existingSelected.text
+            if (seed.isEmpty() && existingSelected.text.isNotEmpty()) {
+                _uiState.update { state ->
+                    state.withUpdatedBoard { b ->
+                        b.copy(textItems = b.textItems.map { item ->
+                            if (item.id == existingSelected.id) item.copy(text = "") else item
+                        })
+                    }
+                }
+            }
+            return existingSelected.id to seed
+        }
+
+        val camera = _cameraState.value
+        val worldCenterX = camera.screenToWorldX(camera.viewportWidthPx * 0.5f)
+        val worldCenterY = camera.screenToWorldY(camera.viewportHeightPx * 0.5f)
+        val board = currentState.board
+        val isDark = board.colorTheme.isDark
+        val defaultWidth = 340f
+        val defaultHeight = 88f
+        val baseX = worldCenterX - defaultWidth * 0.5f
+        val baseY = worldCenterY - defaultHeight * 0.5f
+        val cascadeCount = board.textItems.count { existing ->
+            kotlin.math.abs(existing.x - baseX) < 120f && kotlin.math.abs(existing.y - baseY) < 120f
+        } % 5
+        val cascadeOffset = cascadeCount * 28f
+
+        val resolvedInk = if (isDark) "#F1F5F9" else "#0F172A"
+        val resolvedSurface = if (isDark) "#1E293B" else "#FFFFFF"
+
+        val item = TextItem(
+            text = "",
+            x = baseX + cascadeOffset,
+            y = baseY + cascadeOffset,
+            fontSize = 30f,
+            colorHex = resolvedInk,
+            isEditableCard = true,
+            backgroundColorHex = resolvedSurface,
+            width = defaultWidth,
+            height = defaultHeight
+        )
+        saveUndoSnapshot()
+        _uiState.update { state ->
+            state.withUpdatedBoard { b ->
+                b.copy(textItems = b.textItems + item)
+            }.copy(
+                selectedTextId = item.id,
+                selectedTextIds = setOf(item.id),
+                selectedStrokeId = null,
+                selectedStrokeIds = emptySet(),
+                selectedShapeId = null,
+                selectedShapeIds = emptySet(),
+                isBrushPopoverOpen = false
+            )
+        }
+        return item.id to ""
+    }
+
+    fun startVoiceDictationState(targetId: String) {
+        _uiState.update {
+            it.copy(
+                isVoiceDictating = true,
+                dictatingTextItemId = targetId,
+                dictationRmsLevel = 0f,
+                dictationStatusMessage = null
+            )
+        }
+    }
+
+    fun streamDictatedTextToItem(targetId: String, streamedText: String) {
+        _uiState.update { state ->
+            val currentItem = state.board.textItems.firstOrNull { it.id == targetId } ?: return@update state
+            if (currentItem.text == streamedText) return@update state
+            state.withUpdatedBoard { board ->
+                board.copy(textItems = board.textItems.map { item ->
+                    if (item.id == targetId) item.copy(text = streamedText) else item
+                })
+            }
+        }
+    }
+
+    fun commitDictationPhrase(targetId: String, committedText: String) {
+        streamDictatedTextToItem(targetId, committedText)
+        commitBoardMutationToStore(_uiState.value.board, persist = false)
+    }
+
+    fun stopVoiceDictationState(persist: Boolean = true, statusMessage: String? = null) {
+        val targetId = _uiState.value.dictatingTextItemId
+        _uiState.update { state ->
+            val cleanedBoard = if (targetId != null) {
+                val targetItem = state.board.textItems.firstOrNull { it.id == targetId }
+                if (targetItem != null && targetItem.text.isBlank()) {
+                    state.board.copy(textItems = state.board.textItems.filter { it.id != targetId })
+                } else {
+                    state.board
+                }
+            } else {
+                state.board
+            }
+            val cleanedSelectedId = if (targetId != null && cleanedBoard.textItems.none { it.id == targetId }) {
+                if (state.selectedTextId == targetId) null else state.selectedTextId
+            } else {
+                state.selectedTextId
+            }
+            val cleanedSelectedIds = if (targetId != null && cleanedBoard.textItems.none { it.id == targetId }) {
+                state.selectedTextIds - targetId
+            } else {
+                state.selectedTextIds
+            }
+            state.withUpdatedBoard { cleanedBoard }.copy(
+                selectedTextId = cleanedSelectedId,
+                selectedTextIds = cleanedSelectedIds,
+                isVoiceDictating = false,
+                dictatingTextItemId = null,
+                dictationRmsLevel = 0f,
+                dictationStatusMessage = statusMessage
+            )
+        }
+        if (persist) {
+            commitBoardMutationToStore(_uiState.value.board, persist = true)
+        }
+    }
+
+    fun updateDictationAudioLevel(rms: Float) {
+        _uiState.update { state ->
+            if (!state.isVoiceDictating) state else state.copy(dictationRmsLevel = rms.coerceIn(0f, 1f))
+        }
+    }
+
+    fun showDictationStatusMessage(message: String) {
+        _uiState.update { it.copy(dictationStatusMessage = message) }
+    }
+
+    fun clearDictationStatusMessage() {
+        _uiState.update { it.copy(dictationStatusMessage = null) }
+    }
+
     fun deleteTextItem(id: String) {
         saveUndoSnapshot()
         _uiState.update { state ->
+            val stoppedDictation = state.dictatingTextItemId == id
             state.withUpdatedBoard { b ->
                 b.copy(textItems = b.textItems.filter { it.id != id })
             }.copy(
                 selectedTextId = if (state.selectedTextId == id) null else state.selectedTextId,
-                selectedTextIds = state.selectedTextIds - id
+                selectedTextIds = state.selectedTextIds - id,
+                isVoiceDictating = if (stoppedDictation) false else state.isVoiceDictating,
+                dictatingTextItemId = if (stoppedDictation) null else state.dictatingTextItemId,
+                dictationRmsLevel = if (stoppedDictation) 0f else state.dictationRmsLevel
             )
         }
         commitBoardMutationToStore(_uiState.value.board, persist = true)

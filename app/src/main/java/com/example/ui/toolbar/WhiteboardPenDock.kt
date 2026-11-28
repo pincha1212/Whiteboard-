@@ -69,6 +69,8 @@ fun WhiteboardPenDock(
     onToggleAutoShape: () -> Unit,
     onChangeFloodFillTolerance: (Int) -> Unit,
     onAddText: () -> Unit = {},
+    isVoiceDictating: Boolean = false,
+    onToggleVoiceDictation: () -> Unit = {},
     onEnterZenMode: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -203,7 +205,7 @@ fun WhiteboardPenDock(
 
         DockHairlineDivider(vertical = !isVertical)
 
-        // 4. Lienzo: Texto flotante & Modo Enfoque
+        // 4. Lienzo: Texto flotante, Dictado en vivo & Modo Enfoque
         DockActionButton(
             isSelected = false,
             description = "Insertar texto en lienzo",
@@ -215,6 +217,21 @@ fun WhiteboardPenDock(
                 imageVector = StudioIcons.TextFields,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        DockActionButton(
+            isSelected = isVoiceDictating,
+            description = if (isVoiceDictating) "Detener dictado en vivo" else "Dictar texto en vivo",
+            onClick = onToggleVoiceDictation,
+            testTag = "dock_action_voice_dictation",
+            minWidthDp = 44
+        ) {
+            Icon(
+                imageVector = if (isVoiceDictating) StudioIcons.Stop else StudioIcons.Mic,
+                contentDescription = null,
+                tint = if (isVoiceDictating) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.size(20.dp)
             )
         }
